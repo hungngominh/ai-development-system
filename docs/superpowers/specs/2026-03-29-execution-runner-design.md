@@ -207,6 +207,8 @@ SKIPPED / ABORTED — also terminal
 
 **Terminal states**: `SUCCESS`, `FAILED_FINAL`, `SKIPPED`, `ABORTED`
 
+**Note on `FAILED` enum value**: The existing schema has a plain `FAILED` status. This spec replaces it with `FAILED_RETRYABLE` (transient, retry created) and `FAILED_FINAL` (terminal, exhausted). `FAILED` is deprecated — no new code should write it. A migration step should `UPDATE task_runs SET status = 'FAILED_FINAL' WHERE status = 'FAILED'` before deploying this runner.
+
 ### 4.2 Run-Level State Machine
 
 ```
@@ -242,6 +244,8 @@ RUNNING_PHASE_3 ──► RUNNING_EXECUTION
 
 Retry creates a **new task_run row** with `attempt_number + 1`, `previous_attempt_id` linked, `retry_at = now() + delay`. The failed row becomes `FAILED_RETRYABLE` (immutable — audit trail).
 
+**`create_retry()` data contract**: The new row must have `retry_count = previous_row.retry_count + 1`. The `_handle_failure` function reads `task["retry_count"]` to decide `can_retry` — if the new row started at 0, `max_retries` would never be enforced. Implementation must propagate `retry_count` forward on every retry creation.
+
 ---
 
 ## 5. Materializer
@@ -252,15 +256,7 @@ Retry creates a **new task_run row** with `attempt_number + 1`, `previous_attemp
 def materialize_task_runs(conn, run_id, graph_artifact_id, config):
     """Load approved graph → create task_runs. Safe to call multiple times."""
 
-    # Idempotency guard at code level (DB UNIQUE enforces at data level)
-    existing = conn.execute("""
-        SELECT COUNT(*) FROM task_runs
-        WHERE run_id = %s AND task_graph_artifact_id = %s
-    """, (run_id, graph_artifact_id)).scalar()
-    if existing > 0:
-        return
-
-    # Load graph from promoted artifact path
+    # Load graph from promoted artifact path (before transaction)
     artifact = artifact_repo.get(conn, graph_artifact_id)
     graph_path = os.path.join(artifact["content_ref"], "task_graph.json")
     with open(graph_path) as f:
@@ -270,6 +266,15 @@ def materialize_task_runs(conn, run_id, graph_artifact_id, config):
                     if t["execution_type"] == "atomic"]
 
     with conn.transaction():
+        # Idempotency guard INSIDE transaction (prevents TOCTOU race)
+        existing = conn.execute("""
+            SELECT COUNT(*) FROM task_runs
+            WHERE run_id = %s AND task_graph_artifact_id = %s
+            FOR UPDATE  -- lock the run row to serialize concurrent callers
+        """, (run_id, graph_artifact_id)).scalar()
+        if existing > 0:
+            return  # Already materialized — safe, skip duplicate PHASE_STARTED too
+
         for task in atomic_tasks:
             conn.execute("""
                 INSERT INTO task_runs (
@@ -439,13 +444,16 @@ def check_completion(conn, run_id):
             COUNT(*) FILTER (WHERE status = 'PENDING')           AS pending_count
         FROM task_runs
         WHERE run_id = %s
-          AND execution_type = 'atomic'
+        -- No execution_type filter: materializer inserts ONLY atomic tasks;
+        -- composite structural nodes are never persisted to task_runs.
     """, (run_id,)).fetchone()
 
     active_count = (counts.ready_count + counts.running_count + counts.pending_count)
 
-    if active_count == 0 and counts.failed_final_count == 0:
-        # All done, no failures
+    # SUCCESS: nothing active, no failures, no blocked orphans
+    if (active_count == 0
+            and counts.failed_final_count == 0
+            and counts.blocked_count == 0):
         conn.execute("""
             UPDATE runs SET status = 'SUCCESS', completed_at = now()
             WHERE run_id = %s AND status = 'RUNNING_EXECUTION'
@@ -453,23 +461,27 @@ def check_completion(conn, run_id):
         event_repo.insert(conn, run_id, "RUN_COMPLETED", "system",
                           payload={"outcome": "SUCCESS"})
 
-    elif active_count == 0 and counts.failed_final_count > 0:
-        # Some tasks failed permanently — but separate from "stuck" detection
-        if counts.blocked_count > 0 and counts.running_count == 0 and counts.ready_count == 0:
-            # Stuck: nothing can run, escalation should already be open
-            conn.execute("""
-                UPDATE runs SET status = 'PAUSED_FOR_DECISION'
-                WHERE run_id = %s AND status = 'RUNNING_EXECUTION'
-            """, (run_id,))
-            # Escalation was raised by propagate_failure — no duplicate here
+    # PAUSED: nothing can run (no active tasks), but failures exist
+    # Covers both: blocked tasks exist, AND leaf-task failure (no blocked downstream)
+    elif (active_count == 0
+          and counts.failed_final_count > 0
+          and counts.running_count == 0
+          and counts.ready_count == 0):
+        conn.execute("""
+            UPDATE runs SET status = 'PAUSED_FOR_DECISION'
+            WHERE run_id = %s AND status = 'RUNNING_EXECUTION'
+        """, (run_id,))
+        # Escalation was raised by propagate_failure — no duplicate here
 ```
 
 **Completion conditions:**
 
 | Condition | Run outcome |
 |---|---|
-| `active_count == 0` AND `failed_final_count == 0` | `SUCCESS` |
-| `running_count == 0` AND `ready_count == 0` AND `blocked_count > 0` | `PAUSED_FOR_DECISION` |
+| `active_count == 0` AND `failed_final_count == 0` AND `blocked_count == 0` | `SUCCESS` |
+| `active_count == 0` AND `failed_final_count > 0` AND nothing running/ready | `PAUSED_FOR_DECISION` |
+
+> Leaf task failure (no downstream blocked tasks) is also covered by the second branch — the run pauses and the escalation raised by `propagate_failure` allows human resolution.
 
 ---
 
@@ -580,7 +592,7 @@ def pickup_task(conn, config, run_id, worker_id) -> Optional[dict]:
 def execute_and_promote(conn, config, task, result, worker_id, run_id):
     # Abort guard: check before promoting (agent may have run during abort)
     run_status = run_repo.get_status(conn, run_id)
-    if run_status == "ABORTED":
+    if run_status in ("ABORTED", "FAILED"):  # FAILED = human chose abort via resolve_escalation
         with conn.transaction():
             conn.execute("""
                 UPDATE task_runs SET status = 'ABORTED'
@@ -827,8 +839,10 @@ def resolve_escalation(conn, escalation_id, resolution, run_id):
 
 
 def _unblock_downstream_bfs(conn, run_id, unblocked_task_id):
-    """BFS: move BLOCKED_BY_FAILURE → PENDING for tasks downstream of unblocked_task_id.
-    mark_ready_tasks() will then evaluate which are actually ready.
+    """BFS: move BLOCKED_BY_FAILURE → PENDING for tasks downstream of unblocked_task_id,
+    BUT ONLY if the task has no other FAILED_FINAL dependencies remaining.
+    (If other deps are still FAILED_FINAL, the task stays BLOCKED until those are resolved.)
+    mark_ready_tasks() will then evaluate which PENDING tasks can become READY.
     """
     visited = set()
     queue = [unblocked_task_id]
@@ -847,11 +861,27 @@ def _unblock_downstream_bfs(conn, run_id, unblocked_task_id):
             if dep.task_id in visited:
                 continue
             visited.add(dep.task_id)
-            conn.execute("""
+
+            # Only unblock if ALL remaining deps are non-FAILED_FINAL
+            # (task may have multiple upstream failures; resolve one at a time)
+            rows_updated = conn.execute("""
                 UPDATE task_runs SET status = 'PENDING', error_detail = NULL
-                WHERE task_run_id = %s AND status = 'BLOCKED_BY_FAILURE'
-            """, (dep.task_run_id,))
-            queue.append(dep.task_id)
+                WHERE task_run_id = %s
+                  AND status = 'BLOCKED_BY_FAILURE'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM task_runs other_dep
+                      WHERE other_dep.run_id = %s
+                        AND other_dep.task_id = ANY(
+                            (SELECT resolved_dependencies FROM task_runs
+                             WHERE task_run_id = %s)
+                        )
+                        AND other_dep.status = 'FAILED_FINAL'
+                  )
+            """, (dep.task_run_id, run_id, dep.task_run_id)).rowcount
+
+            if rows_updated > 0:
+                queue.append(dep.task_id)
+            # If rows_updated == 0: task still has FAILED_FINAL deps → stays BLOCKED, don't recurse
 ```
 
 ---
@@ -897,6 +927,8 @@ CREATE TABLE IF NOT EXISTS escalations (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 
     -- One open escalation per (run, task_run, reason)
+    -- Requires PostgreSQL 15+ for NULLS NOT DISTINCT syntax.
+    -- (Project dependency: PostgreSQL 15+ is confirmed in schema/control-layer-schema.sql)
     UNIQUE NULLS NOT DISTINCT (run_id, task_run_id, reason, status)
 );
 
@@ -943,6 +975,72 @@ class AgentResult:
 #   "expected_outputs": ["backend source code", "tests/test_api.py"],
 # }
 ```
+
+---
+
+## 12b. Artifact Path Resolution Contract
+
+`_resolve_artifact_paths` is called in the worker loop before agent dispatch. It enriches the `context_snapshot` with real filesystem paths for each required input.
+
+```python
+# src/ai_dev_system/engine/materializer.py
+
+def _resolve_artifact_paths(conn, run_id, context_snapshot: dict) -> dict:
+    """Resolve logical required_inputs names to artifact paths from runs.current_artifacts.
+
+    Args:
+        conn:             DB connection (read-only, no transaction needed — READ COMMITTED safe)
+        run_id:           UUID of the run
+        context_snapshot: immutable snapshot from task_runs.context_snapshot
+
+    Returns:
+        Copy of context_snapshot with required_inputs enriched:
+        [{"name": "solution_design.md", "artifact_id": "uuid", "path": "/data/.../v1/..."}]
+
+    Raises:
+        ArtifactResolutionError: if a required input cannot be resolved (upstream task
+        did not complete successfully or artifact was not promoted to current_artifacts).
+        This is NOT a retryable error — it indicates a graph dependency misconfiguration.
+    """
+    current = conn.execute("""
+        SELECT current_artifacts FROM runs WHERE run_id = %s
+    """, (run_id,)).scalar()
+
+    resolved = []
+    for logical_name in context_snapshot.get("required_inputs", []):
+        # Try to match logical name to a known artifact type key
+        artifact_id = _match_artifact(logical_name, current)
+        if artifact_id is None:
+            # Input not yet available (upstream task may not have run)
+            raise ArtifactResolutionError(
+                f"Required input '{logical_name}' not found in current_artifacts for run {run_id}. "
+                f"Dependency graph may be incorrect or upstream task did not complete."
+            )
+        artifact = artifact_repo.get(conn, artifact_id)
+        resolved.append({
+            "name": logical_name,
+            "artifact_id": artifact_id,
+            "path": artifact["content_ref"],
+        })
+
+    ctx = copy.deepcopy(context_snapshot)
+    ctx["required_inputs"] = resolved
+    return ctx
+
+
+def _match_artifact(logical_name: str, current_artifacts: dict) -> Optional[str]:
+    """Map a logical input name to an artifact_id from current_artifacts.
+    v1: simple keyword matching against artifact type keys.
+    v2: explicit mapping table in task graph spec.
+    """
+    name_lower = logical_name.lower()
+    for key, artifact_id in current_artifacts.items():
+        if artifact_id and key.replace("_id", "").replace("_", "") in name_lower:
+            return artifact_id
+    return None
+```
+
+**Failure mode**: If `ArtifactResolutionError` is raised, the worker treats it as `EXECUTION_ERROR` and applies the retry policy. After retries exhaust, task becomes `FAILED_FINAL` and `propagate_failure` runs. This covers the case where an upstream task completed but did not promote its output correctly.
 
 ---
 
