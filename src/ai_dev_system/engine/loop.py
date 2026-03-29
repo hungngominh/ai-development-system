@@ -39,6 +39,10 @@ def run_worker_loop(
 
     This ensures the FOR UPDATE SKIP LOCKED row is released before agent execution,
     so other workers can attempt other tasks while this one runs.
+
+    Phase 1 limitation: the loop has no terminal state for "run is complete". When all
+    tasks are done, the loop spins with idle backoff indefinitely. Use max_iterations
+    to bound execution in tests and scripts. Phase 2 should add a run-complete check.
     """
     iterations = 0
     conn_factory = lambda: psycopg.connect(
@@ -93,3 +97,4 @@ def run_worker_loop(
                 logger.exception("Promotion error for task %s", task["task_id"])
                 _recover_failed(conn_factory, task["task_run_id"], "EXECUTION_ERROR", "promotion_failed")
                 time.sleep(idle_backoff_s * 2)
+                continue
