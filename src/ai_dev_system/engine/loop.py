@@ -6,9 +6,21 @@ from typing import Optional
 import psycopg
 
 from ai_dev_system.config import Config
+from ai_dev_system.db.repos.task_runs import TaskRunRepo
 from ai_dev_system.engine.worker import pickup_task, execute_and_promote
 
 logger = logging.getLogger(__name__)
+
+
+def _recover_failed(conn_factory, task_run_id: str, error_type: str, error_detail: str) -> None:
+    """Best-effort recovery: mark task FAILED in a new transaction."""
+    try:
+        with conn_factory() as recovery_conn:
+            recovery_conn.execute("BEGIN")
+            TaskRunRepo(recovery_conn).mark_failed(task_run_id, error_type, error_detail)
+            recovery_conn.execute("COMMIT")
+    except Exception:
+        logger.exception("Recovery transaction failed for task_run %s", task_run_id)
 
 def run_worker_loop(
     config: Config,
@@ -57,11 +69,17 @@ def run_worker_loop(
             continue
 
         # Agent execution (outside any transaction)
-        result = agent.run(
-            task_id=task["task_id"],
-            output_path=task["temp_path"],
-            promoted_outputs=task["promoted_outputs_parsed"],
-        )
+        try:
+            result = agent.run(
+                task_id=task["task_id"],
+                output_path=task["temp_path"],
+                promoted_outputs=task["promoted_outputs_parsed"],
+            )
+        except Exception:
+            logger.exception("Agent error for task %s", task["task_id"])
+            _recover_failed(conn_factory, task["task_run_id"], "EXECUTION_ERROR", "agent_exception")
+            time.sleep(idle_backoff_s * 2)
+            continue
 
         # Tx 2: promote
         with conn_factory() as conn:
@@ -73,4 +91,5 @@ def run_worker_loop(
             except Exception:
                 conn.execute("ROLLBACK")
                 logger.exception("Promotion error for task %s", task["task_id"])
+                _recover_failed(conn_factory, task["task_run_id"], "EXECUTION_ERROR", "promotion_failed")
                 time.sleep(idle_backoff_s * 2)

@@ -56,6 +56,16 @@ def execute_and_promote(
     Tx 2 (Job C): Given agent result, promote outputs and mark task SUCCESS/FAILED.
     Returns final task status string.
     """
+    # Phase 1 limitation: promote_output() calls mark_success() internally,
+    # which sets output_artifact_id on the task_run. Calling it twice would
+    # fail the promotion guard on the second call. Multi-output support
+    # requires refactoring promote_output to not call mark_success.
+    if len(task["promoted_outputs_parsed"]) > 1:
+        raise NotImplementedError(
+            "Phase 1 only supports tasks with 0 or 1 promoted_output. "
+            f"Task {task['task_run_id']} has {len(task['promoted_outputs_parsed'])}."
+        )
+
     repo = TaskRunRepo(conn)
     event_repo = EventRepo(conn)
     run_id = task["run_id"]
