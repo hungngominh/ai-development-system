@@ -5,6 +5,7 @@ ARTIFACT_TYPE_TO_KEY = {
     "DEBATE_REPORT":        "debate_report_id",
     "DECISION_LOG":         "decision_log_id",
     "APPROVED_ANSWERS":     "approved_answers_id",
+    "APPROVED_BRIEF":       "approved_brief_id",
     "SPEC_BUNDLE":          "spec_bundle_id",
     "TASK_GRAPH_GENERATED": "task_graph_gen_id",
     "TASK_GRAPH_APPROVED":  "task_graph_approved_id",

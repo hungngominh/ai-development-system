@@ -1,3 +1,4 @@
+import uuid
 import psycopg
 from typing import Optional
 
@@ -5,6 +6,24 @@ from typing import Optional
 class TaskRunRepo:
     def __init__(self, conn: psycopg.Connection):
         self.conn = conn
+
+    def create_sync(self, run_id: str, task_type: str) -> dict:
+        """Create a task_run for synchronous pipeline. Returns full dict."""
+        task_run_id = str(uuid.uuid4())
+        self.conn.execute("""
+            INSERT INTO task_runs (
+                task_run_id, run_id, task_id, attempt_number, status,
+                agent_type, started_at, heartbeat_at,
+                input_artifact_ids, resolved_dependencies, promoted_outputs
+            ) VALUES (%s, %s, %s, 1, 'RUNNING', 'pipeline', now(), now(), '{}', '{}', '[]')
+        """, (task_run_id, run_id, task_type))
+        return {
+            "task_run_id": task_run_id,
+            "run_id": run_id,
+            "task_id": task_type,
+            "attempt_number": 1,
+            "status": "RUNNING",
+        }
 
     def pickup(self, run_id: str, worker_id: str, max_concurrent: int = 4) -> Optional[dict]:
         # Concurrency limit check — best-effort for v1. The count check and the FOR UPDATE
