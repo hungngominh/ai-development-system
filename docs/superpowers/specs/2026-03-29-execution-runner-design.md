@@ -504,6 +504,9 @@ def check_completion(conn, run_id):
 
 ```python
 # src/ai_dev_system/engine/worker.py  (extend existing)
+# Imports from other engine modules:
+#   from ai_dev_system.engine.failure import _handle_failure, propagate_failure
+#   from ai_dev_system.engine.materializer import _resolve_artifact_paths
 
 def worker_loop(run_id, config, agent, stop_event):
     conn = get_connection(config)
@@ -1022,8 +1025,8 @@ def _resolve_artifact_paths(conn, run_id, context_snapshot: dict) -> dict:
 
     Raises:
         ArtifactResolutionError: if a required input cannot be resolved (upstream task
-        did not complete successfully or artifact was not promoted to current_artifacts).
-        This is NOT a retryable error — it indicates a graph dependency misconfiguration.
+        did not promote its artifact yet, or artifact was not found in current_artifacts).
+        Treated as EXECUTION_ERROR — retried up to max_retries times before escalation.
     """
     current = conn.execute("""
         SELECT current_artifacts FROM runs WHERE run_id = %s
@@ -1063,7 +1066,7 @@ def _match_artifact(logical_name: str, current_artifacts: dict) -> Optional[str]
     return None
 ```
 
-**Failure mode**: If `ArtifactResolutionError` is raised, the worker treats it as `EXECUTION_ERROR` and applies the retry policy. After retries exhaust, task becomes `FAILED_FINAL` and `propagate_failure` runs. This covers the case where an upstream task completed but did not promote its output correctly.
+**Failure mode**: `ArtifactResolutionError` is treated as **retryable** (`EXECUTION_ERROR`, up to 2 retries). Rationale: in rare timing scenarios, an upstream task may have completed but not yet committed its artifact promotion — a retry a few seconds later will find the artifact. If retries exhaust, task becomes `FAILED_FINAL` and `propagate_failure` runs normally. The docstring comment "NOT a retryable error" is incorrect and removed here: it IS retryable.
 
 ---
 
