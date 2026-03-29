@@ -38,6 +38,8 @@ Artifact type strings are **UPPERCASE** throughout the system (matching DB enum 
 
 The `runs.current_artifacts` JSONB column must also have the `approved_brief_id` key added (via migration or seed).
 
+**Rule**: Artifacts are always filesystem representations (files or directories), never Python objects. `promote_output()` receives a `temp_output_path` (directory on disk) — the pipeline writes data to disk first, then promotes. SpecBundle metadata lives in the files themselves, not in the artifact record.
+
 ---
 
 ## 3. Component A: Normalize
@@ -54,6 +56,7 @@ The `runs.current_artifacts` JSONB column must also have the `approved_brief_id`
   "id": "uuid",
   "version": 1,
   "raw_idea": "string — required, non-empty",
+  "source_hash": "sha256 of raw_idea — for idempotency tracing",
 
   "problem": "",
   "target_users": "",
@@ -82,6 +85,7 @@ The `runs.current_artifacts` JSONB column must also have the `approved_brief_id`
 | `id` | UUID, required |
 | `version` | int >= 1, required |
 | `raw_idea` | non-empty string, required (only MUST-have field) |
+| `source_hash` | sha256 hex string, required (computed from raw_idea) |
 | `problem`, `target_users`, `goal` | string, may be empty |
 | `constraints.hard`, `constraints.soft` | list[str], may be empty |
 | `assumptions` | list[str], may be empty |
@@ -95,6 +99,7 @@ The `runs.current_artifacts` JSONB column must also have the `approved_brief_id`
 ```python
 # src/ai_dev_system/normalize.py
 
+import hashlib
 from uuid import uuid4
 
 SCOPE_TYPES = {"product", "feature", "experiment", "unknown"}
@@ -108,6 +113,7 @@ def normalize_idea(raw_text: str) -> dict:
         "id": str(uuid4()),
         "version": 1,
         "raw_idea": raw_text.strip(),
+        "source_hash": hashlib.sha256(raw_text.strip().encode()).hexdigest(),
         "problem": "",
         "target_users": "",
         "goal": "",
@@ -132,8 +138,8 @@ def validate_brief(brief: dict) -> list[str]:
     if brief.get("scope", {}).get("complexity_hint") not in COMPLEXITY_HINTS:
         errors.append(f"scope.complexity_hint must be one of {COMPLEXITY_HINTS}")
     # Strict: no extra keys (top-level)
-    allowed = {"id", "version", "raw_idea", "problem", "target_users", "goal",
-               "constraints", "assumptions", "scope", "success_signals"}
+    allowed = {"id", "version", "raw_idea", "source_hash", "problem", "target_users",
+               "goal", "constraints", "assumptions", "scope", "success_signals"}
     extra = set(brief.keys()) - allowed
     if extra:
         errors.append(f"Extra keys not allowed: {extra}")
@@ -228,7 +234,7 @@ class CLIGateIO:
         # ... etc
 
     def collect_edit(self, brief: dict) -> dict:
-        updated = dict(brief)  # shallow copy
+        updated = copy.deepcopy(brief)  # deep copy — nested dicts must not mutate original
         # For each editable field, prompt user
         # Accept: new value, or Enter to keep current
         # raw_idea is NOT editable (immutable input)
@@ -582,6 +588,19 @@ def _write_json_to_temp(config: Config, task_run: dict, data: dict) -> str:
         json.dump(data, f, indent=2)
     return temp_path
 ```
+
+### Event Consistency
+
+Every task emits a standard event sequence:
+
+| Event | When | Source |
+|-------|------|--------|
+| `TASK_STARTED` | After `create_sync`, before execution | Pipeline (explicit) |
+| `ARTIFACT_CREATED` | After promotion | `promote_output()` (automatic) |
+| `TASK_COMPLETED` | After `mark_success` | `promote_output()` (automatic) |
+| `TASK_FAILED` | On rejection or validation error | Pipeline (explicit, via `mark_failed`) |
+
+`promote_output()` already emits `ARTIFACT_CREATED` and `TASK_COMPLETED` internally (steps 7e-7g). The pipeline only needs to explicitly emit `TASK_STARTED` and `TASK_FAILED`.
 
 ### Transaction Boundaries
 
