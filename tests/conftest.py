@@ -4,13 +4,16 @@ import pytest
 import psycopg
 from ai_dev_system.config import Config
 
-DATABASE_URL = "REDACTED_TEST_DATABASE_URL"
-
 
 @pytest.fixture(scope="session")
 def config():
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise ValueError(
+            "DATABASE_URL must be set to run integration tests. "
+            "Example: export DATABASE_URL=postgresql://user:pass@host/db"
+        )
     os.environ.setdefault("STORAGE_ROOT", "/tmp/ai-dev-test")
-    os.environ["DATABASE_URL"] = DATABASE_URL
     return Config.from_env()
 
 
