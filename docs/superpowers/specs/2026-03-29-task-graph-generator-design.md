@@ -102,7 +102,7 @@ The full `task_graph.generated.json`:
   "spec_bundle_version": 1,
   "source_spec_artifact_id": "uuid of SPEC_BUNDLE artifact",
   "generator_version": "1.0.0",
-  "rules_applied": ["RULE-PRODUCT-SPLIT", "RULE-DATABASE"],
+  "rules_applied": ["RULE-DATABASE", "RULE-PRODUCT-SPLIT"],
   "llm_enriched": true,
 
   "tasks": [
@@ -260,9 +260,9 @@ def build_skeleton() -> list[dict]:
 
 | Action | Semantics |
 |--------|-----------|
-| `add_parallel(target, nodes)` | Attach N sibling nodes. All share target's deps. No deps between siblings. Target becomes `composite`. |
+| `add_parallel(target, nodes)` | Attach N sibling nodes under target. Children inherit target's deps. Target becomes `composite`. Downstream keeps depending on target (composite = done when all children done). |
 | `add_before(target, node)` | Insert node before target. New node gets target's old deps. Target now depends on new node. |
-| `add_after(target, node)` | Insert node after target. New node depends on target. Anything that depended on target now depends on new node. |
+| `add_after(target, node)` | Insert node after target. If target is composite, new node depends on all leaf children instead. Downstream deps redirected from target to new node. |
 
 ### v1 Rules (3 only)
 
@@ -272,7 +272,7 @@ def build_skeleton() -> list[dict]:
 def rule_product_split(spec: dict, graph: list[dict]) -> list[dict]:
     """If scope.type == 'product', split TASK-IMPL into backend + frontend + integration."""
     if spec.get("scope", {}).get("type") != "product":
-        return graph
+        return graph, False
 
     return add_parallel(graph, target_id="TASK-IMPL", nodes=[
         {
@@ -310,7 +310,7 @@ def rule_database(spec: dict, graph: list[dict]) -> list[dict]:
     """If hard constraints mention database/postgresql, add schema design before impl."""
     hard = spec.get("constraints", {}).get("hard", [])
     if not any("database" in c.lower() or "postgresql" in c.lower() for c in hard):
-        return graph
+        return graph, False
 
     return add_before(graph, target_id="TASK-IMPL", node={
         "id": "TASK-DESIGN.SCHEMA",
@@ -333,7 +333,7 @@ def rule_performance(spec: dict, graph: list[dict]) -> list[dict]:
     signals = spec.get("success_signals", [])
     keywords = {"performance", "latency", "speed", "throughput", "response time"}
     if not any(any(kw in s.lower() for kw in keywords) for s in signals):
-        return graph
+        return graph, False
 
     return add_after(graph, target_id="TASK-IMPL", node={
         "id": "TASK-IMPL.PERF",
@@ -366,9 +366,8 @@ def apply_rules(graph: list[dict], spec: dict) -> tuple[list[dict], list[str]]:
     """Apply all rules. Returns (modified_graph, list_of_applied_rule_ids)."""
     applied = []
     for rule_id, rule_fn in RULES:
-        new_graph = rule_fn(spec, graph)
-        if new_graph is not graph:  # rule mutated the graph
-            graph = new_graph
+        graph, changed = rule_fn(spec, graph)
+        if changed:
             applied.append(rule_id)
     return graph, applied
 ```
@@ -380,8 +379,9 @@ def apply_rules(graph: list[dict], spec: dict) -> tuple[list[dict], list[str]]:
 
 def add_parallel(graph: list[dict], target_id: str, nodes: list[dict]) -> list[dict]:
     """Attach sibling nodes under target. Target becomes composite.
-    All new nodes inherit target's deps. Downstream nodes that depended on
-    target now depend on all children instead.
+    All new nodes inherit target's deps. Children depend on target's deps.
+    Target stays in the DAG chain — downstream still depends on target.
+    Worker treats composite as "done when all children done".
     """
     target = _find(graph, target_id)
     if target["execution_type"] == "composite":
@@ -400,13 +400,13 @@ def add_parallel(graph: list[dict], target_id: str, nodes: list[dict]) -> list[d
         node.setdefault("llm_enriched", False)
         graph.append(node)
 
-    # Anything that depended on target now depends on all children
-    child_ids = [n["id"] for n in nodes]
-    for task in graph:
-        if target_id in task["deps"] and task["id"] != target_id:
-            task["deps"] = [d for d in task["deps"] if d != target_id] + child_ids
+    # DO NOT redirect downstream deps away from target.
+    # Downstream nodes keep depending on the composite target.
+    # Worker resolves composite as "done when all children done".
+    # This keeps composite node in the chain for: logging, aggregation,
+    # checkpoint, and future add_after operations.
 
-    return graph
+    return graph, True
 
 
 def add_before(graph: list[dict], target_id: str, node: dict) -> list[dict]:
@@ -428,14 +428,22 @@ def add_before(graph: list[dict], target_id: str, node: dict) -> list[dict]:
     graph.append(node)
 
     target["deps"] = [node["id"]]
-    return graph
+    return graph, True
 
 
 def add_after(graph: list[dict], target_id: str, node: dict) -> list[dict]:
     """Insert node after target. New node depends on target.
+    If target is composite, new node depends on all leaf children instead.
     Anything that depended on target now depends on new node.
     """
-    node.setdefault("deps", [target_id])
+    target = _find(graph, target_id)
+    if target["execution_type"] == "composite":
+        # Attach to leaf children, not composite parent
+        children = [t for t in graph if t.get("parent_id") == target_id]
+        dep_ids = [c["id"] for c in children] if children else [target_id]
+        node.setdefault("deps", dep_ids)
+    else:
+        node.setdefault("deps", [target_id])
     node.setdefault("parent_id", None)
     node.setdefault("objective", "")
     node.setdefault("description", "")
@@ -451,7 +459,7 @@ def add_after(graph: list[dict], target_id: str, node: dict) -> list[dict]:
         if target_id in task["deps"] and task["id"] != node["id"]:
             task["deps"] = [node["id"] if d == target_id else d for d in task["deps"]]
 
-    return graph
+    return graph, True
 
 
 def _find(graph: list[dict], task_id: str) -> dict:
@@ -758,10 +766,12 @@ def run_gate_2(graph_envelope: dict, io: Gate2IO) -> Gate2Result:
 
 User can at Gate 2:
 - **Approve** as-is
-- **Edit** task content (title, description, agent_type, deps)
-- **Add** new tasks
+- **Edit** content fields: title, description, objective, done_definition, agent_type, verification_steps
+- **Add** new atomic tasks (with valid deps)
 - **Remove** non-core tasks (cannot remove TASK-PARSE/DESIGN/IMPL/VALIDATE)
 - **Reject** → triggers regeneration (re-run generator, possibly with updated spec)
+
+**Restricted fields** (cannot edit at Gate 2): `id`, `phase`, `execution_type`, `deps`, `parent_id`, `group`. Deps editing is deferred to v2 with advanced mode + visual diff. Post-edit `validate_graph()` runs regardless to catch any issues.
 
 Post-approval: save as `task_graph.approved.json` artifact (same schema, with `"source": "approved"` and `"user_edits"` diff).
 
@@ -871,7 +881,7 @@ Given spec bundle from a "forum for internal knowledge sharing" idea:
   "spec_bundle_version": 1,
   "source_spec_artifact_id": "artifact-uuid-123",
   "generator_version": "1.0.0",
-  "rules_applied": ["RULE-PRODUCT-SPLIT", "RULE-DATABASE"],
+  "rules_applied": ["RULE-DATABASE", "RULE-PRODUCT-SPLIT"],
   "llm_enriched": true,
 
   "tasks": [
@@ -1048,7 +1058,7 @@ Given spec bundle from a "forum for internal knowledge sharing" idea:
       "execution_type": "atomic",
       "type": "testing",
       "tags": ["validation", "qa"],
-      "deps": ["TASK-IMPL.BACKEND", "TASK-IMPL.FRONTEND"],
+      "deps": ["TASK-IMPL"],
       "agent_type": "QA Engineer",
       "required_inputs": ["source code", "success_criteria.md"],
       "expected_outputs": ["validation_report.json"],
@@ -1078,12 +1088,14 @@ TASK-DESIGN
     ↓
 TASK-DESIGN.SCHEMA  (added by RULE-DATABASE)
     ↓
-TASK-IMPL  (composite)
-    ├── TASK-IMPL.BACKEND   ←┐
-    └── TASK-IMPL.FRONTEND  ←┘ (parallel, added by RULE-PRODUCT-SPLIT)
-         ↓
-TASK-VALIDATE  (depends on both children)
+TASK-IMPL  (composite — done when all children done)
+    ├── TASK-IMPL.BACKEND   (parallel, deps: TASK-DESIGN.SCHEMA)
+    └── TASK-IMPL.FRONTEND  (parallel, deps: TASK-DESIGN.SCHEMA)
+    ↓
+TASK-VALIDATE  (depends on TASK-IMPL composite)
 ```
+
+Composite node stays in the chain. Worker resolves TASK-IMPL as complete when both children succeed.
 
 ---
 
@@ -1118,7 +1130,6 @@ tests/
 
 ## 13. What This Does NOT Include
 
-- **RULE-PERF + RULE-PRODUCT-SPLIT interaction** — when both fire, `add_after(TASK-IMPL)` inserts perf test after the composite node, but downstream deps have already been redirected to children. TASK-VALIDATE would bypass perf test. For v1 this is acceptable (performance testing is rare in v1 scope). v2 should add `add_after_children(target)` that inserts after ALL children of a composite node.
 - **Dynamic rule discovery** — rules are hardcoded in v1. Rule Registry (match by tags/type) is future work.
 - **Multi-level task expansion** — composite nodes don't recursively expand. One level of children only.
 - **LLM-based graph planning** — LLM never decides structure. This is a deliberate constraint.
