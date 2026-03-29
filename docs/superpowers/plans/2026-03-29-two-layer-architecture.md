@@ -70,10 +70,12 @@ State lưu trong **file** (không in-memory), trong session directory:
 ```
 ~/.claude/debate-sessions/<session-id>/
     idea.txt
+    initial_brief.json         ← sau normalize
     debate_results.json        ← sau run_debate
+    decision_log.json          ← Skill ghi sau Gate 1
     approved_answers.json      ← Skill ghi sau Gate 1
-    spec.txt                   ← sau finalize_spec
-    task_graph.json
+    specs/                     ← sau finalize_spec (5 files cố định)
+    task_graph.json            ← sau Task Generator
     approved_tasks.json        ← Skill ghi sau Gate 2
     execution_summary.json
 ```
