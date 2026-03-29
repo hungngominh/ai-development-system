@@ -16,12 +16,14 @@ def config():
 
 @pytest.fixture
 def conn(config):
-    """One connection per test, rolled back after."""
+    """One connection per test. Everything is rolled back after, even if test raises."""
     c = psycopg.connect(config.database_url, autocommit=False, row_factory=psycopg.rows.dict_row)
-    c.execute("BEGIN")
-    yield c
-    c.execute("ROLLBACK")
-    c.close()
+    try:
+        c.execute("BEGIN")
+        yield c
+    finally:
+        c.execute("ROLLBACK")
+        c.close()
 
 
 @pytest.fixture

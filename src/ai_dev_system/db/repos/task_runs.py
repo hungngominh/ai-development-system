@@ -7,6 +7,9 @@ class TaskRunRepo:
         self.conn = conn
 
     def pickup(self, run_id: str, worker_id: str, max_concurrent: int = 4) -> Optional[dict]:
+        # Concurrency limit check — best-effort for v1. The count check and the FOR UPDATE
+        # SKIP LOCKED are not in the same atomic step, so the limit can occasionally be
+        # exceeded by 1 under high concurrency. Acceptable for Phase 1 (1-2 workers).
         running = self.conn.execute(
             "SELECT COUNT(*) as n FROM task_runs WHERE run_id = %s AND status = 'RUNNING'",
             (run_id,)
