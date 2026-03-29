@@ -1,5 +1,6 @@
 import uuid
 import psycopg
+import psycopg.types.json
 from typing import Optional
 
 
@@ -84,3 +85,18 @@ class TaskRunRepo:
             (run_id,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+    def create_from_graph(self, run_id: str, task: dict, task_graph_artifact_id: str) -> str:
+        """Create a PENDING task_run from a graph node. For execution engine."""
+        task_run_id = str(uuid.uuid4())
+        deps = task.get("deps", [])
+        self.conn.execute("""
+            INSERT INTO task_runs (
+                task_run_id, run_id, task_id, task_graph_artifact_id,
+                attempt_number, status, agent_type,
+                input_artifact_ids, resolved_dependencies, promoted_outputs
+            ) VALUES (%s, %s, %s, %s, 1, 'PENDING', %s, '{}', %s, '[]')
+        """, (task_run_id, run_id, task["id"], task_graph_artifact_id,
+              task.get("agent_type", "unknown"),
+              deps))
+        return task_run_id
