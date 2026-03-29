@@ -4,6 +4,7 @@ End-to-end: insert run + 1 PENDING task → resolve → pickup → execute → p
 import os
 import uuid
 import pytest
+from ai_dev_system.config import Config
 from ai_dev_system.engine.resolver import resolve_dependencies
 from ai_dev_system.engine.worker import pickup_task, execute_and_promote
 from ai_dev_system.agents.stub import StubAgent
@@ -13,7 +14,7 @@ def test_single_task_flow(conn, tmp_path, config):
     """
     Full E2E flow: PENDING → READY → pickup → execute → SUCCESS with artifact ACTIVE
     """
-    cfg = config.__class__(storage_root=str(tmp_path), database_url=config.database_url)
+    cfg = Config(storage_root=str(tmp_path), database_url=config.database_url)
     run_id = str(uuid.uuid4())
     project_id = str(uuid.uuid4())
 
@@ -55,7 +56,8 @@ def test_single_task_flow(conn, tmp_path, config):
     """, (run_id,)).fetchone()
     assert artifact["status"] == "ACTIVE"
     assert artifact["version"] == 1
-
+    assert artifact["content_ref"], "content_ref must be a non-empty absolute path"
+    # _complete.marker is written by promote_output (not the agent); output.json by StubAgent
     assert os.path.exists(os.path.join(artifact["content_ref"], "_complete.marker"))
     assert os.path.exists(os.path.join(artifact["content_ref"], "output.json"))
 
