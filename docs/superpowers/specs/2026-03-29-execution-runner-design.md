@@ -244,7 +244,7 @@ RUNNING_PHASE_3 ──► RUNNING_EXECUTION
 
 Retry creates a **new task_run row** with `attempt_number + 1`, `previous_attempt_id` linked, `retry_at = now() + delay`. The failed row becomes `FAILED_RETRYABLE` (immutable — audit trail).
 
-**`create_retry()` data contract**: The new row must have `retry_count = previous_row.retry_count + 1`. The `_handle_failure` function reads `task["retry_count"]` to decide `can_retry` — if the new row started at 0, `max_retries` would never be enforced. Implementation must propagate `retry_count` forward on every retry creation.
+**`create_retry()` data contract**: The new row must have `retry_count = previous_row.retry_count + 1` **for automatic retries** (called from `_handle_failure`). For human-initiated retries (called from `resolve_escalation`), the new row must have `retry_count = 0` — human override resets the counter, allowing the task a fresh set of automatic retries. The `create_retry()` function must accept a `reset_retry_count: bool = False` parameter to distinguish the two cases.
 
 ---
 
@@ -472,6 +472,19 @@ def check_completion(conn, run_id):
             WHERE run_id = %s AND status = 'RUNNING_EXECUTION'
         """, (run_id,))
         # Escalation was raised by propagate_failure — no duplicate here
+
+    # Defensive guard: blocked tasks with no failed tasks (should be impossible,
+    # but catches state inconsistency from bugs in unblock logic)
+    elif active_count == 0 and counts.blocked_count > 0 and counts.failed_final_count == 0:
+        log.error(
+            "run %s: inconsistent state — %d BLOCKED tasks but 0 FAILED_FINAL. "
+            "Forcing PAUSED_FOR_DECISION for human review.",
+            run_id, counts.blocked_count
+        )
+        conn.execute("""
+            UPDATE runs SET status = 'PAUSED_FOR_DECISION'
+            WHERE run_id = %s AND status = 'RUNNING_EXECUTION'
+        """, (run_id,))
 ```
 
 **Completion conditions:**
@@ -515,13 +528,18 @@ def worker_loop(run_id, config, agent, stop_event):
             heartbeat.start()
             try:
                 # Resolve artifact paths for required_inputs before calling agent
-                context = _resolve_artifact_paths(conn, run_id, task["context_snapshot"])
-                result = agent.run(
-                    task_id=task["task_id"],
-                    output_path=task["temp_path"],
-                    context=copy.deepcopy(context),   # immutable copy for agent
-                    timeout_s=config.task_timeout_s,
-                )
+                try:
+                    context = _resolve_artifact_paths(conn, run_id, task["context_snapshot"])
+                except ArtifactResolutionError as e:
+                    # Treat as EXECUTION_ERROR — enters normal retry/escalation path
+                    result = AgentResult(success=False, error=str(e))
+                else:
+                    result = agent.run(
+                        task_id=task["task_id"],
+                        output_path=task["temp_path"],
+                        context=copy.deepcopy(context),   # immutable copy for agent
+                        timeout_s=config.task_timeout_s,
+                    )
             except TimeoutError:
                 result = AgentResult(success=False, error="task_execution_timeout")
             finally:
@@ -637,6 +655,9 @@ def execute_and_promote(conn, config, task, result, worker_id, run_id):
 ### 7.4 Failure Handler
 
 ```python
+# src/ai_dev_system/engine/failure.py
+# (imported by worker.py: from ai_dev_system.engine.failure import _handle_failure)
+
 def _handle_failure(conn, config, task, error, worker_id, run_id, error_type):
     retry_cfg = config.retry_policy[error_type]
     can_retry = task["retry_count"] < retry_cfg["max_retries"]
@@ -804,8 +825,10 @@ def resolve_escalation(conn, escalation_id, resolution, run_id):
         task = task_run_repo.get(conn, esc["task_run_id"])
 
         if resolution == "retry":
-            # Create new attempt for the failed task
-            task_run_repo.create_retry(conn, run_id, task, error_type=None)
+            # Create new attempt for the failed task.
+            # reset_retry_count=True: human override resets counter for fresh automatic retries.
+            task_run_repo.create_retry(conn, run_id, task, error_type=None,
+                                       reset_retry_count=True)
             # Unblock direct downstream (BFS via mark_ready_tasks will cascade)
             _unblock_downstream_bfs(conn, run_id, task["task_id"])
 
