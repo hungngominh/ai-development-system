@@ -274,14 +274,18 @@ def finalize_gate1(run_id, decisions, storage_root, conn) -> tuple[str, str]:
     task_run_aa = task_run_repo.create_sync(run_id, task_type="gate1_approved_answers")
     task_run_aa["input_artifact_ids"] = [debate_report_id]
     event_repo.insert(run_id, "TASK_STARTED", "gate1_skill", task_run_aa["task_run_id"])
-    # write approved_answers.json: {"Q1": "answer", ...} to temp_path
+    temp_aa = build_temp_path(config.storage_root, run_id, "gate1_approved_answers", 1)
+    os.makedirs(temp_aa, exist_ok=True)
+    # write approved_answers.json: {"Q1": "answer", ...} into temp_aa/
     aa_id = promote_output(conn, config, task_run_aa, PromotedOutput("approved_answers", "APPROVED_ANSWERS", "Gate 1 approved answers"), temp_aa)
 
     # Artifact 2: DECISION_LOG
     task_run_dl = task_run_repo.create_sync(run_id, task_type="gate1_decision_log")
     task_run_dl["input_artifact_ids"] = [debate_report_id]
     event_repo.insert(run_id, "TASK_STARTED", "gate1_skill", task_run_dl["task_run_id"])
-    # write decision_log.json: {"run_id": ..., "decisions": [...], "confirmed_at": ...}
+    temp_dl = build_temp_path(config.storage_root, run_id, "gate1_decision_log", 1)
+    os.makedirs(temp_dl, exist_ok=True)
+    # write decision_log.json: {"run_id": ..., "decisions": [...], "confirmed_at": ...} into temp_dl/
     dl_id = promote_output(conn, config, task_run_dl, PromotedOutput("decision_log", "DECISION_LOG", "Gate 1 decision log"), temp_dl)
 
     # Transition: Gate 1 approved → Phase B ready to run
@@ -503,10 +507,10 @@ For completeness, Phase A also traverses:
 ## Testing Strategy
 
 **Unit tests (no DB, no LLM):**
-- `debate/test_questions.py` — question parsing, classification logic
-- `debate/test_rounds.py` — round orchestration with stub LLM client
-- `debate/test_engine.py` — stop conditions (confidence ≥ 0.8, max rounds, OPTIONAL skip)
-- `rules/test_registry.py` — YAML loading, match logic (type match, tag match, wildcard)
+- `tests/debate/test_questions.py` — question parsing, classification logic
+- `tests/debate/test_rounds.py` — round orchestration with stub LLM client
+- `tests/debate/test_engine.py` — stop conditions (confidence ≥ 0.8, max rounds, OPTIONAL skip)
+- `tests/rules/test_registry.py` — YAML loading, match logic (type match, tag match, wildcard)
 
 **Integration tests (DB, stub LLM):**
 - `test_debate_pipeline.py` — Phase A end-to-end: normalize → debate → PAUSED_AT_GATE_1
