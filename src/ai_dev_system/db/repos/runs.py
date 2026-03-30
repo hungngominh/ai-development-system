@@ -30,3 +30,8 @@ class RunRepo:
                 last_activity_at = now()
             WHERE run_id = %s
         """, (f"{{{key}}}", artifact_id, run_id))
+
+    def update_status(self, run_id: str, status: str) -> None:
+        self.conn.execute("""
+            UPDATE runs SET status = %s, last_activity_at = now() WHERE run_id = %s
+        """, (status, run_id))
