@@ -82,3 +82,55 @@ def test_idempotent_project_id(config):
     id1 = json.loads(r1.stdout)["project_id"]
     id2 = json.loads(r2.stdout)["project_id"]
     assert id1 == id2
+
+
+@pytest.mark.integration
+def test_empty_idea_exits_1(config):
+    result = _run_cli("", "my-project")
+    assert result.returncode == 1
+    assert "Error: --idea must be non-empty" in result.stderr
+    assert result.stdout.strip() == ""
+
+
+@pytest.mark.integration
+def test_empty_project_name_exits_1(config):
+    result = _run_cli("Build something", "")
+    assert result.returncode == 1
+    assert "Error: --project-name must be non-empty" in result.stderr
+    assert result.stdout.strip() == ""
+
+
+@pytest.mark.integration
+def test_llm_error_exits_1_stdout_empty(config):
+    """Khi LLM_STUB không set và không có real client → exit 1, stdout trống."""
+    env = os.environ.copy()
+    env.pop("AI_DEV_STUB_LLM", None)   # force real client path
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "ai_dev_system.cli.start_project",
+            "--project-name", "err-test",
+            "--idea", "Build something",
+        ],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 1
+    assert result.stdout.strip() == ""
+    assert "error" in result.stderr.lower() or "Error" in result.stderr
+
+
+@pytest.mark.integration
+def test_bad_database_url_exits_1(config):
+    env = os.environ.copy()
+    env["DATABASE_URL"] = "postgresql://invalid:invalid@localhost:9999/noexist"
+    env["AI_DEV_STUB_LLM"] = "1"
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "ai_dev_system.cli.start_project",
+            "--project-name", "db-err-test",
+            "--idea", "Build something",
+        ],
+        capture_output=True, text=True, env=env,
+    )
+    assert result.returncode == 1
+    assert "DB connection failed" in result.stderr
+    assert result.stdout.strip() == ""
