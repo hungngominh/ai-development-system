@@ -1,3 +1,5 @@
+import subprocess
+import sys
 import uuid
 import pytest
 from ai_dev_system.cli.start_project import name_to_slug, make_project_id
@@ -45,10 +47,6 @@ class TestMakeProjectId:
         assert make_project_id("project-a") != make_project_id("project-b")
 
 
-import subprocess
-import sys
-
-
 class TestArgumentValidation:
     """Test argument validation via subprocess (giữ đúng exit code behaviour)."""
 
@@ -86,3 +84,5 @@ class TestArgumentValidation:
         result = self._run([])
         assert result.returncode == 1
         assert result.stdout == ""
+        assert "Error: --project-name must be non-empty" in result.stderr
+        assert "Error: --idea must be non-empty" in result.stderr
