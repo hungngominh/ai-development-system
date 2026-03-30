@@ -6,6 +6,11 @@ import json
 import re
 import sys
 import uuid
+import os
+
+from ai_dev_system.config import Config
+from ai_dev_system.db.connection import get_connection
+from ai_dev_system.debate_pipeline import run_debate_pipeline
 
 
 
@@ -45,6 +50,32 @@ def _validate(args) -> list[str]:
     return errors
 
 
+def _make_llm_client():
+    """Return StubDebateLLMClient nếu AI_DEV_STUB_LLM=1, else real client."""
+    if os.environ.get("AI_DEV_STUB_LLM") == "1":
+        from ai_dev_system.debate.llm import StubDebateLLMClient
+        return StubDebateLLMClient()
+    # Real client: yêu cầu ANTHROPIC_API_KEY
+    # TODO: implement RealDebateLLMClient khi cần production usage
+    raise RuntimeError(
+        "Real LLM client not yet implemented. Set AI_DEV_STUB_LLM=1 for testing."
+    )
+
+
+def _count_questions(results: list) -> tuple[int, int, int, int]:
+    """Return (total, escalated, resolved, optional)."""
+    escalated = resolved = optional = 0
+    for qdr in results:
+        if qdr.question.classification == "OPTIONAL":
+            optional += 1
+        elif qdr.final.resolution_status in ("ESCALATE_TO_HUMAN", "NEED_MORE_EVIDENCE"):
+            escalated += 1
+        else:
+            resolved += 1
+    total = escalated + resolved + optional
+    return total, escalated, resolved, optional
+
+
 def main(argv=None) -> int:
     args = _parse_args(argv)
     errors = _validate(args)
@@ -52,7 +83,63 @@ def main(argv=None) -> int:
         for e in errors:
             print(e, file=sys.stderr)
         return 1
-    # (pipeline call will go here in Task 3)
+
+    # Build full_idea
+    full_idea = args.idea.strip()
+    if args.constraints.strip():
+        full_idea = full_idea + "\n\nConstraints: " + args.constraints.strip()
+
+    # Compute project_id
+    slug = name_to_slug(args.project_name)
+    project_id = make_project_id(slug)
+
+    # Load config + DB connection
+    try:
+        config = Config.from_env()
+        conn = get_connection(config.database_url)
+    except Exception as exc:
+        print(f"DB connection failed: {exc}", file=sys.stderr)
+        return 1
+
+    # Progress
+    print("[Phase 1a/1b] Running debate pipeline (normalize → questions → debate)...", file=sys.stderr)
+    print("             This may take 2-5 minutes.", file=sys.stderr)
+
+    try:
+        llm_client = _make_llm_client()
+        result = run_debate_pipeline(
+            raw_idea=full_idea,
+            config=config,
+            conn=conn,
+            project_id=project_id,
+            llm_client=llm_client,
+        )
+    except Exception as exc:
+        print(f"LLM API error: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        conn.close()
+
+    # Count question outcomes
+    total, escalated, resolved, optional = _count_questions(result.debate_report.results)
+
+    print(
+        f"[Done]     DEBATE_REPORT promoted. Status: PAUSED_AT_GATE_1",
+        file=sys.stderr,
+    )
+
+    # JSON output to stdout
+    output = {
+        "run_id": result.run_id,
+        "project_id": project_id,
+        "project_name": slug,
+        "status": "PAUSED_AT_GATE_1",
+        "questions_count": total,
+        "escalated_count": escalated,
+        "resolved_count": resolved,
+        "optional_count": optional,
+    }
+    print(json.dumps(output))
     return 0
 
 

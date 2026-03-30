@@ -86,3 +86,52 @@ class TestArgumentValidation:
         assert result.stdout == ""
         assert "Error: --project-name must be non-empty" in result.stderr
         assert "Error: --idea must be non-empty" in result.stderr
+
+
+from unittest.mock import MagicMock
+from ai_dev_system.cli.start_project import _count_questions
+
+
+def _make_qdr(classification: str, resolution_status: str):
+    """Helper: build a minimal QuestionDebateResult-like mock."""
+    qdr = MagicMock()
+    qdr.question.classification = classification
+    qdr.final.resolution_status = resolution_status
+    return qdr
+
+
+class TestCountQuestions:
+    def test_all_resolved(self):
+        results = [
+            _make_qdr("REQUIRED", "RESOLVED"),
+            _make_qdr("STRATEGIC", "RESOLVED_WITH_CAVEAT"),
+        ]
+        total, esc, res, opt = _count_questions(results)
+        assert total == 2 and esc == 0 and res == 2 and opt == 0
+
+    def test_escalate_to_human(self):
+        results = [_make_qdr("REQUIRED", "ESCALATE_TO_HUMAN")]
+        total, esc, res, opt = _count_questions(results)
+        assert esc == 1 and res == 0 and opt == 0
+
+    def test_need_more_evidence_counts_as_escalated(self):
+        results = [_make_qdr("STRATEGIC", "NEED_MORE_EVIDENCE")]
+        total, esc, res, opt = _count_questions(results)
+        assert esc == 1 and res == 0 and opt == 0
+
+    def test_optional_not_debated(self):
+        results = [_make_qdr("OPTIONAL", "RESOLVED")]  # status irrelevant for OPTIONAL
+        total, esc, res, opt = _count_questions(results)
+        assert opt == 1 and esc == 0 and res == 0
+
+    def test_invariant_holds_mixed(self):
+        results = [
+            _make_qdr("REQUIRED", "RESOLVED"),
+            _make_qdr("STRATEGIC", "ESCALATE_TO_HUMAN"),
+            _make_qdr("OPTIONAL", "RESOLVED"),
+            _make_qdr("REQUIRED", "NEED_MORE_EVIDENCE"),
+            _make_qdr("STRATEGIC", "RESOLVED_WITH_CAVEAT"),
+        ]
+        total, esc, res, opt = _count_questions(results)
+        assert total == esc + res + opt
+        assert total == 5 and esc == 2 and res == 2 and opt == 1
