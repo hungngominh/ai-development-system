@@ -275,16 +275,14 @@ def finalize_gate1(run_id, decisions, storage_root, conn) -> tuple[str, str]:
     task_run_aa["input_artifact_ids"] = [debate_report_id]
     event_repo.insert(run_id, "TASK_STARTED", "gate1_skill", task_run_aa["task_run_id"])
     # write approved_answers.json: {"Q1": "answer", ...} to temp_path
-    # call promote_output(conn, config, task_run_aa, PromotedOutput(..., "APPROVED_ANSWERS"), temp)
-    # → returns aa_id
+    aa_id = promote_output(conn, config, task_run_aa, PromotedOutput("approved_answers", "APPROVED_ANSWERS", "Gate 1 approved answers"), temp_aa)
 
     # Artifact 2: DECISION_LOG
     task_run_dl = task_run_repo.create_sync(run_id, task_type="gate1_decision_log")
     task_run_dl["input_artifact_ids"] = [debate_report_id]
     event_repo.insert(run_id, "TASK_STARTED", "gate1_skill", task_run_dl["task_run_id"])
     # write decision_log.json: {"run_id": ..., "decisions": [...], "confirmed_at": ...}
-    # call promote_output(conn, config, task_run_dl, PromotedOutput(..., "DECISION_LOG"), temp)
-    # → returns dl_id
+    dl_id = promote_output(conn, config, task_run_dl, PromotedOutput("decision_log", "DECISION_LOG", "Gate 1 decision log"), temp_dl)
 
     # Transition: Gate 1 approved → Phase B ready to run
     # RUNNING_PHASE_1D already exists in schema ("Build spec bundle")
@@ -385,6 +383,7 @@ Called in Phase B after Gate 2 approval, before `run_execution()`.
 
 ```python
 def beads_sync(run_id: str, graph: dict, conn) -> None:
+    event_repo = EventRepo(conn)
     tasks = topological_sort(graph["tasks"])
     for task in tasks:
         result = subprocess.run(
@@ -393,6 +392,8 @@ def beads_sync(run_id: str, graph: dict, conn) -> None:
         )
         if result.returncode != 0 and "already exists" not in result.stderr.decode():
             logger.warning("beads_sync: bd create failed for %s: %s", task["id"], result.stderr)
+            event_repo.insert(run_id, "BEADS_SYNC_WARNING", "system",
+                              payload={"task_id": task["id"], "stderr": result.stderr.decode()})
 
     for task in graph["tasks"]:
         for dep in task.get("deps", []):
@@ -410,12 +411,13 @@ def beads_sync(run_id: str, graph: dict, conn) -> None:
 ### Phase A: run_debate_pipeline(raw_idea, config, conn, project_id, llm_client)
 
 ```python
-# run_repo.update_status(run_id, "RUNNING_PHASE_1A")
+# run_id = run_repo.create(project_id=project_id, pipeline_type="debate_pipeline")
+# (RunRepo.create() inserts with status=RUNNING_PHASE_1A — no separate update_status call needed)
 # normalize_idea() → brief
 # generate_questions(brief, llm_client) → questions
 # run_repo.update_status(run_id, "RUNNING_PHASE_1B")
 # run_debate(questions, llm_client) → debate_report
-# promote DEBATE_REPORT artifact
+# promote DEBATE_REPORT artifact   (requires task_run via create_sync, same pattern as pipeline.py)
 # run_repo.update_status(run_id, "PAUSED_AT_GATE_1")
 # return DebatePipelineResult(run_id, debate_report, artifact_id)
 ```
@@ -430,6 +432,9 @@ after the Gate 1 pause, so it receives a factory rather than a live connection. 
 a live `conn` because it runs in-process with the CLI caller.
 
 ```python
+# conn = conn_factory()
+# row = conn.execute("SELECT status FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+# assert row["status"] == "RUNNING_PHASE_1D", f"Expected RUNNING_PHASE_1D, got {row['status']}"
 # load approved_answers from APPROVED_ANSWERS artifact
 # finalize_spec(approved_answers, ...) → spec_bundle
 # generate_task_graph(spec_bundle, ...) → task_graph
@@ -458,6 +463,8 @@ include `APPROVED_BRIEF` in `artifact_type`. This type existed only in the workt
 (pre-spec). In the new design it is fully replaced by `APPROVED_ANSWERS`. The field
 `approved_brief_id` in `runs.current_artifacts` is kept as `null` for backward compatibility
 but no new promotions to `APPROVED_BRIEF` will occur.
+`ARTIFACT_TYPE_TO_KEY` in `paths.py` retains the `APPROVED_BRIEF` entry temporarily — do NOT
+add it to `artifact_type` enum in any migration.
 
 Existing types that remain active: `INITIAL_BRIEF`, `SPEC_BUNDLE`, `TASK_GRAPH_GENERATED`,
 `TASK_GRAPH_APPROVED`.
