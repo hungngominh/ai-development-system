@@ -1,0 +1,7 @@
+name: tdd
+applies_to:
+  task_types: [code, implementation, test]
+  tags: []
+file_rules: []
+skill_rules:
+  - superpowers:tdd-test-driven-development
