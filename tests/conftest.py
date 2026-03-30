@@ -6,6 +6,20 @@ import psycopg
 from ai_dev_system.config import Config
 
 
+# psycopg v3 does not provide .scalar(); add it so tests and application code can use it.
+def _cursor_scalar(self):
+    """Return the first column of the first row, or None."""
+    row = self.fetchone()
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return next(iter(row.values()))
+    return row[0]
+
+
+psycopg.Cursor.scalar = _cursor_scalar
+
+
 @pytest.fixture(scope="session")
 def config():
     database_url = os.environ.get("DATABASE_URL")

@@ -12,6 +12,12 @@ class ArtifactRepo:
             WHERE run_id = %s AND artifact_type = %s::artifact_type AND status = 'ACTIVE'
         """, (run_id, artifact_type))
 
+    def get(self, artifact_id: str):
+        row = self.conn.execute(
+            "SELECT * FROM artifacts WHERE artifact_id = %s", (artifact_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
     def insert(
         self, run_id: str, artifact_type: str, version: int,
         created_by: str, input_artifact_ids: list,
