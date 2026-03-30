@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Optional, Protocol
 
 
 @dataclass
@@ -18,3 +18,15 @@ class AgentResult:
     @property
     def success(self) -> bool:
         return self.error is None
+
+
+class Agent(Protocol):
+    def run(
+        self,
+        task_id: str,
+        output_path: str,
+        promoted_outputs=(),
+        context: Optional[dict] = None,
+        timeout_s: float = 3600.0,
+    ) -> AgentResult:
+        ...
