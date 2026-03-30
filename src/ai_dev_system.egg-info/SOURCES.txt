@@ -1,0 +1,8 @@
+README.md
+pyproject.toml
+src/ai_dev_system/__init__.py
+src/ai_dev_system.egg-info/PKG-INFO
+src/ai_dev_system.egg-info/SOURCES.txt
+src/ai_dev_system.egg-info/dependency_links.txt
+src/ai_dev_system.egg-info/requires.txt
+src/ai_dev_system.egg-info/top_level.txt

@@ -1,0 +1,7 @@
+name: security
+applies_to:
+  task_types: [code, implementation, review]
+  tags: [security, auth, authentication, authorization]
+file_rules: []
+skill_rules:
+  - superpowers:security-systematic-debugging

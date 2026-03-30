@@ -1,0 +1,7 @@
+name: code-review
+applies_to:
+  task_types: [review, code]
+  tags: []
+file_rules: []
+skill_rules:
+  - superpowers:requesting-code-review
