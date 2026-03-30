@@ -219,7 +219,7 @@ def _pickup_for_runner(conn, config, run_id: str, worker_id: str):
                 AND dep.task_id = ANY(tr.resolved_dependencies)
                 AND dep.status NOT IN ('SUCCESS', 'SKIPPED')
           )
-        ORDER BY tr.retry_count ASC, tr.created_at ASC
+        ORDER BY tr.retry_count ASC, tr.materialized_at ASC
         LIMIT 1
         FOR UPDATE SKIP LOCKED
     """, (run_id,)).fetchone()
@@ -257,7 +257,14 @@ def _pickup_for_runner(conn, config, run_id: str, worker_id: str):
     promoted_outputs = [PromotedOutput(**po) if isinstance(po, dict) else po
                         for po in promoted_raw]
 
-    return dict(task) | {"temp_path": temp_path, "promoted_outputs_parsed": promoted_outputs}
+    task_dict = dict(task)
+    # Ensure UUID fields are plain strings (psycopg returns uuid columns as uuid.UUID objects
+    # when the connection doesn't have a custom UUID loader registered).
+    for key in ("task_run_id", "run_id", "task_graph_artifact_id",
+                "previous_attempt_id", "output_artifact_id"):
+        if key in task_dict and task_dict[key] is not None:
+            task_dict[key] = str(task_dict[key])
+    return task_dict | {"temp_path": temp_path, "promoted_outputs_parsed": promoted_outputs}
 
 
 def _promote_for_runner(conn, config, task: dict, result, worker_id: str, run_id: str):
