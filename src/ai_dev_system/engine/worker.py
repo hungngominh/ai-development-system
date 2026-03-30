@@ -5,6 +5,7 @@ import logging
 import os
 import socket
 import threading as _threading
+from pathlib import Path
 from typing import Optional
 
 import psycopg
@@ -14,8 +15,12 @@ from ai_dev_system.config import Config
 from ai_dev_system.db.repos.events import EventRepo
 from ai_dev_system.db.repos.task_runs import TaskRunRepo
 from ai_dev_system.engine.resolver import resolve_dependencies
+from ai_dev_system.rules.registry import RuleRegistry
 from ai_dev_system.storage.paths import build_temp_path
 from ai_dev_system.storage.promote import promote_output
+
+_RULES_DIR = Path(__file__).parent.parent / "rules" / "definitions"
+_rule_registry = RuleRegistry(rules_dir=_RULES_DIR)
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +165,15 @@ def worker_loop(
                 except ArtifactResolutionError as e:
                     result = _make_error_result(task, str(e))
                 else:
+                    rule_match = _rule_registry.match_rules(task)
+                    if rule_match.skill_rules or rule_match.file_rules:
+                        event_repo = EventRepo(conn)
+                        event_repo.insert(run_id, "RULES_APPLIED", "worker",
+                                          task_run_id=task["task_run_id"],
+                                          payload={"skill_rules": rule_match.skill_rules,
+                                                   "file_rules": rule_match.file_rules})
+                        for skill in rule_match.skill_rules:
+                            print(f"[RULE] Apply skill: {skill}")
                     result = agent.run(
                         task_id=task["task_id"],
                         output_path=task["temp_path"],
