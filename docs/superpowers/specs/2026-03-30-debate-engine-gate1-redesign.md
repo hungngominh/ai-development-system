@@ -22,9 +22,9 @@ a Claude Code Skill handles the Gate 1 conversation.
 
 ```
 [Python Phase A]  normalize → question gen → debate → DEBATE_REPORT artifact
-                                                            ↓ run.status = PAUSED_FOR_GATE1
+                                                            ↓ run.status = PAUSED_AT_GATE_1
 [Gate 1 Skill]    /review-debate → state machine → approved_answers + decision_log artifacts
-                                                            ↓ run.status = GATE1_APPROVED
+                                                            ↓ run.status = RUNNING_PHASE_1D
 [Python Phase B]  finalize_spec → task_graph → Gate 2 → beads_sync → execution (+ rules)
 ```
 
@@ -175,11 +175,11 @@ Added to `ARTIFACT_TYPE_TO_KEY`:
 "DEBATE_REPORT": "debate_report_id"
 ```
 
-### New Run Status: PAUSED_FOR_GATE1
+### Run Status Transition: PAUSED_AT_GATE_1
 
-Added to `runs.status` valid values. Phase A ends with:
+`PAUSED_AT_GATE_1` already exists in the `run_status` enum (control-layer-schema.sql). Phase A ends with:
 ```python
-run_repo.update_status(run_id, "PAUSED_FOR_GATE1")
+run_repo.update_status(run_id, "PAUSED_AT_GATE_1")
 ```
 
 ---
@@ -226,6 +226,19 @@ Supports batch: `"approve all, Q4 dùng Vue"` → Q4=OVERRIDE, rest=APPROVED_CON
 (✅ Consensus / ✏️ Override / 👤 Human decision). User confirms or requests revision.
 On revision: return to COLLECT_CONSENSUS for specified question, then re-CONFIRM.
 
+### RunRepo.update_status() — New Method
+
+`RunRepo` currently only has `create()` and `update_current_artifact()`. Add:
+
+```python
+def update_status(self, run_id: str, status: str) -> None:
+    self.conn.execute("""
+        UPDATE runs SET status = %s, last_activity_at = now() WHERE run_id = %s
+    """, (status, run_id))
+```
+
+Called by both Phase A end and `finalize_gate1()`.
+
 ### finalize_gate1(run_id, decisions, storage_root, conn)
 
 Called by Skill after CONFIRM:
@@ -243,11 +256,33 @@ class Decision:
 
 def finalize_gate1(run_id, decisions, storage_root, conn) -> tuple[str, str]:
     """Write approved_answers + decision_log artifacts. Returns (aa_id, dl_id)."""
-    # write approved_answers.json: {"Q1": "answer", ...}
+    task_run_repo = TaskRunRepo(conn)
+    event_repo = EventRepo(conn)
+    run_repo = RunRepo(conn)
+    config = Config(storage_root=storage_root)
+
+    # Artifact 1: APPROVED_ANSWERS
+    # promote_output() requires a RUNNING task_run row (promotion guard Step 7b)
+    task_run_aa = task_run_repo.create_sync(run_id, task_type="gate1_approved_answers")
+    task_run_aa["input_artifact_ids"] = []   # debate_report_id should be included in impl
+    event_repo.insert(run_id, "TASK_STARTED", "gate1_skill", task_run_aa["task_run_id"])
+    # write approved_answers.json: {"Q1": "answer", ...} to temp_path
+    # call promote_output(conn, config, task_run_aa, PromotedOutput(..., "APPROVED_ANSWERS"), temp)
+    # → returns aa_id
+
+    # Artifact 2: DECISION_LOG
+    task_run_dl = task_run_repo.create_sync(run_id, task_type="gate1_decision_log")
+    task_run_dl["input_artifact_ids"] = []
+    event_repo.insert(run_id, "TASK_STARTED", "gate1_skill", task_run_dl["task_run_id"])
     # write decision_log.json: {"run_id": ..., "decisions": [...], "confirmed_at": ...}
-    # promote APPROVED_ANSWERS artifact
-    # promote DECISION_LOG artifact
-    # run_repo.update_status(run_id, "GATE1_APPROVED")
+    # call promote_output(conn, config, task_run_dl, PromotedOutput(..., "DECISION_LOG"), temp)
+    # → returns dl_id
+
+    # Transition: Gate 1 approved → Phase B ready to run
+    # RUNNING_PHASE_1D already exists in schema ("Build spec bundle")
+    run_repo.update_status(run_id, "RUNNING_PHASE_1D")
+
+    return aa_id, dl_id
 ```
 
 New artifact types: `APPROVED_ANSWERS`, `DECISION_LOG`.
@@ -367,15 +402,20 @@ def beads_sync(run_id: str, graph: dict, conn) -> None:
 ### Phase A: run_debate_pipeline(raw_idea, config, conn, project_id, llm_client)
 
 ```python
+# run_repo.update_status(run_id, "RUNNING_PHASE_1A")
 # normalize_idea() → brief
 # generate_questions(brief, llm_client) → questions
+# run_repo.update_status(run_id, "RUNNING_PHASE_1B")
 # run_debate(questions, llm_client) → debate_report
 # promote DEBATE_REPORT artifact
-# run_repo.update_status(run_id, "PAUSED_FOR_GATE1")
+# run_repo.update_status(run_id, "PAUSED_AT_GATE_1")
 # return DebatePipelineResult(run_id, debate_report, artifact_id)
 ```
 
-### Phase B: run_spec_pipeline(run_id, config, conn_factory, gate2_io, agent, llm_client)
+### Phase B: run_phase_b_pipeline(run_id, config, conn_factory, gate2_io, agent, llm_client)
+
+Note: named `run_phase_b_pipeline` to avoid conflict with existing `run_spec_pipeline()` in
+`pipeline.py` (which handles the old normalize→gate1→spec flow and will be superseded).
 
 ```python
 # load approved_answers from APPROVED_ANSWERS artifact
@@ -402,12 +442,18 @@ as the primary brief artifact — the existing field is kept for backward compat
 
 ---
 
-## New Run Statuses
+## Run Status Usage
+
+No new `run_status` enum values are needed — all statuses already exist in `control-layer-schema.sql`.
 
 | Status | Set by | Meaning |
 |--------|--------|---------|
-| `PAUSED_FOR_GATE1` | Phase A end | Waiting for Skill Gate 1 |
-| `GATE1_APPROVED` | `finalize_gate1()` | Gate 1 complete, Phase B can start |
+| `PAUSED_AT_GATE_1` | Phase A end | Waiting for Gate 1 Skill |
+| `RUNNING_PHASE_1D` | `finalize_gate1()` | Gate 1 complete, Phase B can start |
+
+For completeness, Phase A also traverses:
+- `RUNNING_PHASE_1A` — set at run start (normalize + question gen)
+- `RUNNING_PHASE_1B` — set before `run_debate()` call
 
 ---
 
@@ -420,8 +466,8 @@ as the primary brief artifact — the existing field is kept for backward compat
 - `rules/test_registry.py` — YAML loading, match logic (type match, tag match, wildcard)
 
 **Integration tests (DB, stub LLM):**
-- `test_debate_pipeline.py` — Phase A end-to-end: normalize → debate → PAUSED_FOR_GATE1
-- `test_finalize_gate1.py` — artifact creation, status transition to GATE1_APPROVED
+- `test_debate_pipeline.py` — Phase A end-to-end: normalize → debate → PAUSED_AT_GATE_1
+- `test_finalize_gate1.py` — artifact creation, status transition to RUNNING_PHASE_1D
 - `test_spec_pipeline_phase_b.py` — Phase B: approved_answers → spec → task_graph → execution
 - `test_beads_sync.py` — subprocess mock, idempotency, graceful skip when bd absent
 
