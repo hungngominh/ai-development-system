@@ -43,3 +43,46 @@ class TestMakeProjectId:
 
     def test_different_slugs_different_ids(self):
         assert make_project_id("project-a") != make_project_id("project-b")
+
+
+import subprocess
+import sys
+
+
+class TestArgumentValidation:
+    """Test argument validation via subprocess (giữ đúng exit code behaviour)."""
+
+    def _run(self, args: list[str]) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, "-m", "ai_dev_system.cli.start_project"] + args,
+            capture_output=True, text=True,
+        )
+
+    def test_missing_idea_exits_1(self):
+        result = self._run(["--project-name", "my-project"])
+        assert result.returncode == 1
+        assert "Error: --idea must be non-empty" in result.stderr
+        assert result.stdout == ""
+
+    def test_empty_idea_exits_1(self):
+        result = self._run(["--project-name", "my-project", "--idea", ""])
+        assert result.returncode == 1
+        assert "Error: --idea must be non-empty" in result.stderr
+        assert result.stdout == ""
+
+    def test_missing_project_name_exits_1(self):
+        result = self._run(["--idea", "Build something"])
+        assert result.returncode == 1
+        assert "Error: --project-name must be non-empty" in result.stderr
+        assert result.stdout == ""
+
+    def test_empty_project_name_exits_1(self):
+        result = self._run(["--project-name", "", "--idea", "Build something"])
+        assert result.returncode == 1
+        assert "Error: --project-name must be non-empty" in result.stderr
+        assert result.stdout == ""
+
+    def test_missing_both_exits_1(self):
+        result = self._run([])
+        assert result.returncode == 1
+        assert result.stdout == ""
