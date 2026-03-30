@@ -28,7 +28,7 @@ a Claude Code Skill handles the Gate 1 conversation.
 [Python Phase B]  finalize_spec → task_graph → Gate 2 → beads_sync → execution (+ rules)
 ```
 
-Bridge: Skill calls `finalize_gate1(run_id, decisions, storage_root)` which writes artifacts
+Bridge: Skill calls `finalize_gate1(run_id, decisions, storage_root, conn)` which writes artifacts
 and updates `runs.status`. Phase B reads `run_id` from CLI arg, queries DB for artifact paths.
 
 ---
@@ -241,6 +241,8 @@ Called by both Phase A end and `finalize_gate1()`.
 
 ### finalize_gate1(run_id, decisions, storage_root, conn)
 
+**Module:** `src/ai_dev_system/gate/gate1_bridge.py`
+
 Called by Skill after CONFIRM:
 
 ```python
@@ -261,10 +263,16 @@ def finalize_gate1(run_id, decisions, storage_root, conn) -> tuple[str, str]:
     run_repo = RunRepo(conn)
     config = Config(storage_root=storage_root)
 
+    # Read debate_report_id for artifact lineage
+    run_row = conn.execute(
+        "SELECT current_artifacts FROM runs WHERE run_id = %s", (run_id,)
+    ).fetchone()
+    debate_report_id = run_row["current_artifacts"]["debate_report_id"]
+
     # Artifact 1: APPROVED_ANSWERS
     # promote_output() requires a RUNNING task_run row (promotion guard Step 7b)
     task_run_aa = task_run_repo.create_sync(run_id, task_type="gate1_approved_answers")
-    task_run_aa["input_artifact_ids"] = []   # debate_report_id should be included in impl
+    task_run_aa["input_artifact_ids"] = [debate_report_id]
     event_repo.insert(run_id, "TASK_STARTED", "gate1_skill", task_run_aa["task_run_id"])
     # write approved_answers.json: {"Q1": "answer", ...} to temp_path
     # call promote_output(conn, config, task_run_aa, PromotedOutput(..., "APPROVED_ANSWERS"), temp)
@@ -272,7 +280,7 @@ def finalize_gate1(run_id, decisions, storage_root, conn) -> tuple[str, str]:
 
     # Artifact 2: DECISION_LOG
     task_run_dl = task_run_repo.create_sync(run_id, task_type="gate1_decision_log")
-    task_run_dl["input_artifact_ids"] = []
+    task_run_dl["input_artifact_ids"] = [debate_report_id]
     event_repo.insert(run_id, "TASK_STARTED", "gate1_skill", task_run_dl["task_run_id"])
     # write decision_log.json: {"run_id": ..., "decisions": [...], "confirmed_at": ...}
     # call promote_output(conn, config, task_run_dl, PromotedOutput(..., "DECISION_LOG"), temp)
@@ -417,6 +425,10 @@ def beads_sync(run_id: str, graph: dict, conn) -> None:
 Note: named `run_phase_b_pipeline` to avoid conflict with existing `run_spec_pipeline()` in
 `pipeline.py` (which handles the old normalize→gate1→spec flow and will be superseded).
 
+`conn_factory: Callable[[], psycopg.Connection]` — Phase B is invoked in a separate process
+after the Gate 1 pause, so it receives a factory rather than a live connection. Phase A receives
+a live `conn` because it runs in-process with the CLI caller.
+
 ```python
 # load approved_answers from APPROVED_ANSWERS artifact
 # finalize_spec(approved_answers, ...) → spec_bundle
@@ -430,15 +442,39 @@ Note: named `run_phase_b_pipeline` to avoid conflict with existing `run_spec_pip
 
 ## New Artifact Types Summary
 
+New types added to `artifact_type` enum (require migration):
+
 | Type | Key in current_artifacts | Phase |
 |------|--------------------------|-------|
 | `DEBATE_REPORT` | `debate_report_id` | A |
 | `APPROVED_ANSWERS` | `approved_answers_id` | Gate 1 |
 | `DECISION_LOG` | `decision_log_id` | Gate 1 |
 
-Existing artifact types (`INITIAL_BRIEF`, `APPROVED_BRIEF`, `SPEC_BUNDLE`, `TASK_GRAPH_GENERATED`,
-`TASK_GRAPH_APPROVED`) remain unchanged. `APPROVED_BRIEF` is superseded by `APPROVED_ANSWERS`
-as the primary brief artifact — the existing field is kept for backward compatibility.
+Note: `DEBATE_REPORT`, `APPROVED_ANSWERS`, and `DECISION_LOG` are already present in
+`control-layer-schema.sql`. No migration needed for these types if deploying fresh.
+
+**`APPROVED_BRIEF` retirement:** The canonical schema (`control-layer-schema.sql`) does NOT
+include `APPROVED_BRIEF` in `artifact_type`. This type existed only in the worktree implementation
+(pre-spec). In the new design it is fully replaced by `APPROVED_ANSWERS`. The field
+`approved_brief_id` in `runs.current_artifacts` is kept as `null` for backward compatibility
+but no new promotions to `APPROVED_BRIEF` will occur.
+
+Existing types that remain active: `INITIAL_BRIEF`, `SPEC_BUNDLE`, `TASK_GRAPH_GENERATED`,
+`TASK_GRAPH_APPROVED`.
+
+---
+
+## New Event Types (Schema Migration Required)
+
+Two event types used in this spec are not yet in the `event_type` enum:
+
+```sql
+-- Add to migration script (v3-debate-engine.sql):
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'RULES_APPLIED';
+ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'BEADS_SYNC_WARNING';
+```
+
+All other event types used (`TASK_STARTED`, `ARTIFACT_CREATED`, `TASK_COMPLETED`) already exist.
 
 ---
 
