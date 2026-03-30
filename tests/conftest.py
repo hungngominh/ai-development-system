@@ -22,6 +22,12 @@ def config():
 def conn(config):
     """One connection per test. Everything is rolled back after, even if test raises."""
     c = psycopg.connect(config.database_url, autocommit=False, row_factory=psycopg.rows.dict_row)
+    # Return UUID columns as plain strings so tests can compare with str(uuid.uuid4())
+    from psycopg.adapt import Loader
+    class UUIDTextLoader(Loader):
+        def load(self, data):
+            return data.tobytes().decode() if hasattr(data, "tobytes") else data.decode()
+    c.adapters.register_loader("uuid", UUIDTextLoader)
     try:
         c.execute("BEGIN")
         yield c
