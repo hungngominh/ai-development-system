@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import uuid
@@ -51,9 +52,12 @@ class TestArgumentValidation:
     """Test argument validation via subprocess (giữ đúng exit code behaviour)."""
 
     def _run(self, args: list[str]) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env["AI_DEV_STUB_LLM"] = "1"
         return subprocess.run(
             [sys.executable, "-m", "ai_dev_system.cli.start_project"] + args,
             capture_output=True, text=True,
+            env=env,
         )
 
     def test_missing_idea_exits_1(self):
@@ -135,3 +139,7 @@ class TestCountQuestions:
         total, esc, res, opt = _count_questions(results)
         assert total == esc + res + opt
         assert total == 5 and esc == 2 and res == 2 and opt == 1
+
+    def test_empty_results(self):
+        total, esc, res, opt = _count_questions([])
+        assert total == 0 and esc == 0 and res == 0 and opt == 0

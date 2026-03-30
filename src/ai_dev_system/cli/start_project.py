@@ -101,12 +101,18 @@ def main(argv=None) -> int:
         print(f"DB connection failed: {exc}", file=sys.stderr)
         return 1
 
+    # Config guard — before progress print
+    try:
+        llm_client = _make_llm_client()
+    except RuntimeError as exc:
+        print(f"LLM configuration error: {exc}", file=sys.stderr)
+        return 1
+
     # Progress
     print("[Phase 1a/1b] Running debate pipeline (normalize → questions → debate)...", file=sys.stderr)
     print("             This may take 2-5 minutes.", file=sys.stderr)
 
     try:
-        llm_client = _make_llm_client()
         result = run_debate_pipeline(
             raw_idea=full_idea,
             config=config,
@@ -114,25 +120,19 @@ def main(argv=None) -> int:
             project_id=project_id,
             llm_client=llm_client,
         )
+        total, escalated, resolved, optional = _count_questions(result.debate_report.results)
+        print("[Done]     DEBATE_REPORT promoted. Status: PAUSED_AT_GATE_1", file=sys.stderr)
     except Exception as exc:
-        print(f"LLM API error: {exc}", file=sys.stderr)
+        print(f"Pipeline error: {exc}", file=sys.stderr)
         return 1
     finally:
         conn.close()
-
-    # Count question outcomes
-    total, escalated, resolved, optional = _count_questions(result.debate_report.results)
-
-    print(
-        f"[Done]     DEBATE_REPORT promoted. Status: PAUSED_AT_GATE_1",
-        file=sys.stderr,
-    )
 
     # JSON output to stdout
     output = {
         "run_id": result.run_id,
         "project_id": project_id,
-        "project_name": slug,
+        "project_slug": slug,
         "status": "PAUSED_AT_GATE_1",
         "questions_count": total,
         "escalated_count": escalated,
