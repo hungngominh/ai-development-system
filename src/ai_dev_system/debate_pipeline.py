@@ -191,6 +191,19 @@ def run_phase_b_pipeline(
     if agent is not None:
         execution_result = run_execution(run_id, graph_artifact_id, config, agent)
 
+        # Step 6: Phase V — Verification (only if execution succeeded)
+        # Terminal states per runner.py: {"COMPLETED","FAILED","ABORTED","PAUSED_FOR_DECISION"}.
+        # "SUCCESS" is not a run_status value; COMPLETED is the success terminal.
+        if execution_result.status == "COMPLETED":
+            conn.execute(
+                "UPDATE runs SET status = 'RUNNING_PHASE_V', last_activity_at = now() "
+                "WHERE run_id = %s AND status = 'COMPLETED'",
+                (run_id,),
+            )
+            if llm_client is not None:
+                from ai_dev_system.verification.pipeline import run_phase_v_pipeline
+                run_phase_v_pipeline(run_id, spec_artifact_id, config, conn, llm_client)
+
     return PhaseBResult(
         run_id=run_id,
         graph_artifact_id=graph_artifact_id,
