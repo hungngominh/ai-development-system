@@ -98,7 +98,26 @@ OPENAI_API_KEY=sk-...
 
 ---
 
-## 4. Khởi tạo Database
+## 4. Cấu hình Claude Code Skills
+
+Skills (`/start-project`, `/review-debate`, `/review-verification`) cần nằm trong `.claude/commands/` để Claude Code nhận ra.
+
+Đã có sẵn trong repo — chạy một lần:
+
+```bash
+mkdir -p .claude/commands
+cp skills/start-project.md .claude/commands/
+cp skills/review-debate.md .claude/commands/
+cp skills/review-verification.md .claude/commands/
+```
+
+Sau đó mở project trong Claude Code, gõ `/` sẽ thấy 3 commands xuất hiện.
+
+> **Lưu ý:** `.claude/commands/` đã có trong `.gitignore` của Claude Code theo mặc định — nếu muốn commit vào repo thì kiểm tra lại `.gitignore`.
+
+---
+
+## 5. Khởi tạo Database
 
 Chạy migrations theo thứ tự. Nếu không có `psql`, dùng Python:
 
@@ -130,7 +149,7 @@ psql $DATABASE_URL -f docs/schema/migrations/v4-verification.sql
 
 ---
 
-## 5. Verify cài đặt
+## 6. Verify cài đặt
 
 ```bash
 # Unit tests (không cần DATABASE_URL)
@@ -145,7 +164,7 @@ Kết quả mong đợi: `202 passed` (unit) và `60 passed` (integration).
 
 ---
 
-## 6. Sử dụng — Luồng 3 bước
+## 7. Sử dụng — Luồng 3 bước
 
 ### Bước 1: `/start-project`
 
@@ -206,7 +225,7 @@ Nếu tất cả pass → run status = `COMPLETED`.
 
 ---
 
-## 7. Stub mode (không tốn API credit)
+## 8. Stub mode (không tốn API credit)
 
 Thêm vào `.env`:
 
