@@ -152,6 +152,20 @@ class TestRealLLMClientComplete:
             ],
         )
 
+    def test_complete_openai_null_content(self, mocker):
+        mock_openai_cls = mocker.patch("ai_dev_system.llm_factory.openai.OpenAI")
+        mock_client = mock_openai_cls.return_value
+
+        mock_response = mocker.MagicMock()
+        mock_response.choices[0].message.content = None
+        mock_response.choices[0].finish_reason = "content_filter"
+        mock_client.chat.completions.create.return_value = mock_response
+
+        llm = RealLLMClient(_fake_config(provider="openai"))
+
+        with pytest.raises(ValueError, match="null content"):
+            llm.complete("sys prompt", "user prompt")
+
     def test_complete_propagates_exception(self, mocker):
         mock_anthropic_cls = mocker.patch("ai_dev_system.llm_factory.anthropic.Anthropic")
         mock_client = mock_anthropic_cls.return_value

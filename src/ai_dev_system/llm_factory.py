@@ -110,7 +110,10 @@ class RealLLMClient:
                     {"role": "user", "content": user},
                 ],
             )
-            return response.choices[0].message.content
+            content = response.choices[0].message.content
+            if content is None:
+                raise ValueError(f"OpenAI returned null content (finish_reason={response.choices[0].finish_reason!r})")
+            return content
 
     # --- VerificationLLMClient protocol ---
 
@@ -149,8 +152,8 @@ class RealLLMClient:
             raise ValueError(
                 f"Invalid verdict '{verdict}' for criterion {criterion_id}"
             )
-        confidence = max(0.0, min(1.0, float(parsed["confidence"])))
-        reasoning = str(parsed["reasoning"])
+        confidence = max(0.0, min(1.0, float(parsed.get("confidence", 0.5))))
+        reasoning = str(parsed.get("reasoning", ""))
         return (verdict, confidence, reasoning)
 
 
