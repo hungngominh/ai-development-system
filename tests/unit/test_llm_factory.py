@@ -19,6 +19,9 @@ _ALL_LLM_ENV_VARS = (
     "LLM_MODEL",
     "ANTHROPIC_API_KEY",
     "OPENAI_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+    "AZURE_OPENAI_API_VERSION",
 )
 
 
@@ -79,7 +82,52 @@ class TestLLMConfigFromEnv:
         monkeypatch.setenv("LLM_MODEL", "any-model")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
 
-        with pytest.raises(ValueError, match="'anthropic' or 'openai'"):
+        with pytest.raises(ValueError, match="'anthropic', 'openai', or 'azure'"):
+            LLMConfig.from_env()
+
+    def test_from_env_azure(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        monkeypatch.setenv("LLM_PROVIDER", "azure")
+        monkeypatch.setenv("LLM_MODEL", "my-gpt4o-deployment")
+        monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+        monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://my-resource.openai.azure.com/")
+        monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2024-05-01-preview")
+
+        config = LLMConfig.from_env()
+
+        assert config.provider == "azure"
+        assert config.model == "my-gpt4o-deployment"
+        assert config.api_key == "az-key"
+        assert config.azure_endpoint == "https://my-resource.openai.azure.com/"
+        assert config.api_version == "2024-05-01-preview"
+
+    def test_from_env_azure_default_api_version(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        monkeypatch.setenv("LLM_PROVIDER", "azure")
+        monkeypatch.setenv("LLM_MODEL", "my-gpt4o-deployment")
+        monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+        monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://my-resource.openai.azure.com/")
+
+        config = LLMConfig.from_env()
+
+        assert config.api_version == "2024-02-01"
+
+    def test_missing_azure_key(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        monkeypatch.setenv("LLM_PROVIDER", "azure")
+        monkeypatch.setenv("LLM_MODEL", "my-gpt4o-deployment")
+        monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://my-resource.openai.azure.com/")
+
+        with pytest.raises(ValueError, match="AZURE_OPENAI_API_KEY"):
+            LLMConfig.from_env()
+
+    def test_missing_azure_endpoint(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        monkeypatch.setenv("LLM_PROVIDER", "azure")
+        monkeypatch.setenv("LLM_MODEL", "my-gpt4o-deployment")
+        monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+
+        with pytest.raises(ValueError, match="AZURE_OPENAI_ENDPOINT"):
             LLMConfig.from_env()
 
     def test_missing_model(self, monkeypatch):
@@ -147,6 +195,38 @@ class TestRealLLMClientComplete:
         assert result == "OpenAI says hello"
         mock_client.chat.completions.create.assert_called_once_with(
             model="test-model",
+            messages=[
+                {"role": "system", "content": "sys prompt"},
+                {"role": "user", "content": "user prompt"},
+            ],
+        )
+
+    def test_complete_azure(self, mocker):
+        mock_azure_cls = mocker.patch("ai_dev_system.llm_factory.openai.AzureOpenAI")
+        mock_client = mock_azure_cls.return_value
+
+        mock_response = mocker.MagicMock()
+        mock_response.choices[0].message.content = "Azure says hello"
+        mock_client.chat.completions.create.return_value = mock_response
+
+        config = LLMConfig(
+            provider="azure",
+            model="my-gpt4o-deployment",
+            api_key="az-key",
+            azure_endpoint="https://my-resource.openai.azure.com/",
+            api_version="2024-02-01",
+        )
+        llm = RealLLMClient(config)
+        result = llm.complete("sys prompt", "user prompt")
+
+        assert result == "Azure says hello"
+        mock_azure_cls.assert_called_once_with(
+            api_key="az-key",
+            azure_endpoint="https://my-resource.openai.azure.com/",
+            api_version="2024-02-01",
+        )
+        mock_client.chat.completions.create.assert_called_once_with(
+            model="my-gpt4o-deployment",
             messages=[
                 {"role": "system", "content": "sys prompt"},
                 {"role": "user", "content": "user prompt"},

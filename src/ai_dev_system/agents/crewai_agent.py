@@ -10,10 +10,19 @@ from ai_dev_system.agents.base import AgentResult, PromotedOutput
 class CrewAIAgent:
     """Production agent that delegates task execution to a CrewAI crew."""
 
-    def __init__(self, llm_model: str, llm_api_key: str, verbose: bool = False) -> None:
+    def __init__(
+        self,
+        llm_model: str,
+        llm_api_key: str,
+        verbose: bool = False,
+        llm_base_url: str | None = None,
+        llm_api_version: str | None = None,
+    ) -> None:
         self._llm_model = llm_model  # LiteLLM-style, e.g. "anthropic/claude-opus-4-5"
         self._llm_api_key = llm_api_key
         self._verbose = verbose
+        self._llm_base_url = llm_base_url
+        self._llm_api_version = llm_api_version
 
     def run(
         self,
@@ -66,7 +75,12 @@ class CrewAIAgent:
         )
 
         # Step 5: create LLM object
-        llm = crewai.LLM(model=self._llm_model, api_key=self._llm_api_key)
+        llm_kwargs: dict = {"model": self._llm_model, "api_key": self._llm_api_key}
+        if self._llm_base_url:
+            llm_kwargs["base_url"] = self._llm_base_url
+        if self._llm_api_version:
+            llm_kwargs["api_version"] = self._llm_api_version
+        llm = crewai.LLM(**llm_kwargs)
 
         # Step 6: create CrewAI Agent objects
         coder_backstory = "Expert software developer who writes clean, working code and delivers files to the specified output directory."
@@ -144,16 +158,34 @@ def make_crewai_agent() -> CrewAIAgent:
     """Factory that builds a CrewAIAgent from environment variables."""
     provider = os.environ.get("LLM_PROVIDER", "")
     model = os.environ.get("LLM_MODEL", "")
-    if not provider or provider not in ("anthropic", "openai"):
-        raise RuntimeError("LLM_PROVIDER must be 'anthropic' or 'openai'")
+    if not provider or provider not in ("anthropic", "openai", "azure"):
+        raise RuntimeError("LLM_PROVIDER must be 'anthropic', 'openai', or 'azure'")
     if not model:
         raise RuntimeError("LLM_MODEL is required")
+
     if provider == "anthropic":
         key = os.environ.get("ANTHROPIC_API_KEY", "")
-        litellm_model = f"anthropic/{model}"
-    else:
+        if not key:
+            raise RuntimeError("ANTHROPIC_API_KEY is required")
+        return CrewAIAgent(llm_model=f"anthropic/{model}", llm_api_key=key)
+
+    elif provider == "openai":
         key = os.environ.get("OPENAI_API_KEY", "")
-        litellm_model = model
-    if not key:
-        raise RuntimeError(f"{provider.upper()}_API_KEY is required")
-    return CrewAIAgent(llm_model=litellm_model, llm_api_key=key)
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY is required")
+        return CrewAIAgent(llm_model=model, llm_api_key=key)
+
+    else:  # azure
+        key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+        if not key:
+            raise RuntimeError("AZURE_OPENAI_API_KEY is required")
+        endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
+        if not endpoint:
+            raise RuntimeError("AZURE_OPENAI_ENDPOINT is required")
+        api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
+        return CrewAIAgent(
+            llm_model=f"azure/{model}",
+            llm_api_key=key,
+            llm_base_url=endpoint,
+            llm_api_version=api_version,
+        )

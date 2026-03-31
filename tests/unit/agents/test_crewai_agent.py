@@ -257,6 +257,58 @@ def test_make_crewai_agent_missing_key(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# test_make_crewai_agent_azure
+# ---------------------------------------------------------------------------
+
+def test_make_crewai_agent_azure(monkeypatch):
+    """LLM_PROVIDER=azure builds agent with 'azure/<model>' litellm string."""
+    monkeypatch.setenv("LLM_PROVIDER", "azure")
+    monkeypatch.setenv("LLM_MODEL", "my-gpt4o-deployment")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://my-resource.openai.azure.com/")
+    monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
+
+    agent = make_crewai_agent()
+
+    assert isinstance(agent, CrewAIAgent)
+    assert agent._llm_model == "azure/my-gpt4o-deployment"
+    assert agent._llm_api_key == "az-key"
+    assert agent._llm_base_url == "https://my-resource.openai.azure.com/"
+    assert agent._llm_api_version == "2024-02-01"
+
+
+# ---------------------------------------------------------------------------
+# test_make_crewai_agent_azure_missing_endpoint
+# ---------------------------------------------------------------------------
+
+def test_make_crewai_agent_azure_missing_endpoint(monkeypatch):
+    """LLM_PROVIDER=azure without AZURE_OPENAI_ENDPOINT raises RuntimeError."""
+    monkeypatch.setenv("LLM_PROVIDER", "azure")
+    monkeypatch.setenv("LLM_MODEL", "my-gpt4o-deployment")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+    monkeypatch.delenv("AZURE_OPENAI_ENDPOINT", raising=False)
+
+    with pytest.raises(RuntimeError, match="AZURE_OPENAI_ENDPOINT"):
+        make_crewai_agent()
+
+
+# ---------------------------------------------------------------------------
+# test_make_crewai_agent_azure_default_api_version
+# ---------------------------------------------------------------------------
+
+def test_make_crewai_agent_azure_default_api_version(monkeypatch):
+    """AZURE_OPENAI_API_VERSION defaults to '2024-02-01' when not set."""
+    monkeypatch.setenv("LLM_PROVIDER", "azure")
+    monkeypatch.setenv("LLM_MODEL", "my-gpt4o-deployment")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "az-key")
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://my-resource.openai.azure.com/")
+    monkeypatch.delenv("AZURE_OPENAI_API_VERSION", raising=False)
+
+    agent = make_crewai_agent()
+
+    assert agent._llm_api_version == "2024-02-01"
+
+# ---------------------------------------------------------------------------
 # test_run_injects_file_rules_into_backstory
 # ---------------------------------------------------------------------------
 

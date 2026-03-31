@@ -41,20 +41,22 @@ Respond ONLY with a JSON object in this exact format:
 
 @dataclass
 class LLMConfig:
-    provider: str  # "anthropic" or "openai"
-    model: str     # e.g. "claude-opus-4-5"
-    api_key: str   # the appropriate API key
+    provider: str  # "anthropic", "openai", or "azure"
+    model: str     # e.g. "claude-opus-4-5" / "gpt-4o" / "my-deployment-name"
+    api_key: str
+    azure_endpoint: str | None = None   # required when provider="azure"
+    api_version: str | None = None      # required when provider="azure"
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
         # --- provider ---
         provider_raw = os.environ.get("LLM_PROVIDER")
         if provider_raw is None:
-            raise ValueError("LLM_PROVIDER is required (set to 'anthropic' or 'openai')")
+            raise ValueError("LLM_PROVIDER is required (set to 'anthropic', 'openai', or 'azure')")
         provider = provider_raw.strip()
-        if provider not in ("anthropic", "openai"):
+        if provider not in ("anthropic", "openai", "azure"):
             raise ValueError(
-                f"LLM_PROVIDER must be 'anthropic' or 'openai', got: {provider}"
+                f"LLM_PROVIDER must be 'anthropic', 'openai', or 'azure', got: {provider}"
             )
 
         # --- model ---
@@ -62,21 +64,42 @@ class LLMConfig:
         if not model:
             raise ValueError("LLM_MODEL is required")
 
-        # --- api key ---
+        # --- api key + provider-specific config ---
         if provider == "anthropic":
             key = os.environ.get("ANTHROPIC_API_KEY")
             if not key:
                 raise ValueError(
                     "ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic"
                 )
-        else:  # openai
+            return cls(provider=provider, model=model, api_key=key)
+
+        elif provider == "openai":
             key = os.environ.get("OPENAI_API_KEY")
             if not key:
                 raise ValueError(
                     "OPENAI_API_KEY is required when LLM_PROVIDER=openai"
                 )
+            return cls(provider=provider, model=model, api_key=key)
 
-        return cls(provider=provider, model=model, api_key=key)
+        else:  # azure
+            key = os.environ.get("AZURE_OPENAI_API_KEY")
+            if not key:
+                raise ValueError(
+                    "AZURE_OPENAI_API_KEY is required when LLM_PROVIDER=azure"
+                )
+            endpoint = os.environ.get("AZURE_OPENAI_ENDPOINT")
+            if not endpoint:
+                raise ValueError(
+                    "AZURE_OPENAI_ENDPOINT is required when LLM_PROVIDER=azure"
+                )
+            api_version = os.environ.get("AZURE_OPENAI_API_VERSION", "2024-02-01")
+            return cls(
+                provider=provider,
+                model=model,
+                api_key=key,
+                azure_endpoint=endpoint,
+                api_version=api_version,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +111,12 @@ class RealLLMClient:
         self._config = config
         if config.provider == "anthropic":
             self._client = anthropic.Anthropic(api_key=config.api_key)
+        elif config.provider == "azure":
+            self._client = openai.AzureOpenAI(
+                api_key=config.api_key,
+                azure_endpoint=config.azure_endpoint,
+                api_version=config.api_version,
+            )
         else:  # openai
             self._client = openai.OpenAI(api_key=config.api_key)
 
@@ -102,7 +131,7 @@ class RealLLMClient:
                 messages=[{"role": "user", "content": user}],
             )
             return response.content[0].text
-        else:  # openai
+        else:  # openai or azure (same SDK interface)
             response = self._client.chat.completions.create(
                 model=self._config.model,
                 messages=[

@@ -60,15 +60,12 @@ py -3.12 -m pip install -e ".[dev]"
 
 ## 3. Cấu hình `.env`
 
-Tạo file `.env` ở root project. Chọn **một trong hai** provider:
+Tạo file `.env` ở root project. Chọn **một trong ba** provider:
 
 ### Dùng Anthropic
 
 ```env
 DATABASE_URL=postgresql://user:password@host/dbname
-
-# Windows: dùng đường dẫn Windows, ví dụ C:/ai-dev-storage
-# Linux/Mac: /tmp/ai-dev-storage
 STORAGE_ROOT=C:/ai-dev-storage
 
 LLM_PROVIDER=anthropic
@@ -78,11 +75,10 @@ ANTHROPIC_API_KEY=sk-ant-...
 # AI_DEV_STUB_LLM=1
 ```
 
-### Dùng OpenAI (chỉ có OpenAI key)
+### Dùng OpenAI
 
 ```env
 DATABASE_URL=postgresql://user:password@host/dbname
-
 STORAGE_ROOT=C:/ai-dev-storage
 
 LLM_PROVIDER=openai
@@ -91,6 +87,27 @@ OPENAI_API_KEY=sk-...
 
 # AI_DEV_STUB_LLM=1
 ```
+
+### Dùng Azure OpenAI
+
+```env
+DATABASE_URL=postgresql://user:password@host/dbname
+STORAGE_ROOT=C:/ai-dev-storage
+
+LLM_PROVIDER=azure
+LLM_MODEL=my-gpt4o-deployment        # tên deployment (không phải tên model)
+AZURE_OPENAI_API_KEY=...
+AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/
+AZURE_OPENAI_API_VERSION=2024-02-01  # optional, default: 2024-02-01
+
+# AI_DEV_STUB_LLM=1
+```
+
+> **Lưu ý Azure:** `LLM_MODEL` là **deployment name** bạn đặt khi deploy model trong Azure Portal, không phải tên model gốc (vd: deployment name `my-gpt4o-deployment` deploy model `gpt-4o`).
+
+> **Chỉ cần set key của provider đang dùng** — các key còn lại bỏ trống hoặc không có cũng không sao.
+
+### Các model được khuyến nghị
 
 > **Lưu ý:** Không cần set key của provider kia. Nếu `LLM_PROVIDER=openai` thì `ANTHROPIC_API_KEY` bỏ trống hoặc không có cũng không sao.
 
@@ -102,6 +119,7 @@ OPENAI_API_KEY=sk-...
 | Anthropic | `claude-sonnet-4-6` | Cân bằng tốt |
 | OpenAI | `gpt-4o` | Mặc định cho OpenAI |
 | OpenAI | `gpt-4o-mini` | Nhanh hơn, rẻ hơn |
+| Azure | *(deployment name)* | Tùy theo deployment bạn tạo trong Azure Portal |
 
 ---
 
