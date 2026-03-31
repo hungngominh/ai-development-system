@@ -52,11 +52,13 @@ Print:
 Then run the following bash command (blocking — wait for it to finish):
 
 ```bash
-python -m ai_dev_system.cli.start_project \
+ai-dev start \
   --project-name '<project_name_escaped>' \
   --idea '<idea_escaped>' \
   --constraints '<constraints_escaped>'
 ```
+
+> **Fallback:** If `ai-dev` is not in PATH, use `python -m ai_dev_system.cli.start_project` with the same arguments.
 
 Stderr from the script will appear in the terminal in real-time. Do not suppress it.
 
