@@ -254,3 +254,43 @@ def test_make_crewai_agent_missing_key(monkeypatch):
 
     with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
         make_crewai_agent()
+
+
+# ---------------------------------------------------------------------------
+# test_run_injects_file_rules_into_backstory
+# ---------------------------------------------------------------------------
+
+def test_run_injects_file_rules_into_backstory(tmp_path, mocker):
+    """file_rules are appended to the coder agent's backstory."""
+    _patch_crewai_success(mocker)
+
+    mock_agent_cls = mocker.patch("ai_dev_system.agents.crewai_agent.crewai.Agent")
+
+    agent = _make_agent()
+    agent.run(
+        task_id="T-rules",
+        output_path=str(tmp_path),
+        file_rules=["no print statements", "use type hints"],
+    )
+
+    # First Agent call is the coder; check backstory kwarg
+    coder_kwargs = mock_agent_cls.call_args_list[0].kwargs
+    assert "no print statements" in coder_kwargs["backstory"]
+    assert "use type hints" in coder_kwargs["backstory"]
+
+
+# ---------------------------------------------------------------------------
+# test_run_no_file_rules_keeps_default_backstory
+# ---------------------------------------------------------------------------
+
+def test_run_no_file_rules_keeps_default_backstory(tmp_path, mocker):
+    """When file_rules is empty, backstory is the default string without extra lines."""
+    _patch_crewai_success(mocker)
+
+    mock_agent_cls = mocker.patch("ai_dev_system.agents.crewai_agent.crewai.Agent")
+
+    agent = _make_agent()
+    agent.run(task_id="T-norules", output_path=str(tmp_path))
+
+    coder_kwargs = mock_agent_cls.call_args_list[0].kwargs
+    assert "Apply these rules" not in coder_kwargs["backstory"]

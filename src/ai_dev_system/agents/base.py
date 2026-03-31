@@ -28,5 +28,6 @@ class Agent(Protocol):
         promoted_outputs=(),
         context: Optional[dict] = None,
         timeout_s: float = 3600.0,
+        file_rules: list = (),
     ) -> AgentResult:
         ...

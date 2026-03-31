@@ -14,6 +14,7 @@ class StubAgent:
         promoted_outputs=(),
         context: Optional[dict] = None,
         timeout_s: float = 3600.0,
+        file_rules: list = (),
     ) -> AgentResult:
         os.makedirs(output_path, exist_ok=True)
         promoted_list = list(promoted_outputs)

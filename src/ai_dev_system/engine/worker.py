@@ -180,6 +180,7 @@ def worker_loop(
                         promoted_outputs=task["promoted_outputs_parsed"],
                         context=copy.deepcopy(context),
                         timeout_s=getattr(config, "task_timeout_s", 3600.0),
+                        file_rules=rule_match.file_rules,
                     )
             except Exception as e:
                 result = _make_error_result(task, str(e))

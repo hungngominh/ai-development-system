@@ -22,6 +22,7 @@ class CrewAIAgent:
         promoted_outputs=(),
         context: Optional[dict] = None,
         timeout_s: float = 3600.0,
+        file_rules: list = (),
     ) -> AgentResult:
         # Step 1: ensure output directory exists
         os.makedirs(output_path, exist_ok=True)
@@ -68,10 +69,13 @@ class CrewAIAgent:
         llm = crewai.LLM(model=self._llm_model, api_key=self._llm_api_key)
 
         # Step 6: create CrewAI Agent objects
+        coder_backstory = "Expert software developer who writes clean, working code and delivers files to the specified output directory."
+        if file_rules:
+            coder_backstory += "\n\nApply these rules:\n" + "\n".join(f"- {r}" for r in file_rules)
         coder = crewai.Agent(
             role="Software Engineer",
             goal=f"Implement the development task: {task_description[:200]}",
-            backstory="Expert software developer who writes clean, working code and delivers files to the specified output directory.",
+            backstory=coder_backstory,
             llm=llm,
             allow_delegation=False,
             verbose=self._verbose,
