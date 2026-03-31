@@ -2,275 +2,122 @@
 
 ---
 
-## 1. Prerequisites
-
-| Yêu cầu | Phiên bản | Ghi chú |
-|---|---|---|
-| Python | **3.12 hoặc 3.13** | ⚠️ Python 3.14 chưa được hỗ trợ (xem bên dưới) |
-| PostgreSQL | 15+ | Local hoặc remote |
-| Claude Code CLI | latest | `claude` trong PATH |
-| API key | Anthropic hoặc OpenAI | |
-
-### ⚠️ Lỗi thường gặp: Python 3.14 không tương thích
-
-```
-ERROR: No matching distribution found for crewai>=0.51
-```
-
-**Nguyên nhân:** `crewai>=0.51` chỉ hỗ trợ Python `>=3.10,<3.14`. Python 3.14 quá mới.
-
-**Fix:** Cài Python 3.12 từ https://python.org/downloads/ rồi dùng:
+## Quick Start (2 bước)
 
 ```bash
-py -3.12 -m pip install -e ".[dev]"
+# 1. Cài đặt (cần Python 3.12 hoặc 3.13 — Python 3.14 chưa hỗ trợ)
+pip install -e ".[dev]"
+
+# 2. Setup tương tác — nhập DB, API key, tự chạy migration và cài skills
+ai-dev setup
 ```
+
+Xong. Mở Claude Code ở bất kỳ thư mục nào và gõ `/start-project`.
 
 ---
 
-## 2. Cài đặt
+## Chi tiết từng bước
+
+### 1. Cài đặt
 
 ```bash
 git clone <repo>
 cd ai-development-system
-
-# Cài dependencies (dùng Python 3.12)
-py -3.12 -m pip install -e ".[dev]"
-```
-
-### ⚠️ Lỗi thường gặp: `pip` không có trong PATH
-
-```
-'pip' is not recognized as an internal or external command
-```
-
-**Fix:** Thay `pip` bằng `python -m pip` (hoặc `py -3.12 -m pip`):
-
-```bash
-# Thay vì:
 pip install -e ".[dev]"
-
-# Dùng:
-python -m pip install -e ".[dev]"
-
-# Hoặc nếu có nhiều Python:
-py -3.12 -m pip install -e ".[dev]"
 ```
 
----
+> **Python 3.14?** `crewai>=0.51` chưa hỗ trợ. Dùng Python 3.12: `py -3.12 -m pip install -e ".[dev]"`
 
-## 3. Cấu hình `.env`
+> **`pip` not found?** Dùng: `python -m pip install -e ".[dev]"`
 
-Tạo file `.env` ở root project. Chọn **một trong ba** provider:
-
-### Dùng Anthropic
-
-```env
-DATABASE_URL=postgresql://user:password@host/dbname
-STORAGE_ROOT=C:/ai-dev-storage
-
-LLM_PROVIDER=anthropic
-LLM_MODEL=claude-opus-4-6
-ANTHROPIC_API_KEY=sk-ant-...
-
-# AI_DEV_STUB_LLM=1
-```
-
-### Dùng OpenAI
-
-```env
-DATABASE_URL=postgresql://user:password@host/dbname
-STORAGE_ROOT=C:/ai-dev-storage
-
-LLM_PROVIDER=openai
-LLM_MODEL=gpt-4o
-OPENAI_API_KEY=sk-...
-
-# AI_DEV_STUB_LLM=1
-```
-
-### Dùng Azure OpenAI
-
-```env
-DATABASE_URL=postgresql://user:password@host/dbname
-STORAGE_ROOT=C:/ai-dev-storage
-
-LLM_PROVIDER=azure
-LLM_MODEL=my-gpt4o-deployment        # tên deployment (không phải tên model)
-AZURE_OPENAI_API_KEY=...
-AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/
-AZURE_OPENAI_API_VERSION=2024-02-01  # optional, default: 2024-02-01
-
-# AI_DEV_STUB_LLM=1
-```
-
-> **Lưu ý Azure:** `LLM_MODEL` là **deployment name** bạn đặt khi deploy model trong Azure Portal, không phải tên model gốc (vd: deployment name `my-gpt4o-deployment` deploy model `gpt-4o`).
-
-> **Chỉ cần set key của provider đang dùng** — các key còn lại bỏ trống hoặc không có cũng không sao.
-
-### Các model được khuyến nghị
-
-> **Lưu ý:** Không cần set key của provider kia. Nếu `LLM_PROVIDER=openai` thì `ANTHROPIC_API_KEY` bỏ trống hoặc không có cũng không sao.
-
-### Các model được khuyến nghị
-
-| Provider | Model | Ghi chú |
-|---|---|---|
-| Anthropic | `claude-opus-4-6` | Mạnh nhất, chậm hơn |
-| Anthropic | `claude-sonnet-4-6` | Cân bằng tốt |
-| OpenAI | `gpt-4o` | Mặc định cho OpenAI |
-| OpenAI | `gpt-4o-mini` | Nhanh hơn, rẻ hơn |
-| Azure | *(deployment name)* | Tùy theo deployment bạn tạo trong Azure Portal |
-
----
-
-## 4. Cấu hình Claude Code Skills
-
-Skills (`/start-project`, `/review-debate`, `/review-verification`) đã có sẵn trong `.claude/commands/` sau khi clone — không cần làm gì thêm.
-
-Mở project trong Claude Code, gõ `/` sẽ thấy 3 commands xuất hiện.
-
----
-
-## 5. Khởi tạo Database
-
-**Load `.env` trước**, sau đó chạy migrations:
+### 2. Setup
 
 ```bash
-# Load env vars (Linux/Mac)
-export $(cat .env | grep -v '^#' | xargs)
-
-# Load env vars (Windows PowerShell)
-Get-Content .env | Where-Object { $_ -notmatch '^#' -and $_ -ne '' } | ForEach-Object { $k,$v = $_ -split '=',2; [System.Environment]::SetEnvironmentVariable($k,$v) }
+ai-dev setup
 ```
 
-Chạy migrations — nếu không có `psql`, dùng Python:
+Wizard hỏi lần lượt:
+
+```
+=== AI Dev System Setup ===
+
+DATABASE_URL (postgresql://user:pass@host/db): postgresql://...
+STORAGE_ROOT [~/.ai-dev-system/storage]:
+LLM Provider:
+  1. anthropic
+  2. openai
+  3. azure
+Choose [1/2/3]: 2
+LLM_MODEL [gpt-4o]:
+OPENAI_API_KEY: sk-...
+
+Config saved to ~/.ai-dev-system/.env
+Applying database migrations...
+  OK   control-layer-schema.sql
+  OK   v2-execution-runner.sql
+  OK   v3-debate-engine.sql
+  OK   v4-verification.sql
+Installing Claude Code skills...
+  OK   start-project.md
+  OK   review-debate.md
+  OK   review-verification.md
+
+=== Setup complete ===
+```
+
+Config lưu tại `~/.ai-dev-system/.env` — tự động load, không cần export thủ công.
+
+### 3. Chạy lại setup
+
+Chạy `ai-dev setup` bất kỳ lúc nào để thay đổi config — wizard nhớ giá trị cũ.
+
+---
+
+## Sử dụng
+
+### Qua Claude Code (khuyến nghị)
+
+Mở Claude Code ở bất kỳ thư mục nào:
+
+```
+/start-project "Xây forum chia sẻ kiến thức"
+```
+
+Sau đó theo hướng dẫn: `/review-debate` → Gate 2 → `/review-verification`.
+
+### Qua CLI trực tiếp
 
 ```bash
-python - <<'EOF'
-import psycopg, os
-conn = psycopg.connect(os.environ["DATABASE_URL"])
-conn.autocommit = True
-for f in [
-    "docs/schema/control-layer-schema.sql",
-    "docs/schema/migrations/v2-execution-runner.sql",
-    "docs/schema/migrations/v3-debate-engine.sql",
-    "docs/schema/migrations/v4-verification.sql",
-]:
-    conn.execute(open(f).read())
-    print(f"Applied: {f}")
-conn.close()
-EOF
+# Phase 1a: normalize + debate
+ai-dev start --project-name "my-forum" --idea "Xay forum..." --constraints ""
+
+# Phase B: spec → task graph → execution → verification
+ai-dev run --run-id <run_id>
 ```
 
-Hoặc nếu có `psql`:
+---
+
+## LLM Providers
+
+| Provider | Env vars cần thiết |
+|---|---|
+| `anthropic` | `ANTHROPIC_API_KEY` |
+| `openai` | `OPENAI_API_KEY` |
+| `azure` | `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION` |
+
+> **Azure:** `LLM_MODEL` là **deployment name** (tên khi deploy trong Azure Portal), không phải tên model gốc.
+
+---
+
+## Stub mode (không tốn API credit)
+
+Khi setup, chọn "Dung stub LLM? y" — toàn bộ pipeline chạy với LLM giả.
+
+---
+
+## Chạy tests
 
 ```bash
-psql $DATABASE_URL -f docs/schema/control-layer-schema.sql
-psql $DATABASE_URL -f docs/schema/migrations/v2-execution-runner.sql
-psql $DATABASE_URL -f docs/schema/migrations/v3-debate-engine.sql
-psql $DATABASE_URL -f docs/schema/migrations/v4-verification.sql
+python -m pytest tests/unit/ -q          # 212 passed (không cần DB)
+python -m pytest tests/integration/ -q   # 60 passed (cần DB)
 ```
-
----
-
-## 6. Verify cài đặt
-
-```bash
-# Unit tests (không cần DATABASE_URL)
-python -m pytest tests/unit/ -q
-
-# Integration tests (cần DATABASE_URL đã load)
-python -m pytest tests/integration/ -q
-```
-
-Kết quả mong đợi: `204 passed` (unit) và `60 passed` (integration).
-
----
-
-## 7. Sử dụng — Luồng 3 bước
-
-> **Quan trọng:** Mỗi lần dùng, đảm bảo `.env` đã được load vào môi trường shell hiện tại (xem Section 5).
-
-### Bước 1: `/start-project`
-
-```
-/start-project "Xây forum chia sẻ kiến thức nội bộ công ty"
-```
-
-Claude hỏi constraints và tên project, sau đó tự chạy:
-- Normalize ý tưởng → initial brief
-- Sinh câu hỏi (REQUIRED / STRATEGIC / OPTIONAL)
-- AI debate tự động (~2-5 phút)
-
-**Output:**
-```
-✅ Phase A hoàn tất.
-   Run ID    : abc123-...
-   Questions : 8 tổng (1 ESCALATE, 7 RESOLVED)
-
-→ Chạy /review-debate --run-id abc123-... để bắt đầu Gate 1.
-```
-
----
-
-### Bước 2: `/review-debate <run_id>` — Gate 1
-
-```
-/review-debate --run-id abc123-...
-```
-
-Claude dẫn qua 4 states:
-
-1. **PRESENT** — Hiển thị toàn bộ kết quả debate
-2. **COLLECT_FORCED** — Bạn quyết định các câu `ESCALATE_TO_HUMAN`:
-   ```
-   Q6 đồng ý moderator
-   ```
-3. **COLLECT_CONSENSUS** — Confirm các câu AI đã resolved:
-   ```
-   approve all
-   ```
-4. **CONFIRM** — Xem lại tóm tắt, xác nhận
-
-Sau Gate 1, Claude tự động chạy tiếp: build spec bundle → sinh task graph → hiển thị Gate 2.
-
----
-
-### Bước 2b: Gate 2 — Duyệt task graph
-
-Claude hiển thị danh sách tasks và dependencies. Bạn chọn:
-
-- `approve` → tiến hành execution
-- `sửa task X: ...` → chỉnh sửa rồi approve
-- `reject` → sinh lại task graph
-
-Sau khi approve, execution tự chạy (~vài phút tùy số tasks).
-
----
-
-### Bước 3: `/review-verification <run_id>` — Gate 3
-
-Sau khi execution hoàn tất:
-
-```
-/review-verification --run-id abc123-...
-```
-
-Claude hiển thị verification report. Với mỗi FAIL criterion, chọn:
-- `fix` → spawn remediation, chạy lại (tối đa 3 lần)
-- `skip` → bỏ qua criterion này
-- `abort` → dừng toàn bộ run
-
-Nếu tất cả pass → run status = `COMPLETED`.
-
----
-
-## 8. Stub mode (không tốn API credit)
-
-Thêm vào `.env`:
-
-```env
-AI_DEV_STUB_LLM=1
-```
-
-Toàn bộ pipeline chạy với LLM giả — đủ để test flow mà không gọi API thật.

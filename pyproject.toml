@@ -11,13 +11,20 @@ dependencies = [
     "anthropic>=0.25",
     "openai>=1.30",
     "crewai>=0.51",
+    "python-dotenv>=1.0",
 ]
+
+[project.scripts]
+ai-dev = "ai_dev_system.cli.main:main"
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-mock>=3.12"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+ai_dev_system = ["../../skills/*.md", "../../docs/schema/*.sql", "../../docs/schema/migrations/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

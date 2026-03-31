@@ -1,6 +1,16 @@
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
+
+# Auto-load .env from ~/.ai-dev-system/.env (global config)
+_GLOBAL_ENV = Path.home() / ".ai-dev-system" / ".env"
+if _GLOBAL_ENV.exists():
+    load_dotenv(_GLOBAL_ENV)
+# Also load project-local .env if present (overrides global)
+load_dotenv(override=True)
 
 
 def _default_retry_policy() -> dict[str, dict[str, Any]]:
