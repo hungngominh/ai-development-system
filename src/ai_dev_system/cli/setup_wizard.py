@@ -170,8 +170,33 @@ def _install_skills() -> None:
     print("Skills installed. /start-project, /review-debate, /review-verification now work globally.")
 
 
+def _install_package() -> bool:
+    """Install the ai-dev-system package in editable mode."""
+    import subprocess
+
+    repo_root = Path(__file__).resolve().parent.parent.parent.parent
+    print("Installing ai-dev-system package...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "-e", f"{repo_root}[dev]"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print("  OK   package installed")
+        return True
+    else:
+        # Show last 3 lines of error
+        err_lines = result.stderr.strip().splitlines()[-3:]
+        for line in err_lines:
+            print(f"  {line}")
+        print("Package install failed. Check Python version (need 3.12 or 3.13).")
+        return False
+
+
 def run_setup() -> None:
     """Main setup entry point."""
+    # Step 0: Install package itself
+    _install_package()
+
     config = _collect_config()
     _write_env(config)
 
