@@ -57,23 +57,44 @@ py -3.12 -m pip install -e ".[dev]"
 
 ## 3. Cấu hình `.env`
 
-Tạo file `.env` ở root project:
+Tạo file `.env` ở root project. Chọn **một trong hai** provider:
+
+### Dùng Anthropic
 
 ```env
-# Database
 DATABASE_URL=postgresql://user:password@host/dbname
-
-# Storage (nơi lưu artifacts trên disk)
 STORAGE_ROOT=/tmp/ai-dev-storage
 
-# LLM provider: "anthropic" hoặc "openai"
 LLM_PROVIDER=anthropic
 LLM_MODEL=claude-opus-4-6
 ANTHROPIC_API_KEY=sk-ant-...
 
-# Dùng stub LLM để test (không gọi API thật, không tốn credit)
 # AI_DEV_STUB_LLM=1
 ```
+
+### Dùng OpenAI (chỉ có OpenAI key)
+
+```env
+DATABASE_URL=postgresql://user:password@host/dbname
+STORAGE_ROOT=/tmp/ai-dev-storage
+
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o
+OPENAI_API_KEY=sk-...
+
+# AI_DEV_STUB_LLM=1
+```
+
+> **Lưu ý:** Không cần set key của provider kia. Nếu `LLM_PROVIDER=openai` thì `ANTHROPIC_API_KEY` bỏ trống hoặc không có cũng không sao.
+
+### Các model được khuyến nghị
+
+| Provider | Model | Ghi chú |
+|---|---|---|
+| Anthropic | `claude-opus-4-6` | Mạnh nhất, chậm hơn |
+| Anthropic | `claude-sonnet-4-6` | Cân bằng tốt |
+| OpenAI | `gpt-4o` | Mặc định cho OpenAI |
+| OpenAI | `gpt-4o-mini` | Nhanh hơn, rẻ hơn |
 
 ---
 
