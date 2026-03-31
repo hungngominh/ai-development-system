@@ -14,7 +14,7 @@ Implements the final phase of workflow-v2 where Beads provides real-time progres
 beads_sync() → run_execution() → [per-task: BD->>BD] → [end: BD->>U]
 ```
 
-**Core decision:** Self-tracking via events table (DB-only). No dependency on `bd status` JSON format — progress is computed from `TASK_COMPLETED` events written to the existing `events` table after each task.
+**Core decision:** Self-tracking via events table (DB-only). No dependency on `bd status` JSON format — progress is computed from `TASK_COMPLETED` events already written by `worker.py` after each task.
 
 ---
 
@@ -29,8 +29,7 @@ Phase B: ... → beads_sync() → run_execution()
                           │  per-task (BD->>BD):    │
                           │  beads_update_task()    │
                           │  ├─ bd close <task_id>  │
-                          │  ├─ insert TASK_COMPLETED│
-                          │  └─ print_beads_progress │
+                          │  └─ print_beads_progress│
                           └──────────┬─────────────┘
                                      │ (after all tasks)
                           ┌──────────▼─────────────┐
@@ -46,7 +45,7 @@ Phase B: ... → beads_sync() → run_execution()
 | File | Responsibility |
 |------|----------------|
 | `src/ai_dev_system/beads/report.py` | `beads_update_task()`, `print_beads_progress()`, `write_beads_final_artifact()`, `BeadsFinalReport` dataclass |
-| `docs/schema/migrations/v4-beads-report.sql` | Add `TASK_COMPLETED`, `BEADS_SYNC_START` event types |
+| `docs/schema/migrations/v5-beads-report.sql` | Add `BEADS_SYNC_START` event type; add `BEADS_FINAL_REPORT` artifact type |
 | `tests/unit/beads/test_report.py` | Unit tests (subprocess mocked, DB stub) |
 | `tests/integration/test_beads_report.py` | Integration tests (real DB, subprocess mocked) |
 
@@ -55,16 +54,20 @@ Phase B: ... → beads_sync() → run_execution()
 | File | Change |
 |------|--------|
 | `src/ai_dev_system/beads/sync.py` | Insert `BEADS_SYNC_START` event at start of `beads_sync()` |
-| `src/ai_dev_system/engine/worker.py` | Call `beads_update_task()` after each task succeeds; call `write_beads_final_artifact()` after all tasks |
+| `src/ai_dev_system/engine/worker.py` | (1) Add `task_id` to existing `TASK_COMPLETED` payload; (2) call `beads_update_task()` after transaction commits; (3) call `write_beads_final_artifact()` at end of `run_phase_b_pipeline()` |
 
 ---
 
-## Schema Migration (v4)
+## Schema Migration (v5)
 
 ```sql
--- v4-beads-report.sql
-ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'TASK_COMPLETED';
-ALTER TYPE event_type ADD VALUE IF NOT EXISTS 'BEADS_SYNC_START';
+-- v5-beads-report.sql
+-- Adds BEADS_SYNC_START event type and BEADS_FINAL_REPORT artifact type.
+-- Safe to run after v4-verification.sql.
+-- Note: TASK_COMPLETED already exists in control-layer-schema.sql — no-op needed.
+
+ALTER TYPE event_type    ADD VALUE IF NOT EXISTS 'BEADS_SYNC_START';
+ALTER TYPE artifact_type ADD VALUE IF NOT EXISTS 'BEADS_FINAL_REPORT';
 ```
 
 ---
@@ -86,9 +89,26 @@ class BeadsFinalReport:
 
 ---
 
+### Modification to worker.py — add task_id to TASK_COMPLETED payload
+
+`worker.py` already inserts `TASK_COMPLETED` in two places. Both must be updated to include `task_id` in the payload so `write_beads_final_artifact()` can build the timeline:
+
+```python
+# In _execute_task() (existing path, no promoted outputs):
+event_repo.insert(run_id, "TASK_COMPLETED", f"worker:{worker_id}",
+                  task["task_run_id"], {"task_id": task["task_id"]})
+
+# In _promote_for_runner() (existing path):
+EventRepo(conn).insert(run_id, "TASK_COMPLETED", f"worker:{worker_id}",
+                       task_run_id=task["task_run_id"],
+                       payload={"task_id": task["task_id"]})
+```
+
+---
+
 ### beads_update_task(run_id, task_id, conn) — per-task (BD->>BD)
 
-Called by `worker.py` after each task completes successfully.
+Called by `worker_loop()` **outside the task transaction**, immediately after the transaction that calls `_promote_for_runner()` commits. Does NOT insert a `TASK_COMPLETED` event (worker already does this).
 
 ```python
 def beads_update_task(run_id: str, task_id: str, conn) -> None:
@@ -99,37 +119,35 @@ def beads_update_task(run_id: str, task_id: str, conn) -> None:
             capture_output=True
         )
         if result.returncode != 0:
-            logger.warning("beads: close failed for %s: %s", task_id, result.stderr)
+            logger.warning("beads: close failed for %s: %s",
+                           task_id, result.stderr.decode(errors="replace"))
     except FileNotFoundError:
         logger.warning("beads: bd not in PATH, skipping close for %s", task_id)
 
-    # 2. Record completion in events table
-    EventRepo(conn).insert(run_id, "TASK_COMPLETED", "system",
-                           payload={"task_id": task_id})
-
-    # 3. Print real-time progress to terminal
+    # 2. Print real-time progress to terminal
     print_beads_progress(run_id, conn)
 ```
 
 **Error handling:**
-- `bd close` non-zero exit → log warning, continue (non-blocking)
+- `bd close` non-zero exit → decode stderr, log warning, continue (non-blocking)
 - `bd` not in PATH (`FileNotFoundError`) → log warning, continue
 - Never raises — execution must not fail due to reporting
+- Called outside transaction — no rollback risk
 
 ---
 
 ### print_beads_progress(run_id, conn) — terminal output
 
-Computes progress from events table only (no subprocess call):
+Computes progress from events table only (no subprocess call). Uses `occurred_at` (actual column name in events table):
 
 ```python
 def print_beads_progress(run_id: str, conn) -> None:
     rows = conn.execute("""
-        SELECT event_type, payload, created_at
+        SELECT event_type, payload, occurred_at
         FROM events
         WHERE run_id = %s
           AND event_type IN ('TASK_COMPLETED', 'BEADS_SYNC_WARNING')
-        ORDER BY created_at
+        ORDER BY occurred_at
     """, (run_id,)).fetchall()
 
     completed = [r for r in rows if r["event_type"] == "TASK_COMPLETED"]
@@ -137,9 +155,10 @@ def print_beads_progress(run_id: str, conn) -> None:
     total = _get_total_tasks(run_id, conn)
 
     warning_str = f"  ⚠️  {len(warnings)} sync warning(s)" if warnings else ""
+    open_count = max(0, total - len(completed))
     print(
         f"[{len(completed)}/{total} tasks done]"
-        f"  open={total - len(completed)}"
+        f"  open={open_count}"
         f"  closed={len(completed)}"
         f"{warning_str}"
     )
@@ -159,23 +178,28 @@ def print_beads_progress(run_id: str, conn) -> None:
 
 ### _get_total_tasks(run_id, conn) — internal helper
 
-Reads `total_tasks` from the `BEADS_SYNC_START` event payload:
+Reads `total_tasks` from the `BEADS_SYNC_START` event payload. Uses `occurred_at`:
 
 ```python
 def _get_total_tasks(run_id: str, conn) -> int:
     row = conn.execute("""
         SELECT payload FROM events
         WHERE run_id = %s AND event_type = 'BEADS_SYNC_START'
-        ORDER BY created_at LIMIT 1
+        ORDER BY occurred_at LIMIT 1
     """, (run_id,)).fetchone()
-    return row["payload"]["total_tasks"] if row else 0
+    if row is None:
+        logger.warning("beads: BEADS_SYNC_START event not found for run %s", run_id)
+        return 0
+    return row["payload"]["total_tasks"]
 ```
+
+**Note on fallback:** If `BEADS_SYNC_START` is missing (e.g. beads_sync skipped), `total=0` and `open=max(0, 0-N)=0`. Output becomes `[N/0 tasks done]  open=0  closed=N` — unusual but non-crashing. Warning is logged.
 
 ---
 
 ### Modification to beads_sync() — BEADS_SYNC_START event
 
-Add at start of `beads_sync()` so `total_tasks` is available for progress tracking:
+Add at start of `beads_sync()` so `_get_total_tasks()` has data before any task completes:
 
 ```python
 def beads_sync(run_id: str, graph: dict, conn) -> None:
@@ -191,18 +215,18 @@ def beads_sync(run_id: str, graph: dict, conn) -> None:
 
 ---
 
-### write_beads_final_artifact(run_id, conn) — final report (BD->>U)
+### write_beads_final_artifact(run_id, storage_root, conn) — final report (BD->>U)
 
-Called once after all tasks complete. Writes `BEADS_FINAL_REPORT` artifact + prints terminal summary.
+Called once in `run_phase_b_pipeline()` after `run_execution()` returns, passing `config.storage_root`. Writes JSON file + prints terminal summary. Uses `occurred_at`:
 
 ```python
 def write_beads_final_artifact(run_id: str, storage_root: str, conn) -> str:
     rows = conn.execute("""
-        SELECT event_type, payload, created_at
+        SELECT event_type, payload, occurred_at
         FROM events
         WHERE run_id = %s
           AND event_type IN ('TASK_COMPLETED', 'BEADS_SYNC_WARNING')
-        ORDER BY created_at
+        ORDER BY occurred_at
     """, (run_id,)).fetchall()
 
     completed_rows = [r for r in rows if r["event_type"] == "TASK_COMPLETED"]
@@ -216,13 +240,13 @@ def write_beads_final_artifact(run_id: str, storage_root: str, conn) -> str:
         sync_warnings=[r["payload"] for r in warning_rows],
         task_timeline=[
             {"task_id": r["payload"]["task_id"],
-             "completed_at": r["created_at"].isoformat()}
+             "completed_at": r["occurred_at"].isoformat()}
             for r in completed_rows
         ],
-        generated_at=datetime.utcnow().isoformat() + "Z",
+        generated_at=datetime.now(timezone.utc).isoformat(),
     )
 
-    # Write JSON artifact
+    # Write JSON file
     artifact_path = Path(storage_root) / run_id / "beads_final_report.json"
     artifact_path.parent.mkdir(parents=True, exist_ok=True)
     artifact_path.write_text(json.dumps(asdict(report), indent=2))
@@ -275,11 +299,20 @@ def _print_final_summary(report: BeadsFinalReport) -> None:
 
 ## New Artifact Type
 
-Added to `artifact_type` enum (requires v4 migration for artifact type if not already covered):
+`BEADS_FINAL_REPORT` added to `artifact_type` enum via v5 migration. The JSON file is written to `<storage_root>/<run_id>/beads_final_report.json`. No `artifacts` table row is inserted in this phase (file-only artifact, consistent with other Phase 5 outputs).
 
-| Type | Key in current_artifacts | Phase |
-|------|--------------------------|-------|
-| `BEADS_FINAL_REPORT` | `beads_final_report_id` | Phase 5 |
+| Type | File path | Phase |
+|------|-----------|-------|
+| `BEADS_FINAL_REPORT` | `<storage_root>/<run_id>/beads_final_report.json` | Phase 5 |
+
+---
+
+## worker.py Integration Points
+
+| Call | Location in worker.py | Notes |
+|------|----------------------|-------|
+| `beads_update_task(run_id, task_id, conn)` | `worker_loop()`, after transaction that calls `_promote_for_runner()` commits | Outside transaction — no rollback risk |
+| `write_beads_final_artifact(run_id, config.storage_root, conn)` | `run_phase_b_pipeline()`, after `run_execution()` returns | Uses `config.storage_root` (already available in Phase B context) |
 
 ---
 
@@ -292,18 +325,21 @@ Added to `artifact_type` enum (requires v4 migration for artifact type if not al
 | `test_print_progress_no_warnings` | `[2/5 tasks done]  open=3  closed=2` — correct format, no warning suffix |
 | `test_print_progress_with_warnings` | Line ends with `⚠️  1 sync warning(s)` |
 | `test_print_progress_zero_completed` | `[0/5 tasks done]` — handles empty state |
-| `test_write_final_report_structure` | `BeadsFinalReport` has correct fields, JSON written to correct path |
-| `test_beads_update_task_logs_warning_on_close_fail` | `bd close` returncode=1 → warning logged, no exception |
+| `test_get_total_tasks_reads_from_sync_start_event` | `_get_total_tasks()` returns value from `BEADS_SYNC_START` payload |
+| `test_get_total_tasks_missing_event_returns_zero` | No `BEADS_SYNC_START` → returns 0, warning logged |
+| `test_write_final_report_total_tasks_from_sync_start` | `BeadsFinalReport.total_tasks` comes from `BEADS_SYNC_START`, not hardcoded |
+| `test_write_final_report_file_written` | JSON written to `<storage_root>/<run_id>/beads_final_report.json` |
+| `test_beads_update_task_logs_warning_on_close_fail` | `bd close` returncode=1 → warning logged with decoded stderr, no exception |
 | `test_beads_update_task_skips_bd_not_found` | `FileNotFoundError` → warning logged, no exception |
 
 ### Integration tests — `tests/integration/test_beads_report.py`
 
 | Test | Verifies |
 |------|----------|
-| `test_full_flow_3_tasks` | 3× `beads_update_task()` → 3 `TASK_COMPLETED` events → final report has `completed_tasks=3` |
+| `test_full_flow_3_tasks` | 3× `beads_update_task()` + 3 existing `TASK_COMPLETED` events → final report has `completed_tasks=3` |
 | `test_sync_warning_surfaces_in_final_report` | Pre-insert `BEADS_SYNC_WARNING` → appears in `sync_warnings` list |
-| `test_final_artifact_written_to_db` | `write_beads_final_artifact()` → file exists at expected path |
-| `test_get_total_tasks_from_sync_start_event` | `_get_total_tasks()` reads correctly from `BEADS_SYNC_START` payload |
+| `test_final_artifact_file_written` | `write_beads_final_artifact()` → file exists at expected path |
+| `test_task_timeline_uses_task_id_from_payload` | Timeline entries have correct `task_id` from `TASK_COMPLETED` payload |
 
 ### Stub pattern (consistent with test_beads_sync.py)
 
@@ -319,10 +355,11 @@ with patch("subprocess.run") as mock_run:
 
 | Failure | Behavior |
 |---------|----------|
-| `bd close` non-zero exit | Log warning, continue execution |
-| `bd` not in PATH | Log warning, continue execution |
-| `BEADS_SYNC_START` event missing | `_get_total_tasks()` returns 0, progress shows `[N/0]` |
-| Artifact write fails | Propagate exception (storage failure = real error) |
+| `bd close` non-zero exit | Decode stderr, log warning, continue (non-blocking) |
+| `bd` not in PATH | Log warning, continue (non-blocking) |
+| `BEADS_SYNC_START` event missing | Log warning, `total=0`, `open=max(0, 0-N)=0` |
+| `TASK_COMPLETED` missing `task_id` in payload | `KeyError` propagates — indicates worker.py migration was not applied |
+| Artifact file write fails | Propagate exception (storage failure = real error) |
 
 ---
 
@@ -332,3 +369,4 @@ with patch("subprocess.run") as mock_run:
 - Real-time streaming to UI
 - Beads error recovery (best-effort sync only, per existing spec)
 - `bd audit record` integration (separate concern)
+- Inserting `BEADS_FINAL_REPORT` row into `artifacts` table (file-only in Phase 5)
