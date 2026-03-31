@@ -123,8 +123,9 @@ def test_phase_v_not_called_when_llm_client_none(tmp_path):
     original_side_effect = conn.execute.side_effect
 
     def tracking_execute(query, params=None):
+        # Track the query text itself so we can check which status was written
         if "update runs set status" in query.lower():
-            status_updates.append(params[0] if params else None)
+            status_updates.append(query)
         return original_side_effect(query, params)
 
     conn.execute.side_effect = tracking_execute
