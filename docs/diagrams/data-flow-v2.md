@@ -21,8 +21,8 @@ sequenceDiagram
 
     Note over U,AG: === PHASE 1a: NORMALIZE + SINH CAU HOI ===
     U->>SK: Y tuong tho ("Forum chia se kien thuc")
-    SK->>SK: Normalize → initial brief (problem, users, criteria, constraints)
-    SK->>SP: Superpowers brainstorming
+    SK->>SK: Normalize → initial_brief.json
+    SK->>SP: Superpowers brainstorming (feed initial_brief)
     SP-->>SK: N cau hoi phan loai (REQUIRED/STRATEGIC/OPTIONAL)
 
     Note over U,AG: === PHASE 1b: AI DEBATE ===
@@ -37,28 +37,29 @@ sequenceDiagram
         MOD->>MOD: Buoc 4: Resolution status + confidence
         Note right of MOD: RESOLVED / RESOLVED_WITH_CAVEAT<br/>ESCALATE_TO_HUMAN / NEED_MORE_EVIDENCE
     end
-    DC-->>SK: Debate Report (structured)
+    DC-->>SK: Debate results (structured)
+    SK->>SK: Ghi debate_report.json
 
     Note over U,AG: === GATE 1: DUYET + DECISION LOG ===
     SK-->>U: Debate Report<br/>(ESCALATE_TO_HUMAN truoc, RESOLVED cuoi)
     U->>U: Quyet dinh ESCALATE items (bat buoc)<br/>Confirm RESOLVED items (1-click)
     U-->>SK: Dap an da duyet
-    SK->>SK: Ghi decision_log.json (trace moi quyet dinh)
+    SK->>SK: Ghi decision_log.json + approved_answers.json
 
-    Note over U,AG: === PHASE 1d: FORMALIZE (contract co dinh) ===
-    SK->>OS: finalize_spec
+    Note over U,AG: === PHASE 1d: BUILD SPEC BUNDLE ===
+    SK->>OS: build_spec_bundle (approved_answers.json)
     OS->>OS: proposal + design + functional + non-functional + acceptance-criteria
     alt Spec mau thuan
         OS-->>SK: Conflict
         SK-->>U: Hoi resolve
-        SK->>OS: finalize_spec lai
+        SK->>OS: build_spec_bundle lai
     end
 
     Note over U,AG: === PHASE 2a: SINH TASK GRAPH (voi metadata) ===
-    OS->>TG: Spec lam dau vao
+    OS->>TG: Spec bundle lam dau vao
     TG->>TG: Planner xac dinh tasks (voi agent_type, done_definition)
     TG->>TG: Architect xac dinh dependencies
-    TG-->>SK: Task graph JSON (day du metadata)
+    TG-->>SK: task_graph.generated.json
 
     Note over U,AG: === GATE 2: DUYET TASK GRAPH ===
     SK-->>U: Task Graph Report
@@ -66,9 +67,11 @@ sequenceDiagram
     alt Reject
         U->>SK: Reject
         SK->>TG: regenerate_task_graph
-        TG-->>SK: Task Graph moi
+        TG-->>SK: task_graph.generated.json moi
         SK-->>U: Present lai
     end
+    U-->>SK: Approve (voi edits neu co)
+    SK->>SK: Ghi task_graph.approved.json
     SK->>BD: bd create + bd dep add
 
     Note over U,AG: === PHASE 3: RULE MATCHING + EXECUTION + FAILURE HANDLING ===

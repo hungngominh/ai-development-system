@@ -184,8 +184,8 @@ sequenceDiagram
 
     Note over U,BD: Phase 1a — Normalize + Sinh cau hoi
     U->>SK: Y tuong tho
-    SK->>SK: Normalize → initial brief
-    SK->>SP: Superpowers brainstorming
+    SK->>SK: Normalize → initial_brief.json
+    SK->>SP: Superpowers brainstorming (feed initial_brief)
     SP-->>SK: N cau hoi (REQUIRED/STRATEGIC/OPTIONAL)
 
     Note over U,BD: Phase 1b — AI Debate
@@ -196,39 +196,41 @@ sequenceDiagram
         DC->>DC: Debate (toi da 5 vong)
         DC->>DC: Moderator: resolution status + confidence
     end
+    DC-->>SK: Debate results (structured)
+    SK->>SK: Ghi debate_report.json
 
     Note over U,BD: Gate 1 — Duyet + Decision Log
-    DC-->>SK: Debate Report
     SK-->>U: ESCALATE_TO_HUMAN truoc, RESOLVED cuoi
     U->>U: Quyet dinh ESCALATE items (bat buoc)
     U-->>SK: Dap an da duyet
     SK->>SK: Ghi decision_log.json + approved_answers.json
 
-    Note over U,BD: Phase 1d — Formalize (OpenSpec contract)
-    SK->>OS: finalize_spec
+    Note over U,BD: Phase 1d — Build spec bundle
+    SK->>OS: build_spec_bundle (approved_answers.json)
     OS->>OS: proposal + design + functional + non-functional + acceptance-criteria
     alt Spec mau thuan
         OS-->>SK: Conflict warning
         SK-->>U: Hoi resolve
         U-->>SK: Resolve
-        SK->>OS: finalize_spec lai
+        SK->>OS: build_spec_bundle lai
     end
 
     Note over U,BD: Phase 2a — Task Graph (voi metadata day du)
-    OS->>TG: Spec lam dau vao
+    OS->>TG: Spec bundle lam dau vao
     TG->>TG: Sinh tasks (voi agent_type, inputs, outputs, done_definition)
+    TG-->>SK: task_graph.generated.json
 
     Note over U,BD: Gate 2 — Duyet task graph
-    TG-->>SK: Task graph report
     SK-->>U: Present task graph
     U->>U: Review, approve/edit/reject
     alt Reject
         U->>SK: Reject
         SK->>TG: regenerate_task_graph
-        TG-->>SK: Task graph moi
+        TG-->>SK: task_graph.generated.json moi
         SK-->>U: Present lai
     end
-    U-->>SK: Approve
+    U-->>SK: Approve (voi edits neu co)
+    SK->>SK: Ghi task_graph.approved.json
     SK->>BD: bd create + bd dep add
 
     Note over U,BD: Phase 3 — Rule matching + Execution + Failure handling
