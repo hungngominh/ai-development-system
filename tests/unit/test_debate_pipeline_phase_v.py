@@ -111,3 +111,53 @@ def test_phase_v_pipeline_not_called_without_agent(tmp_path):
         )
 
     mock_phase_v.assert_not_called()
+
+
+def test_phase_v_not_called_when_llm_client_none(tmp_path):
+    """If llm_client=None, Phase V must not run and run status must NOT advance to RUNNING_PHASE_V."""
+    run_id = str(uuid.uuid4())
+    conn = _make_phase_b_conn(run_id, tmp_path)
+    stub_agent = MagicMock()
+
+    status_updates = []
+    original_side_effect = conn.execute.side_effect
+
+    def tracking_execute(query, params=None):
+        if "update runs set status" in query.lower():
+            status_updates.append(params[0] if params else None)
+        return original_side_effect(query, params)
+
+    conn.execute.side_effect = tracking_execute
+
+    with patch("ai_dev_system.debate_pipeline.finalize_spec") as mock_spec, \
+         patch("ai_dev_system.debate_pipeline.generate_task_graph") as mock_tg, \
+         patch("ai_dev_system.debate_pipeline.run_gate_2") as mock_g2, \
+         patch("ai_dev_system.debate_pipeline.beads_sync"), \
+         patch("ai_dev_system.debate_pipeline.promote_output") as mock_promote, \
+         patch("ai_dev_system.debate_pipeline.run_execution") as mock_exec, \
+         patch("ai_dev_system.verification.pipeline.run_phase_v_pipeline") as mock_phase_v:
+
+        mock_spec.return_value = MagicMock(files=["acceptance-criteria.md"])
+        mock_tg.return_value = {"graph_version": 1, "tasks": []}
+        g2_result = MagicMock(); g2_result.status = "approved"; g2_result.graph = {}
+        mock_g2.return_value = g2_result
+        mock_promote.return_value = str(uuid.uuid4())
+        mock_exec.return_value = ExecutionResult(run_id=run_id, status="COMPLETED")
+
+        config = MagicMock()
+        config.storage_root = str(tmp_path / "storage")
+        os.makedirs(config.storage_root, exist_ok=True)
+
+        run_phase_b_pipeline(
+            run_id=run_id,
+            config=config,
+            conn_factory=lambda: conn,
+            gate2_io=MagicMock(),
+            llm_client=None,   # ← no LLM client
+            agent=stub_agent,
+        )
+
+    # Phase V must not be called
+    mock_phase_v.assert_not_called()
+    # Run must NOT have been advanced to RUNNING_PHASE_V
+    assert "RUNNING_PHASE_V" not in status_updates
