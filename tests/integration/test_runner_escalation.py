@@ -16,7 +16,7 @@ from ai_dev_system.config import Config
 class FailingAgent:
     """Fails TASK-IMPL; succeeds everything else."""
 
-    def run(self, task_id, output_path, promoted_outputs=(), context=None, timeout_s=3600.0):
+    def run(self, task_id, output_path, promoted_outputs=(), context=None, timeout_s=3600.0, file_rules=()):
         import os
         os.makedirs(output_path, exist_ok=True)
         if task_id == "TASK-IMPL":
