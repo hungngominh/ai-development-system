@@ -29,9 +29,7 @@ def test_stub_defaults_to_pass_for_unknown_criterion():
 
 
 def test_stub_protocol_compliance():
-    """Verify stub satisfies the Protocol interface at runtime."""
+    """Static check: StubVerificationLLMClient satisfies VerificationLLMClient protocol."""
     from ai_dev_system.verification.judge import VerificationLLMClient
-    from typing import runtime_checkable, Protocol
-    stub = StubVerificationLLMClient(verdicts={})
-    # Protocol compliance: just verify method exists and is callable
-    assert callable(stub.judge_criterion)
+    client: VerificationLLMClient = StubVerificationLLMClient(verdicts={})
+    assert callable(client.judge_criterion)
