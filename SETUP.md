@@ -32,6 +32,9 @@ py -3.12 -m pip install -e ".[dev]"
 ```bash
 git clone <repo>
 cd ai-development-system
+
+# Cài dependencies (dùng Python 3.12)
+py -3.12 -m pip install -e ".[dev]"
 ```
 
 ### ⚠️ Lỗi thường gặp: `pip` không có trong PATH
@@ -63,7 +66,10 @@ Tạo file `.env` ở root project. Chọn **một trong hai** provider:
 
 ```env
 DATABASE_URL=postgresql://user:password@host/dbname
-STORAGE_ROOT=/tmp/ai-dev-storage
+
+# Windows: dùng đường dẫn Windows, ví dụ C:/ai-dev-storage
+# Linux/Mac: /tmp/ai-dev-storage
+STORAGE_ROOT=C:/ai-dev-storage
 
 LLM_PROVIDER=anthropic
 LLM_MODEL=claude-opus-4-6
@@ -76,7 +82,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ```env
 DATABASE_URL=postgresql://user:password@host/dbname
-STORAGE_ROOT=/tmp/ai-dev-storage
+
+STORAGE_ROOT=C:/ai-dev-storage
 
 LLM_PROVIDER=openai
 LLM_MODEL=gpt-4o
@@ -100,29 +107,28 @@ OPENAI_API_KEY=sk-...
 
 ## 4. Cấu hình Claude Code Skills
 
-Skills (`/start-project`, `/review-debate`, `/review-verification`) cần nằm trong `.claude/commands/` để Claude Code nhận ra.
+Skills (`/start-project`, `/review-debate`, `/review-verification`) đã có sẵn trong `.claude/commands/` sau khi clone — không cần làm gì thêm.
 
-Đã có sẵn trong repo — chạy một lần:
-
-```bash
-mkdir -p .claude/commands
-cp skills/start-project.md .claude/commands/
-cp skills/review-debate.md .claude/commands/
-cp skills/review-verification.md .claude/commands/
-```
-
-Sau đó mở project trong Claude Code, gõ `/` sẽ thấy 3 commands xuất hiện.
-
-> **Lưu ý:** `.claude/commands/` đã có trong `.gitignore` của Claude Code theo mặc định — nếu muốn commit vào repo thì kiểm tra lại `.gitignore`.
+Mở project trong Claude Code, gõ `/` sẽ thấy 3 commands xuất hiện.
 
 ---
 
 ## 5. Khởi tạo Database
 
-Chạy migrations theo thứ tự. Nếu không có `psql`, dùng Python:
+**Load `.env` trước**, sau đó chạy migrations:
 
 ```bash
-python -m python - <<'EOF'
+# Load env vars (Linux/Mac)
+export $(cat .env | grep -v '^#' | xargs)
+
+# Load env vars (Windows PowerShell)
+Get-Content .env | Where-Object { $_ -notmatch '^#' -and $_ -ne '' } | ForEach-Object { $k,$v = $_ -split '=',2; [System.Environment]::SetEnvironmentVariable($k,$v) }
+```
+
+Chạy migrations — nếu không có `psql`, dùng Python:
+
+```bash
+python - <<'EOF'
 import psycopg, os
 conn = psycopg.connect(os.environ["DATABASE_URL"])
 conn.autocommit = True
@@ -155,16 +161,17 @@ psql $DATABASE_URL -f docs/schema/migrations/v4-verification.sql
 # Unit tests (không cần DATABASE_URL)
 python -m pytest tests/unit/ -q
 
-# Integration tests (cần DATABASE_URL)
-export $(cat .env | xargs)
+# Integration tests (cần DATABASE_URL đã load)
 python -m pytest tests/integration/ -q
 ```
 
-Kết quả mong đợi: `202 passed` (unit) và `60 passed` (integration).
+Kết quả mong đợi: `204 passed` (unit) và `60 passed` (integration).
 
 ---
 
 ## 7. Sử dụng — Luồng 3 bước
+
+> **Quan trọng:** Mỗi lần dùng, đảm bảo `.env` đã được load vào môi trường shell hiện tại (xem Section 5).
 
 ### Bước 1: `/start-project`
 
@@ -188,13 +195,13 @@ Claude hỏi constraints và tên project, sau đó tự chạy:
 
 ---
 
-### Bước 2: `/review-debate <run_id>`
+### Bước 2: `/review-debate <run_id>` — Gate 1
 
 ```
 /review-debate --run-id abc123-...
 ```
 
-Claude dẫn qua Gate 1 (4 states):
+Claude dẫn qua 4 states:
 
 1. **PRESENT** — Hiển thị toàn bộ kết quả debate
 2. **COLLECT_FORCED** — Bạn quyết định các câu `ESCALATE_TO_HUMAN`:
@@ -205,11 +212,25 @@ Claude dẫn qua Gate 1 (4 states):
    ```
    approve all
    ```
-4. **CONFIRM** — Xem lại tóm tắt, xác nhận → ghi `decision_log.json`, build spec, sinh task graph
+4. **CONFIRM** — Xem lại tóm tắt, xác nhận
+
+Sau Gate 1, Claude tự động chạy tiếp: build spec bundle → sinh task graph → hiển thị Gate 2.
 
 ---
 
-### Bước 3: `/review-verification <run_id>`
+### Bước 2b: Gate 2 — Duyệt task graph
+
+Claude hiển thị danh sách tasks và dependencies. Bạn chọn:
+
+- `approve` → tiến hành execution
+- `sửa task X: ...` → chỉnh sửa rồi approve
+- `reject` → sinh lại task graph
+
+Sau khi approve, execution tự chạy (~vài phút tùy số tasks).
+
+---
+
+### Bước 3: `/review-verification <run_id>` — Gate 3
 
 Sau khi execution hoàn tất:
 
@@ -220,6 +241,7 @@ Sau khi execution hoàn tất:
 Claude hiển thị verification report. Với mỗi FAIL criterion, chọn:
 - `fix` → spawn remediation, chạy lại (tối đa 3 lần)
 - `skip` → bỏ qua criterion này
+- `abort` → dừng toàn bộ run
 
 Nếu tất cả pass → run status = `COMPLETED`.
 
