@@ -16,7 +16,7 @@ def collect_evidence(
     """
     rows = conn.execute(
         """
-        SELECT task_id, status, output_artifact_id
+        SELECT task_id, output_artifact_id
         FROM task_runs
         WHERE run_id = %s AND status = 'SUCCESS'
         """,
@@ -54,7 +54,7 @@ def collect_evidence(
 
 
 def _read_text_files(directory: str) -> list[str]:
-    """Read all .txt and .log files in a directory. Returns list of file contents."""
+    """Read all .txt, .log, and .json files in a directory. Returns list of file contents."""
     lines = []
     if not os.path.isdir(directory):
         return lines

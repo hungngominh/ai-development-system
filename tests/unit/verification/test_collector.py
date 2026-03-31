@@ -1,5 +1,4 @@
 import os
-import json
 import uuid
 from unittest.mock import MagicMock
 from ai_dev_system.verification.collector import collect_evidence
@@ -19,6 +18,8 @@ def _make_conn(task_runs: list[dict], artifacts: dict[str, dict]) -> MagicMock:
             artifact_id = params[0] if params else None
             row = artifacts.get(str(artifact_id))
             cursor.fetchone.return_value = row
+        else:
+            raise ValueError(f"Unexpected query in mock: {query.strip()!r}")
         return cursor
 
     conn.execute.side_effect = execute_side_effect
@@ -32,7 +33,7 @@ def test_collect_evidence_empty_run():
     assert evidence == []
 
 
-def test_collect_evidence_success_task_no_artifact(tmp_path):
+def test_collect_evidence_success_task_no_artifact():
     task_id = "TASK-1"
     task_run = {
         "task_id": task_id,
