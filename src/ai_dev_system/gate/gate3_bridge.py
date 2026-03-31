@@ -26,7 +26,7 @@ class Gate3Result:
 def finalize_gate3(
     run_id: str,
     decisions: list[Gate3Decision],
-    storage_root: str,
+    storage_root: str,  # kept for API symmetry with gate1_bridge; gate3 only reads artifacts
     conn,
 ) -> Gate3Result:
     """
@@ -69,7 +69,7 @@ def finalize_gate3(
         """,
         (run_id,),
     ).fetchone()
-    attempt_count = count_row["count"] if count_row else 1
+    attempt_count = count_row["count"] if count_row else 0
 
     # --- Build decision index ---
     decision_map = {d.criterion_id: d.action for d in decisions}

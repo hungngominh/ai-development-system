@@ -10,7 +10,7 @@ def test_allpass_empty_decisions_completes(conn, config, project_id, tmp_path):
     run_id = str(uuid.uuid4())
     conn.execute("""
         INSERT INTO runs (run_id, project_id, status, title, current_artifacts, metadata)
-        VALUES (%s, %s, 'RUNNING_PHASE_V', 'AllPass Test', '{}', '{}')
+        VALUES (%s, %s, 'PAUSED_AT_GATE_3', 'AllPass Test', '{}', '{}')
     """, (run_id, project_id))
 
     # All criteria PASS
