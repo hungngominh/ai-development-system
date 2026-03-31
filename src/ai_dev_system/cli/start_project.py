@@ -55,11 +55,8 @@ def _make_llm_client():
     if os.environ.get("AI_DEV_STUB_LLM") == "1":
         from ai_dev_system.debate.llm import StubDebateLLMClient
         return StubDebateLLMClient()
-    # Real client: yêu cầu ANTHROPIC_API_KEY
-    # TODO: implement RealDebateLLMClient khi cần production usage
-    raise RuntimeError(
-        "Real LLM client not yet implemented. Set AI_DEV_STUB_LLM=1 for testing."
-    )
+    from ai_dev_system.llm_factory import make_real_llm_client
+    return make_real_llm_client()
 
 
 def _count_questions(results: list) -> tuple[int, int, int, int]:
