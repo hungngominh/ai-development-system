@@ -43,6 +43,11 @@ class CrewAIAgent:
                 except OSError:
                     pass
             task_description = "\n\n".join(contents)[:3000]
+            if not task_description.strip():
+                task_description = (
+                    f"Task {task_id}: implement the required functionality "
+                    f"and write output files to {output_path}"
+                )
         else:
             task_description = (
                 f"Task {task_id}: implement the required functionality and write output files to {output_path}"
@@ -101,17 +106,22 @@ class CrewAIAgent:
         )
 
         # Step 9: execute with timeout
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(crew.kickoff)
-            try:
-                future.result(timeout=timeout_s)
-            except concurrent.futures.TimeoutError:
-                return AgentResult(
-                    output_path=output_path,
-                    error=f"CrewAI execution timed out after {timeout_s}s",
-                )
-            except Exception as exc:
-                return AgentResult(output_path=output_path, error=str(exc))
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(crew.kickoff)
+        try:
+            future.result(timeout=timeout_s)
+        except concurrent.futures.TimeoutError:
+            # Python threads cannot be forcefully killed; the background thread
+            # may continue running. shutdown(wait=False) ensures we don't block here.
+            executor.shutdown(wait=False)
+            return AgentResult(
+                output_path=output_path,
+                error=f"CrewAI execution timed out after {timeout_s}s",
+            )
+        except Exception as exc:
+            executor.shutdown(wait=False)
+            return AgentResult(output_path=output_path, error=str(exc))
+        executor.shutdown(wait=True)  # Clean shutdown on success
 
         # Step 10: verify promoted outputs exist
         for po in promoted_list:

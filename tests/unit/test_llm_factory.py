@@ -5,6 +5,7 @@ No real API calls — all SDK clients are mocked.
 """
 
 import pytest
+from unittest.mock import patch
 
 from ai_dev_system.llm_factory import LLMConfig, RealLLMClient, make_real_llm_client
 
@@ -248,6 +249,13 @@ class TestRealLLMClientJudgeCriterion:
 
         with pytest.raises(Exception, match="backend down"):
             llm.judge_criterion("AC-8", "criterion", ["ev"])
+
+    def test_missing_confidence_raises(self):
+        """LLM response missing 'confidence' key → ValueError."""
+        client = RealLLMClient(LLMConfig(provider="anthropic", model="test", api_key="key"))
+        with patch.object(client, "complete", return_value='{"verdict":"PASS","reasoning":"ok"}'):
+            with pytest.raises(ValueError, match="missing required fields"):
+                client.judge_criterion("AC-1", "criterion", ["evidence"])
 
 
 # ---------------------------------------------------------------------------

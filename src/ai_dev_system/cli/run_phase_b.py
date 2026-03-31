@@ -20,7 +20,7 @@ def _parse_args(argv=None):
         "--run-id",
         required=True,
         dest="run_id",
-        help="Run ID from a completed Phase A (PAUSED_AT_GATE_1 or later).",
+        help="Run ID that has passed Gate 1 review (run must be in status RUNNING_PHASE_1D).",
     )
     return parser.parse_args(argv)
 
@@ -31,6 +31,16 @@ def _make_llm_client():
         return None  # run_phase_b_pipeline guards: if llm_client is not None → runs Phase V
     from ai_dev_system.llm_factory import make_real_llm_client
     return make_real_llm_client()
+
+
+def _make_gate2_io():
+    """Return StubGate2IO (auto-approve) in stub mode; raise in production (not yet implemented)."""
+    if os.environ.get("AI_DEV_STUB_LLM") == "1":
+        return StubGate2IO(action="approve")
+    raise RuntimeError(
+        "Real interactive Gate2IO not yet implemented. "
+        "Set AI_DEV_STUB_LLM=1 for testing, or implement a terminal Gate2IO for production."
+    )
 
 
 def _make_agent():
@@ -68,7 +78,12 @@ def main(argv=None) -> int:
         print(f"Agent configuration error: {exc}", file=sys.stderr)
         return 1
 
-    gate2_io = StubGate2IO(action="approve")
+    # Create Gate2 IO
+    try:
+        gate2_io = _make_gate2_io()
+    except RuntimeError as exc:
+        print(f"Gate2 IO error: {exc}", file=sys.stderr)
+        return 1
 
     print("[Phase B] Running: finalize_spec → task_graph → Gate 2 → execution...", file=sys.stderr)
     if llm_client is None:

@@ -152,8 +152,13 @@ class RealLLMClient:
             raise ValueError(
                 f"Invalid verdict '{verdict}' for criterion {criterion_id}"
             )
-        confidence = max(0.0, min(1.0, float(parsed.get("confidence", 0.5))))
-        reasoning = str(parsed.get("reasoning", ""))
+        if "confidence" not in parsed or "reasoning" not in parsed:
+            raise ValueError(
+                f"LLM response missing required fields for {criterion_id}. "
+                f"Got keys: {list(parsed.keys())}"
+            )
+        confidence = max(0.0, min(1.0, float(parsed["confidence"])))
+        reasoning = str(parsed["reasoning"])
         return (verdict, confidence, reasoning)
 
 

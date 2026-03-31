@@ -140,7 +140,7 @@ def test_run_timeout_returns_error(tmp_path, mocker):
     )
     mock_future = mocker.MagicMock()
     mock_future.result.side_effect = concurrent.futures.TimeoutError()
-    mock_executor_cls.return_value.__enter__.return_value.submit.return_value = mock_future
+    mock_executor_cls.return_value.submit.return_value = mock_future
 
     agent = _make_agent()
     result = agent.run(task_id="T-6", output_path=str(tmp_path), timeout_s=1.0)
