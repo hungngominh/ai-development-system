@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 from datetime import datetime, timezone
@@ -13,6 +14,8 @@ from ai_dev_system.storage.promote import promote_output
 from ai_dev_system.verification.collector import collect_evidence
 from ai_dev_system.verification.judge import VerificationLLMClient
 from ai_dev_system.verification.report import CriterionResult, VerificationReport
+
+logger = logging.getLogger(__name__)
 
 
 def task_run_repo_create(run_id: str, task_type: str, conn) -> dict:
@@ -81,6 +84,8 @@ def run_verification(
         "SELECT content_ref FROM artifacts WHERE artifact_id = %s",
         (spec_artifact_id,),
     ).fetchone()
+    if spec_row is None:
+        raise ValueError(f"Spec artifact not found: {spec_artifact_id}")
     criteria_list = _parse_acceptance_criteria(spec_row["content_ref"])
 
     # --- LLM judge each criterion ---
@@ -142,15 +147,20 @@ def _parse_acceptance_criteria(spec_bundle_path: str) -> list[tuple[str, str]]:
     """
     criteria_file = os.path.join(spec_bundle_path, "acceptance-criteria.md")
     if not os.path.exists(criteria_file):
+        logger.warning(
+            "acceptance-criteria.md not found in spec bundle: %s — "
+            "verification will produce vacuous ALL_PASS with zero criteria",
+            spec_bundle_path,
+        )
         return []
 
     with open(criteria_file, encoding="utf-8") as f:
         content = f.read()
 
     results = []
-    # Match lines like: AC-1: text, AC-1 — text, **AC-1**: text
+    # Match lines like: AC-1: text, AC-1 — text, **AC-1**: text, ## AC-1 — text
     pattern = re.compile(
-        r"(?:^|\n)\s*(?:\*\*)?(?P<id>AC-\d+)(?:\*\*)?[\s:—\-]+(?P<text>[^\n]+)",
+        r"(?:^|\n)[#\s]*(?:\*\*)?(?P<id>AC-\d+)(?:\*\*)?[\s:—\-]+(?P<text>[^\n]+)",
         re.MULTILINE,
     )
     for m in pattern.finditer(content):
