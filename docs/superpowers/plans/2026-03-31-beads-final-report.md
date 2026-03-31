@@ -805,7 +805,15 @@ git commit -m "feat(pipeline): call write_beads_final_artifact after run_executi
 **Files:**
 - Create: `tests/integration/test_beads_report.py`
 
-- [ ] **Step 1: Write integration tests**
+- [ ] **Step 1: Confirm v5 migration is applied**
+
+```bash
+psql $DATABASE_URL -c "SELECT 'BEADS_SYNC_START'::event_type;"
+```
+
+Expected: one row returned. If you get `ERROR: invalid input value for enum event_type`, run Task 1 Step 2 first.
+
+- [ ] **Step 2: Write integration tests**
 
 Create `tests/integration/test_beads_report.py`:
 
@@ -932,7 +940,7 @@ def test_task_timeline_uses_task_id_from_payload(conn, seed_run, tmp_path):
     assert "TASK-TEST" in task_ids
 ```
 
-- [ ] **Step 2: Run integration tests**
+- [ ] **Step 3: Run integration tests**
 
 ```bash
 pytest tests/integration/test_beads_report.py -v
@@ -940,7 +948,7 @@ pytest tests/integration/test_beads_report.py -v
 
 Expected: all tests PASS
 
-- [ ] **Step 3: Run full test suite to confirm no regressions**
+- [ ] **Step 4: Run full test suite to confirm no regressions**
 
 ```bash
 pytest tests/ -v --tb=short
@@ -948,7 +956,7 @@ pytest tests/ -v --tb=short
 
 Expected: all tests PASS
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add tests/integration/test_beads_report.py
