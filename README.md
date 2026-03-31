@@ -1,87 +1,83 @@
-# Hệ thống AI Development hoàn chỉnh
+# AI Development System
 
-Research hub tổng hợp kiến trúc, tài liệu và ví dụ cho hệ thống phát triển phần mềm bằng AI -- kết hợp 5 thành phần chuyên biệt thành một quy trình thống nhất.
-
----
-
-## Bản đồ 5 thành phần
-
-| Vai trò | Repo | Analogy | Mô tả |
-|---|---|---|---|
-| Chuyên môn | **agency-agents** | Bộ não chuyên gia | AI agent prompts chuyên biệt theo lĩnh vực |
-| Điều phối | **CrewAI** | Cơ thể | Multi-agent orchestration (sequential/hierarchical), unified memory |
-| Quy trình | **OpenSpec** | Quy trình làm việc | Spec-driven development: proposal &rarr; specs &rarr; design &rarr; tasks &rarr; verify &rarr; archive |
-| Phương pháp | **Superpowers** | Kỷ luật chuyên nghiệp | 14 skills: brainstorming, planning, TDD, code review, debugging, verification... |
-| Lưu vết | **Beads** | Ký ức | Distributed graph issue tracker, audit trail, dependency graph, thống kê |
+Hệ thống tự động hóa phát triển phần mềm theo mô hình **Human-as-Approver**: AI tranh luận, lập kế hoạch, và thực thi — con người chỉ duyệt tại các gate quan trọng.
 
 ---
 
-## Sơ đồ kiến trúc
+## Mô hình hoạt động
 
-```mermaid
-flowchart LR
-    Input([Input]) --> OpenSpec
-    OpenSpec --> Beads
-    Beads --> CrewAI
-    CrewAI <--> Agents[agency-agents]
-    Agents --> Superpowers
-    Superpowers --> Output([Output])
-
-    Superpowers -. tham gia mọi giai đoạn .-> OpenSpec
-    Superpowers -. tham gia mọi giai đoạn .-> CrewAI
-    Beads -. theo dõi toàn bộ .-> CrewAI
-    Beads -. theo dõi toàn bộ .-> Superpowers
+```
+Ý tưởng thô
+    │
+    ▼
+[AI debate] ──── 2 agent tranh luận mỗi câu hỏi, Moderator tổng hợp
+    │
+    ▼
+[Gate 1] ──────── Bạn duyệt kết quả debate, quyết định ESCALATE items
+    │
+    ▼
+[Build spec] ─── 5 artifact cố định: proposal, design, functional, non-functional, acceptance-criteria
+    │
+    ▼
+[Task graph] ─── AI sinh tasks + dependencies + metadata đầy đủ
+    │
+    ▼
+[Gate 2] ──────── Bạn approve/sửa task graph
+    │
+    ▼
+[Execution] ──── CrewAI thực thi theo dependency order, retry tự động
+    │
+    ▼
+[Gate 3] ──────── Bạn duyệt verification report, quyết định fix/skip/abort
+    │
+    ▼
+COMPLETED
 ```
 
-**Ghi chú:**
-- **Superpowers** tham gia ở mọi giai đoạn (brainstorming, planning, TDD, code review, debugging, verification).
-- **Beads** theo dõi và lưu vết xuyên suốt toàn bộ quy trình.
+**Con người làm:** Duyệt debate report (~5 phút) + Approve task graph (~2 phút) + Review verification (~5 phút)
+
+**AI làm:** Mọi thứ còn lại.
 
 ---
 
-## Quick Start
+## Kiến trúc
 
-```bash
-# 1. Clone research hub
-git clone <research-hub-url> ai-development-system
-cd ai-development-system
-
-# 2. Clone 5 repo vào cùng workspace directory
-git clone <url>/agency-agents  ../agency-agents
-git clone <url>/CrewAI          ../CrewAI
-git clone <url>/OpenSpec        ../OpenSpec
-git clone <url>/Superpowers     ../Superpowers
-git clone <url>/Beads           ../Beads
-
-# 3. Đọc hướng dẫn tích hợp
-# Mở docs/integration-guide.md
-
-# 4. Chạy ví dụ đầu tiên
-cd examples/01-basic-crew/
-# Làm theo README trong thư mục ví dụ
+```
+src/ai_dev_system/
+├── normalize.py          # Normalize ý tưởng thô → initial brief
+├── debate/               # AI debate engine (agents, rounds, moderator)
+├── gate/                 # Gate 1, 2, 3 — approval logic + bridges
+├── spec_bundle.py        # Build 5-artifact spec bundle
+├── finalize_spec.py      # Finalize spec sau Gate 1
+├── task_graph/           # Sinh + validate task graph
+├── rules/                # Rule Registry — inject rules vào agent
+├── engine/               # Execution engine (worker loop, retry, escalation)
+├── agents/               # CrewAI agent wrapper
+├── verification/         # LLM judge acceptance criteria
+├── beads/                # Beads audit trail sync
+├── storage/              # Artifact storage trên disk
+├── db/                   # PostgreSQL repos
+└── cli/                  # CLI entry points
 ```
 
----
+**Skills (Claude Code slash commands):**
 
-## Mục lục
-
-| Tài liệu | Mô tả |
+| Command | Chức năng |
 |---|---|
-| [docs/architecture.md](docs/architecture.md) | Kiến trúc tổng thể |
-| [docs/integration-guide.md](docs/integration-guide.md) | Hướng dẫn tích hợp |
-| [docs/memory-analysis.md](docs/memory-analysis.md) | Phân tích trí nhớ AI |
-| [docs/workflow.md](docs/workflow.md) | Luồng làm việc end-to-end |
-| [references/](references/) | Thẻ tham chiếu 5 repo |
-| [research/](research/) | Ghi chú nghiên cứu |
-| [examples/](examples/) | Code mẫu minh họa |
+| `/start-project` | Phase 1a — nhận ý tưởng, chạy debate pipeline |
+| `/review-debate` | Gate 1 — duyệt debate report, ghi decision log |
+| `/review-verification` | Gate 3 — duyệt verification report, đóng run |
 
 ---
 
-## Yêu cầu hệ thống
+## Trạng thái
 
-| Công cụ | Phiên bản |
-|---|---|
-| Python | &ge;3.10, &lt;3.14 |
-| Node.js | 18+ |
-| Go | 1.25+ |
-| Git | latest |
+- **262 tests** (204 unit + 60 integration) — tất cả pass
+- Đầy đủ pipeline từ normalize → verification
+- PostgreSQL-backed với full audit trail
+
+---
+
+## Bắt đầu
+
+Xem [SETUP.md](SETUP.md) để cài đặt và chạy.
