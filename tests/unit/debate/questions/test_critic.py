@@ -270,6 +270,21 @@ def test_loop_guard_allows_genuinely_new_rewrite():
     assert q3.text == "Completely fresh phrasing for Q3"
 
 
+def test_loop_guard_drops_rewrite_that_returns_original_unchanged():
+    # Edge case: LLM responds with the SAME text it received → loop guard
+    # treats the unchanged hash as "previously seen" and forces drop.
+    questions = _make_questions(6)
+    original_q3 = questions[2].text
+    llm = FakeLLM([
+        json.dumps([_flag("Q3", "rewrite")]),
+        _rewrite_response(original_q3, qid="Q3"),
+        _empty(),
+    ])
+    with pytest.warns(UserWarning, match="loop guard"):
+        result, _ = critic.run(questions, brief_digest="d", llm_client=llm)
+    assert "Q3" not in [q.id for q in result]
+
+
 # ---- min surviving guard ----
 
 
@@ -313,6 +328,17 @@ def test_critic_non_array_response_treated_as_no_flags():
 
 
 # ---- invalid flag input ----
+
+
+def test_missing_question_id_in_flag_is_ignored():
+    questions = _make_questions(6)
+    llm = FakeLLM([
+        json.dumps([{"action": "drop", "flag": "SHALLOW", "reason": "no qid"}]),
+        _empty(),
+    ])
+    with pytest.warns(UserWarning, match="missing question_id"):
+        result, _ = critic.run(questions, brief_digest="d", llm_client=llm)
+    assert len(result) == 6
 
 
 def test_unknown_question_id_in_flag_is_ignored():

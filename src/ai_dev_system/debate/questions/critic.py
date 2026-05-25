@@ -21,6 +21,25 @@ Degraded handling: critic JSON parse failure is treated as "no flags"
 (loop exits cleanly). Per-rewrite parse failures convert that flag
 into a drop with a warning. Catastrophic LLM exceptions propagate to
 the caller as `CriticError`.
+
+MVP merge semantics (locked decision #43):
+
+This implementation simplifies the merge action vs. the spec
+(`2026-05-23-question-generation-redesign.md` §"Merge sub-logic").
+Spec describes:
+    - LLM call to synthesize merged text
+    - Keep the question with higher classification
+    - source_decision_id becomes list[str] of both decisions
+
+This module instead does:
+    - Drop the source question (`question_id`)
+    - Keep the target (`merge_into`) unchanged
+    - No LLM call, no schema change to Question
+
+Rationale: dedup is the primary value of merge in the current golden
+set; the rest of the spec semantics adds cost (extra LLM call) and
+schema churn (Question.source_decision_id type change ripples to
+coverage C1). Revisit if an eval idea exposes measurable loss.
 """
 
 import dataclasses
@@ -29,6 +48,7 @@ import json
 import warnings
 from pathlib import Path
 
+from ai_dev_system.debate.questions._prompt_utils import split_prompt as _split_prompt
 from ai_dev_system.debate.report import Question
 
 CRITIC_PROMPT_PATH = Path(__file__).parent / "prompts" / "critic.txt"
@@ -51,15 +71,6 @@ def load_critic_prompt() -> str:
 
 def load_rewrite_prompt() -> str:
     return REWRITE_PROMPT_PATH.read_text(encoding="utf-8")
-
-
-def _split_prompt(template: str) -> tuple[str, str]:
-    if "\nUSER\n" not in template:
-        raise ValueError("Prompt template missing USER section")
-    system_block, user_template = template.split("\nUSER\n", 1)
-    if system_block.startswith("SYSTEM\n"):
-        system_block = system_block[len("SYSTEM\n"):]
-    return system_block.strip(), user_template
 
 
 def _hash_text(text: str) -> str:
@@ -189,6 +200,12 @@ def _apply_flags(
         flag_name = str(flag.get("flag") or "")
         reason = str(flag.get("reason") or "")
 
+        if not qid:
+            warnings.warn(
+                "Critic flag missing question_id; ignored",
+                stacklevel=2,
+            )
+            continue
         if qid not in by_id:
             warnings.warn(
                 f"Critic flagged unknown question_id={qid!r}; ignored",

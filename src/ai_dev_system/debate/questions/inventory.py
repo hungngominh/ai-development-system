@@ -24,6 +24,7 @@ import warnings
 from pathlib import Path
 
 from ai_dev_system.debate.domains import resolve_domain
+from ai_dev_system.debate.questions._prompt_utils import split_prompt as _split_prompt
 from ai_dev_system.debate.questions.models import Decision
 
 PROMPT_PATH = Path(__file__).parent / "prompts" / "inventory.txt"
@@ -43,29 +44,6 @@ class InventoryCountError(InventoryError):
 
 def load_prompt() -> str:
     return PROMPT_PATH.read_text(encoding="utf-8")
-
-
-def _split_prompt(template: str) -> tuple[str, str]:
-    """Split a prompt template into (system, user_template).
-
-    Files use the convention:
-
-        SYSTEM
-        <system content>
-
-        USER
-        <user template containing {brief_v2_json}>
-
-    The `{brief_v2_json}` placeholder is substituted via plain str
-    `replace` rather than `.format` because brief JSON contains `{`/`}`
-    characters that break `.format`.
-    """
-    if "\nUSER\n" not in template:
-        raise ValueError("Prompt template missing USER section")
-    system_block, user_template = template.split("\nUSER\n", 1)
-    if system_block.startswith("SYSTEM\n"):
-        system_block = system_block[len("SYSTEM\n"):]
-    return system_block.strip(), user_template
 
 
 def _parse_response(raw: str) -> list[dict]:

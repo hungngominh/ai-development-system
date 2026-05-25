@@ -353,3 +353,25 @@ def test_critic_iterations_propagate_to_result(monkeypatch, stub_llm):
     )
     result = pipeline.run_pipeline({}, "digest", stub_llm)
     assert result.critic_iterations == 2
+
+
+def test_decision_9_critic_receives_same_llm_client(monkeypatch, stub_llm):
+    """Locked decision #9: critic uses the same model as materializer.
+
+    Verify the pipeline forwards the exact llm_client object to critic
+    rather than constructing a separate client.
+    """
+    decisions = [_decision(f"d{i}") for i in range(8)]
+    refined = [_question(f"Q{i}", source=f"d{i}") for i in range(8)]
+    inv, mat, crit, cov = _patch_stages(
+        monkeypatch,
+        inventory_return=decisions,
+        materializer_returns=[refined],
+        critic_return=(refined, 0),
+        coverage_returns=[_coverage_report()],
+    )
+    pipeline.run_pipeline({}, "digest", stub_llm)
+    # critic must receive the same object (not a copy / wrapper)
+    materializer_client = mat.calls[0]["args"][2]
+    critic_client = crit.calls[0]["args"][2]
+    assert critic_client is materializer_client is stub_llm
