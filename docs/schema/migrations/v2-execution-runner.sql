@@ -1,50 +1,40 @@
--- v2-execution-runner.sql
--- Requires PostgreSQL 15+ (NULLS NOT DISTINCT)
+-- v2-execution-runner.sql (SQLite)
+--
+-- Adds execution runner support: task_runs additional columns + escalations table.
+--
+-- These additions are ALSO present in the current control-layer-schema.sql, so this
+-- migration is idempotent — running on a fresh DB (control-layer applied) is a no-op.
+-- Running on an old DB (pre-v2) adds the missing pieces.
+--
+-- SQLite note: ALTER TABLE ADD COLUMN doesn't support IF NOT EXISTS in versions before
+-- 3.35. App-layer migration runner should check column existence via PRAGMA table_info
+-- before issuing ALTER. The raw ADD COLUMN statements below are commented out for that
+-- reason — uncomment + skip-on-exists in the runner.
 
--- 1. New run statuses
-ALTER TYPE run_status ADD VALUE IF NOT EXISTS 'RUNNING_EXECUTION';
-ALTER TYPE run_status ADD VALUE IF NOT EXISTS 'PAUSED_FOR_DECISION';
+-- ALTER TABLE task_runs ADD COLUMN retry_count        INTEGER NOT NULL DEFAULT 0;
+-- ALTER TABLE task_runs ADD COLUMN retry_at           TEXT;
+-- ALTER TABLE task_runs ADD COLUMN agent_routing_key  TEXT;
+-- ALTER TABLE task_runs ADD COLUMN context_snapshot   TEXT;
+-- ALTER TABLE task_runs ADD COLUMN materialized_at    TEXT;
 
--- 2. New task_run statuses
-ALTER TYPE task_run_status ADD VALUE IF NOT EXISTS 'FAILED_RETRYABLE';
-ALTER TYPE task_run_status ADD VALUE IF NOT EXISTS 'FAILED_FINAL';
-ALTER TYPE task_run_status ADD VALUE IF NOT EXISTS 'BLOCKED_BY_FAILURE';
-
--- 3. New columns on task_runs
-ALTER TABLE task_runs
-    ADD COLUMN IF NOT EXISTS retry_count        INT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS retry_at           TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS agent_routing_key  TEXT,
-    ADD COLUMN IF NOT EXISTS context_snapshot   JSONB,
-    ADD COLUMN IF NOT EXISTS materialized_at    TIMESTAMPTZ;
-
--- 4. Idempotency constraint for materializer
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint WHERE conname = 'uq_task_runs_attempt'
-    ) THEN
-        ALTER TABLE task_runs
-            ADD CONSTRAINT uq_task_runs_attempt
-            UNIQUE (run_id, task_id, attempt_number);
-    END IF;
-END $$;
-
--- 5. Escalations table
+-- escalations table (CREATE TABLE IF NOT EXISTS is supported; no-op if already present)
 CREATE TABLE IF NOT EXISTS escalations (
-    escalation_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    run_id          UUID NOT NULL REFERENCES runs(run_id),
-    task_run_id     UUID NOT NULL REFERENCES task_runs(task_run_id),
-    status          TEXT NOT NULL DEFAULT 'OPEN'
-                        CHECK (status IN ('OPEN', 'RESOLVED')),
-    reason          TEXT NOT NULL,
-    options         JSONB NOT NULL,
+    escalation_id   TEXT            PRIMARY KEY,
+    run_id          TEXT            NOT NULL REFERENCES runs(run_id),
+    task_run_id     TEXT            NOT NULL REFERENCES task_runs(task_run_id),
+    status          TEXT            NOT NULL DEFAULT 'OPEN',
+    reason          TEXT            NOT NULL,
+    options         TEXT            NOT NULL CHECK (json_valid(options)),
     resolution      TEXT,
-    resolved_at     TIMESTAMPTZ,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT uq_escalation_open_dedup
-        UNIQUE (run_id, task_run_id, reason, status)
+    resolved_at     TEXT,
+    created_at      TEXT            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (status IN ('OPEN', 'RESOLVED')),
+    UNIQUE (run_id, task_run_id, reason, status)
 );
 
 CREATE INDEX IF NOT EXISTS idx_escalations_run_open
     ON escalations (run_id) WHERE status = 'OPEN';
+
+-- Status enum values (RUNNING_EXECUTION, PAUSED_FOR_DECISION) and task_run_status values
+-- (FAILED_RETRYABLE, FAILED_FINAL, BLOCKED_BY_FAILURE) are merged into the CHECK
+-- constraints in control-layer-schema.sql. SQLite has no ALTER TYPE.
