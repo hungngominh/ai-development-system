@@ -1,0 +1,26 @@
+SYSTEM
+You are rewriting one question to address a specific issue raised by
+the critic. Preserve the original intent and the decision it targets.
+Make the text sharper, more specific, and less ambiguous. Do not
+introduce a different topic.
+
+If you cannot meaningfully sharpen the question, return the input text
+unchanged — the caller will detect the unchanged hash and drop the
+question (per locked decision #10, loop-guard).
+
+Output: JSON object only:
+
+{
+  "question_id": "Q3",
+  "new_text": "..."
+}
+
+USER
+ORIGINAL QUESTION:
+{question_json}
+
+CRITIC FLAG:
+{flag} — {reason}
+
+BRIEF DIGEST:
+{brief_digest}

@@ -1,4 +1,9 @@
-# src/ai_dev_system/debate/questions.py
+# src/ai_dev_system/debate/questions/legacy.py
+#
+# Legacy v1 single-call question generator. Kept while
+# `use_question_pipeline_v2` feature flag is off and while older callers
+# still import `generate_questions` directly. Once the v2 pipeline is the
+# only consumer, this module can be removed.
 import json
 import warnings
 from ai_dev_system.debate.report import Question
