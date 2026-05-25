@@ -42,11 +42,6 @@ def test_prompts_are_loadable():
     assert critic.load_rewrite_prompt()
 
 
-def test_coverage_not_yet_implemented():
-    with pytest.raises(NotImplementedError, match="M4.4"):
-        coverage.run([], [], brief_v2={})
-
-
 def test_pipeline_not_yet_implemented():
     with pytest.raises(NotImplementedError, match="M4.5"):
         pipeline.run_pipeline({}, brief_digest="", llm_client=None)

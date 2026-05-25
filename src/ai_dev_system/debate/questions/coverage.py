@@ -2,16 +2,27 @@
 
 Runs four checks (spec M4.4):
 
-- C1 decision_coverage: every non-OPTIONAL decision has at least one
-  question. FAIL if any missing; the orchestrator re-triggers
-  Stage 2 only for the missing decisions, then re-runs C1 once.
-- C2 domain_balance: warn (not fail) when no question covers a
-  declared domain hint.
-- C3 classification_sanity: WARN when REQUIRED/total < 0.3.
-- C4 question_count: FAIL when total < max(5, 0.6 * len(decisions)).
+- C1 decision_coverage: every non-OPTIONAL decision must have at least
+  one question pointing at it via `question.source_decision_id`.
+  FAIL when any non-OPTIONAL decision is uncovered. The pipeline
+  orchestrator (M4.5) re-triggers Stage 2 for the missing decisions
+  and re-runs coverage once.
+- C2 domain_balance: every domain declared in any
+  `decision.domain_hints` should appear in at least one question's
+  `domain`. WARN-only.
+- C3 classification_sanity: REQUIRED / total >= 0.3. WARN-only.
+  When total questions == 0, returns warn with ratio 0.0.
+- C4 question_count: total >= max(MIN_ABSOLUTE, ceil(MIN_RATIO * len(decisions))).
+  FAIL otherwise.
 
-C1 and C4 are blocking; C2 and C3 only warn.
+`run()` is pure — it returns a `CoverageReport` and never raises for
+domain failures. The caller (pipeline.py) decides whether to abort,
+retry, or proceed based on the report and on whether each check is
+listed as blocking.
 """
+
+import math
+from collections import Counter
 
 from ai_dev_system.debate.questions.models import (
     CoverageCheck,
@@ -24,9 +35,94 @@ CLASSIFICATION_REQUIRED_MIN_RATIO = 0.3
 QUESTION_COUNT_MIN_ABSOLUTE = 5
 QUESTION_COUNT_MIN_RATIO = 0.6
 
+BLOCKING_CHECKS = ("C1_decision_coverage", "C4_question_count")
+
 
 class CoverageError(RuntimeError):
-    """Raised when a blocking check (C1, C4) cannot be satisfied."""
+    """Raised by pipeline.py when a blocking check (C1, C4) cannot be
+    satisfied. Not raised by this module — coverage is pure reporting.
+    """
+
+
+def check_c1_decision_coverage(
+    questions: list[Question], decisions: list[Decision]
+) -> CoverageCheck:
+    non_optional_ids = {d.id for d in decisions if d.classification != "OPTIONAL"}
+    covered = {q.source_decision_id for q in questions if q.source_decision_id}
+    missing = sorted(non_optional_ids - covered)
+    return CoverageCheck(
+        name="C1_decision_coverage",
+        status="fail" if missing else "pass",
+        detail={
+            "missing_decision_ids": missing,
+            "covered_count": len(non_optional_ids - set(missing)),
+            "non_optional_count": len(non_optional_ids),
+        },
+    )
+
+
+def check_c2_domain_balance(
+    questions: list[Question], decisions: list[Decision]
+) -> CoverageCheck:
+    declared: set[str] = set()
+    for d in decisions:
+        for hint in d.domain_hints:
+            declared.add(hint)
+    covered = {q.domain for q in questions}
+    missing = sorted(declared - covered)
+    return CoverageCheck(
+        name="C2_domain_balance",
+        status="warn" if missing else "pass",
+        detail={
+            "declared_domains": sorted(declared),
+            "covered_domains": sorted(declared & covered),
+            "missing_domains": missing,
+        },
+    )
+
+
+def check_c3_classification_sanity(questions: list[Question]) -> CoverageCheck:
+    total = len(questions)
+    required = sum(1 for q in questions if q.classification == "REQUIRED")
+    ratio = (required / total) if total else 0.0
+    status = "pass" if ratio >= CLASSIFICATION_REQUIRED_MIN_RATIO else "warn"
+    return CoverageCheck(
+        name="C3_classification_sanity",
+        status=status,
+        detail={
+            "required_count": required,
+            "total": total,
+            "ratio": round(ratio, 4),
+            "threshold": CLASSIFICATION_REQUIRED_MIN_RATIO,
+        },
+    )
+
+
+def check_c4_question_count(
+    questions: list[Question], decisions: list[Decision]
+) -> CoverageCheck:
+    total = len(questions)
+    threshold = max(
+        QUESTION_COUNT_MIN_ABSOLUTE,
+        math.ceil(QUESTION_COUNT_MIN_RATIO * len(decisions)),
+    )
+    return CoverageCheck(
+        name="C4_question_count",
+        status="pass" if total >= threshold else "fail",
+        detail={
+            "total": total,
+            "threshold": threshold,
+            "decision_count": len(decisions),
+        },
+    )
+
+
+def _domain_distribution(questions: list[Question]) -> dict[str, int]:
+    return dict(Counter(q.domain for q in questions))
+
+
+def _classification_distribution(questions: list[Question]) -> dict[str, int]:
+    return dict(Counter(q.classification for q in questions))
 
 
 def run(
@@ -36,35 +132,28 @@ def run(
 ) -> CoverageReport:
     """Execute Stage 4. No LLM calls; pure rule-based.
 
-    Args:
-        questions: Output of Stage 3.
-        decisions: Output of Stage 1.
-        brief_v2: Full brief (Stage 4 needs scope_out / domain hints).
-
-    Returns:
-        `CoverageReport`. Caller persists as QUESTION_COVERAGE_REPORT
-        artifact and emits `COVERAGE_REPORT_GENERATED` event.
+    `brief_v2` is currently unused by any check (the C2 declared-domain
+    set is derived from decisions, not brief). The parameter is kept
+    so future checks (e.g. scope_out vs question.domain) can land
+    without a signature change.
     """
-    raise NotImplementedError("M4.4 — implement Coverage Validator")
+    _ = brief_v2  # reserved for future checks
 
+    checks = [
+        check_c1_decision_coverage(questions, decisions),
+        check_c2_domain_balance(questions, decisions),
+        check_c3_classification_sanity(questions),
+        check_c4_question_count(questions, decisions),
+    ]
 
-def check_c1_decision_coverage(
-    questions: list[Question], decisions: list[Decision]
-) -> CoverageCheck:
-    raise NotImplementedError("M4.4 — C1")
-
-
-def check_c2_domain_balance(
-    questions: list[Question], decisions: list[Decision]
-) -> CoverageCheck:
-    raise NotImplementedError("M4.4 — C2")
-
-
-def check_c3_classification_sanity(questions: list[Question]) -> CoverageCheck:
-    raise NotImplementedError("M4.4 — C3")
-
-
-def check_c4_question_count(
-    questions: list[Question], decisions: list[Decision]
-) -> CoverageCheck:
-    raise NotImplementedError("M4.4 — C4")
+    c1 = checks[0]
+    return CoverageReport(
+        checks=checks,
+        covered_decision_ids=sorted(
+            {q.source_decision_id for q in questions if q.source_decision_id}
+        ),
+        missing_decision_ids=list(c1.detail.get("missing_decision_ids", [])),
+        domain_distribution=_domain_distribution(questions),
+        classification_distribution=_classification_distribution(questions),
+        total_questions=len(questions),
+    )
