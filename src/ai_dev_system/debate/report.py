@@ -20,7 +20,8 @@ class RoundResult:
     moderator_summary: str
     resolution_status: Literal[
         "RESOLVED", "RESOLVED_WITH_CAVEAT",
-        "ESCALATE_TO_HUMAN", "NEED_MORE_EVIDENCE"
+        "ESCALATE_TO_HUMAN", "NEED_MORE_EVIDENCE",
+        "MODERATOR_PARSE_FAILED",
     ]
     confidence: float
     caveat: str | None
