@@ -42,11 +42,6 @@ def test_prompts_are_loadable():
     assert critic.load_rewrite_prompt()
 
 
-def test_inventory_not_yet_implemented():
-    with pytest.raises(NotImplementedError, match="M4.1"):
-        inventory.run({}, llm_client=None)
-
-
 def test_materializer_not_yet_implemented():
     with pytest.raises(NotImplementedError, match="M4.2"):
         materializer.run([], brief_digest="", llm_client=None)
