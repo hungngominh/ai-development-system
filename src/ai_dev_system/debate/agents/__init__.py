@@ -18,6 +18,7 @@ Public surface:
 from ai_dev_system.debate.agents.legacy import (
     AGENT_PROMPTS,
     MODERATOR_PROMPT,
+    MODERATOR_PROMPT_CALIBRATED,
     VALID_AGENT_KEYS,
 )
 from ai_dev_system.debate.agents.loader import (
@@ -37,6 +38,7 @@ from ai_dev_system.debate.agents.registry import (
 __all__ = [
     "AGENT_PROMPTS",
     "MODERATOR_PROMPT",
+    "MODERATOR_PROMPT_CALIBRATED",
     "VALID_AGENT_KEYS",
     "AGENCY_AGENTS_DIR",
     "AgentLoadError",

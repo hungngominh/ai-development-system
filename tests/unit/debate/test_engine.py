@@ -36,11 +36,20 @@ def test_optional_questions_auto_resolved_no_rounds():
 
 
 def test_stop_on_high_confidence():
-    """Stub returns confidence=0.9 → should stop after 1 round."""
+    """Stub returns confidence=0.9. REQUIRED must hit required_min_rounds=2
+    (spec D7 Mitigation 1), then stop because confidence >= 0.8."""
     client = StubDebateLLMClient()
     report = run_debate([REQUIRED_Q], client, run_id="r1", brief={})
     result = report.results[0]
-    assert len(result.rounds) == 1  # stopped early because confidence >= 0.8
+    assert len(result.rounds) == 2
+
+
+def test_strategic_stops_immediately_on_high_confidence():
+    """STRATEGIC has no min-rounds floor → stops after round 1."""
+    client = StubDebateLLMClient()
+    report = run_debate([STRATEGIC_Q], client, run_id="r1", brief={})
+    result = report.results[0]
+    assert len(result.rounds) == 1
 
 
 def test_all_three_classifications():

@@ -49,4 +49,17 @@ MODERATOR_PROMPT = (
     "confidence >= 0.8 means no further debate rounds are needed."
 )
 
+# M5.E (spec D7 Mitigation 2) — calibrated moderator. Used by engine
+# when DebateConfig.use_calibrated_moderator is True. Keeps the legacy
+# MODERATOR_PROMPT intact for v1 callers.
+MODERATOR_PROMPT_CALIBRATED = (
+    MODERATOR_PROMPT
+    + " CALIBRATION: Be cautious with high confidence on round 1. "
+    "If both agents agree without naming a specific trade-off, that is "
+    "an echo chamber — return confidence <= 0.6 and NEED_MORE_EVIDENCE "
+    "to force a round 2. Do NOT return confidence >= 0.8 unless the "
+    "agents have explicitly identified and weighed at least one concrete "
+    "trade-off."
+)
+
 VALID_AGENT_KEYS = set(AGENT_PROMPTS.keys())
