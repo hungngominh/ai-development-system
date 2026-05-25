@@ -1,7 +1,7 @@
 # src/ai_dev_system/debate/rounds.py
-import json
-from ai_dev_system.debate.report import Question, RoundResult
 from ai_dev_system.debate.agents import AGENT_PROMPTS, MODERATOR_PROMPT
+from ai_dev_system.debate.moderator import run_moderator
+from ai_dev_system.debate.report import Question, RoundResult
 
 _AGENT_A_INSTRUCTION = "Đưa ra / điều chỉnh quan điểm của bạn về câu hỏi sau."
 _AGENT_B_INSTRUCTION = "Phản biện và đưa ra quan điểm riêng của bạn."
@@ -13,8 +13,17 @@ def run_debate_round(
     prev_moderator_summary: str | None,
     llm_client,
 ) -> RoundResult:
-    """Three sequential LLM calls: Agent A → Agent B → Moderator."""
-    prev_context = f"\n\nTóm tắt vòng trước: {prev_moderator_summary}" if prev_moderator_summary else ""
+    """Three sequential LLM calls: Agent A → Agent B → Moderator.
+
+    Moderator JSON parsing + retry is delegated to
+    `debate.moderator.run_moderator` (M5.C). Unparseable responses
+    surface as `resolution_status="MODERATOR_PARSE_FAILED"` rather
+    than being silently downgraded to `NEED_MORE_EVIDENCE`.
+    """
+    prev_context = (
+        f"\n\nTóm tắt vòng trước: {prev_moderator_summary}"
+        if prev_moderator_summary else ""
+    )
 
     # Call 1: Agent A
     agent_a_user = f"{question.text}{prev_context}\n\n{_AGENT_A_INSTRUCTION}"
@@ -33,30 +42,17 @@ def run_debate_round(
         user=agent_b_user,
     )
 
-    # Call 3: Moderator → JSON
+    # Call 3: Moderator (with retry + typed parse failures)
     moderator_user = (
         f"Câu hỏi: {question.text}\n\n"
         f"{question.agent_a}: {agent_a_position}\n\n"
         f"{question.agent_b}: {agent_b_position}"
     )
-    moderator_raw = llm_client.complete(system=MODERATOR_PROMPT, user=moderator_user)
-
-    try:
-        verdict = json.loads(moderator_raw)
-    except json.JSONDecodeError:
-        verdict = {
-            "status": "NEED_MORE_EVIDENCE",
-            "confidence": 0.0,
-            "summary": moderator_raw,
-            "caveat": "Moderator response was not valid JSON.",
-        }
-
-    return RoundResult(
+    return run_moderator(
+        llm_client,
+        system_prompt=MODERATOR_PROMPT,
+        user_context=moderator_user,
         round_number=round_num,
         agent_a_position=agent_a_position,
         agent_b_position=agent_b_position,
-        moderator_summary=verdict.get("summary", ""),
-        resolution_status=verdict.get("status", "NEED_MORE_EVIDENCE"),
-        confidence=float(verdict.get("confidence", 0.0)),
-        caveat=verdict.get("caveat"),
     )
