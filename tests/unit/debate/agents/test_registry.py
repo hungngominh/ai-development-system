@@ -222,3 +222,97 @@ def test_real_registry_lookups():
     sec = reg.get("SecuritySpecialist")
     assert sec.domain == "security"
     assert reg.by_domain("backend")[0].key == "BackendArchitect"
+
+
+# ---- M5.F.1: 12-domain coverage ----
+
+
+def test_real_registry_covers_all_12_canonical_domains():
+    """Spec Appendix A: every canonical domain must have ≥1 agent.
+
+    Without this, pair_suggestion strategy 3 (decision_domains lookup)
+    falls back to strategy 4 (any other domain) for any decision that
+    spans a domain with no resident agent — silently weakening lens
+    diversity.
+    """
+    from ai_dev_system.debate.domains import DOMAINS
+
+    reg = AgentRegistry.from_directory()
+    covered = {spec.domain for spec in reg.list_all()}
+    missing = set(DOMAINS) - covered
+    assert not missing, f"canonical domains without agent: {sorted(missing)}"
+
+
+def test_real_registry_has_exactly_one_agent_per_canonical_domain():
+    """Per locked decision #23 the agent set is capped at 12 (one per
+    canonical domain). Multiple agents in a single domain is allowed by
+    the data model but should not happen with the shipped set."""
+    from ai_dev_system.debate.domains import DOMAINS
+
+    reg = AgentRegistry.from_directory()
+    counts: dict[str, int] = {}
+    for spec in reg.list_all():
+        counts[spec.domain] = counts.get(spec.domain, 0) + 1
+    duplicates = {d: n for d, n in counts.items() if n > 1}
+    assert not duplicates, f"domains with >1 agent: {duplicates}"
+    assert len(reg) == len(DOMAINS)
+
+
+def test_real_registry_typical_paired_with_resolves():
+    """Every agent's typical_paired_with hints should point at real
+    registry keys — broken hints downgrade pair_suggestion strategy 1
+    to a silent miss."""
+    reg = AgentRegistry.from_directory()
+    broken: dict[str, list[str]] = {}
+    for spec in reg.list_all():
+        missing = [k for k in spec.typical_paired_with if k not in reg]
+        if missing:
+            broken[spec.key] = missing
+    assert not broken, f"unresolvable typical_paired_with hints: {broken}"
+
+
+def test_real_registry_no_self_pair_hints():
+    """An agent should never list itself as typical_paired_with."""
+    reg = AgentRegistry.from_directory()
+    self_pairs = [
+        spec.key for spec in reg.list_all()
+        if spec.key in spec.typical_paired_with
+    ]
+    assert not self_pairs
+
+
+def test_real_registry_pair_suggestion_works_for_every_agent():
+    """For every agent, asking for a counterparty with an empty
+    decision_domains list should succeed via strategy 2 (typical_paired_with
+    with different domain) or fall through to strategy 4. PairSuggestionError
+    here means a corner of the registry has no valid counterparty."""
+    reg = AgentRegistry.from_directory()
+    failures: list[str] = []
+    for spec in reg.list_all():
+        try:
+            partner = reg.pair_suggestion(spec.key, [])
+        except PairSuggestionError as e:
+            failures.append(f"{spec.key}: {e}")
+            continue
+        partner_spec = reg.get(partner)
+        if partner_spec.domain == spec.domain:
+            failures.append(
+                f"{spec.key} -> {partner} but both are in domain {spec.domain!r}"
+            )
+    assert not failures, "\n".join(failures)
+
+
+def test_real_registry_debate_role_valid_for_every_agent():
+    """Every agent must declare critic_first | advocate_first | neutral.
+    parse_agent_md rejects unknown values, but a regression in the file
+    set would surface here as a load failure → keep this as a smoke
+    barrier for future contributors."""
+    from ai_dev_system.debate.agents.loader import VALID_DEBATE_ROLES
+
+    reg = AgentRegistry.from_directory()
+    bad = [
+        (spec.key, spec.debate_role)
+        for spec in reg.list_all()
+        if spec.debate_role not in VALID_DEBATE_ROLES
+    ]
+    assert not bad
