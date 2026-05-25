@@ -10,6 +10,7 @@ class Question:
     domain: str
     agent_a: str
     agent_b: str
+    source_decision_id: str | None = None
 
 
 @dataclass
