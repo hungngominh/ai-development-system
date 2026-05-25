@@ -28,6 +28,11 @@ from ai_dev_system.debate.agents.loader import (
     parse_agent_md,
     snake_case,
 )
+from ai_dev_system.debate.agents.registry import (
+    AgentNotFoundError,
+    AgentRegistry,
+    PairSuggestionError,
+)
 
 __all__ = [
     "AGENT_PROMPTS",
@@ -39,4 +44,7 @@ __all__ = [
     "load_agent_prompt",
     "parse_agent_md",
     "snake_case",
+    "AgentNotFoundError",
+    "AgentRegistry",
+    "PairSuggestionError",
 ]
