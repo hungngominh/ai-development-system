@@ -1,13 +1,9 @@
-"""Smoke tests for the M4 pipeline scaffold.
+"""Surface tests for the M4 pipeline package.
 
-Each stage currently raises NotImplementedError. These tests assert
-the scaffold surface stays stable (signatures, imports, prompt files
-on disk) and will be expanded as each slice lands. Once a stage gets
-a real implementation, replace its corresponding NotImplementedError
-test with behavior tests.
+Asserts the public surface (signatures, prompt files on disk, package
+re-exports) stays stable. Behaviour of each stage is covered by the
+per-stage test files; orchestration by `test_pipeline.py`.
 """
-
-import pytest
 
 from ai_dev_system.debate.questions import (
     Decision,
@@ -40,11 +36,6 @@ def test_prompts_are_loadable():
     assert "Question" in materializer.load_prompt() or "question" in materializer.load_prompt().lower()
     assert critic.load_critic_prompt()
     assert critic.load_rewrite_prompt()
-
-
-def test_pipeline_not_yet_implemented():
-    with pytest.raises(NotImplementedError, match="M4.5"):
-        pipeline.run_pipeline({}, brief_digest="", llm_client=None)
 
 
 def test_pipeline_result_dataclass():
