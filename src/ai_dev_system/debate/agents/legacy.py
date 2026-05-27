@@ -1,4 +1,21 @@
-# src/ai_dev_system/debate/agents.py
+# src/ai_dev_system/debate/agents/legacy.py
+"""DEPRECATED — legacy 3-line agent system prompts (M5.F.2, spec D10).
+
+Phase 1 v2 ships dense `.md`-based prompts under
+`references/agency-agents/` loaded via `AgentRegistry`. The constants
+here remain as a fallback for callers that haven't wired the registry
+(primarily tests and the v1 debate pipeline).
+
+Deprecation timeline (per phase1-migration-plan):
+- Now (M5.F.2): registry-aware callers prefer dense prompts; legacy
+  constants stay live but accessing AGENT_PROMPTS / MODERATOR_PROMPT
+  via the legacy module emits DeprecationWarning.
+- After `use_debate_v2` is the only enabled path: remove this module
+  (v6 cleanup migration).
+
+Prefer importing from `ai_dev_system.debate.agents` (the package
+__init__ re-exports without warning during the transition).
+"""
 
 AGENT_PROMPTS: dict[str, str] = {
     "SecuritySpecialist": (

@@ -22,6 +22,62 @@ def test_auto_resolve_optional():
     assert result.final.confidence == 1.0
     assert len(result.rounds) == 1
 
+
+# ---- M5.F.2 (spec D9) auto_resolution_reason ----
+
+
+def test_auto_resolve_sets_reason_without_decision():
+    """Backward-compat path: caller passes no decision → generic reason."""
+    q = Question(id="Q5", text="Color?", classification="OPTIONAL",
+                 domain="product", agent_a="ProductManager", agent_b="QAEngineer")
+    result = auto_resolve(q)
+    assert result.final.auto_resolution_reason is not None
+    assert "OPTIONAL" in result.final.auto_resolution_reason
+    assert "no debate" in result.final.auto_resolution_reason.lower()
+
+
+def test_auto_resolve_with_safe_default_decision_mentions_id():
+    from ai_dev_system.debate.questions.models import Decision
+
+    q = Question(id="Q5", text="Color?", classification="OPTIONAL",
+                 domain="product", agent_a="ProductManager", agent_b="QAEngineer",
+                 source_decision_id="D1")
+    decision = Decision(
+        id="D1", summary="Pick palette", classification="OPTIONAL",
+        domain_hints=["design"], has_safe_default=True,
+    )
+    result = auto_resolve(q, decision)
+    reason = result.final.auto_resolution_reason
+    assert reason is not None
+    assert "D1" in reason
+    assert "Pick palette" in reason
+    assert "safe default" in reason.lower()
+
+
+def test_auto_resolve_without_safe_default_marks_deferred():
+    from ai_dev_system.debate.questions.models import Decision
+
+    q = Question(id="Q5", text="Color?", classification="OPTIONAL",
+                 domain="product", agent_a="ProductManager", agent_b="QAEngineer",
+                 source_decision_id="D2")
+    decision = Decision(
+        id="D2", summary="Theme accent", classification="OPTIONAL",
+        domain_hints=["design"], has_safe_default=False,
+    )
+    result = auto_resolve(q, decision)
+    reason = result.final.auto_resolution_reason
+    assert reason is not None
+    assert "D2" in reason
+    assert "deferred" in reason.lower() or "non-blocking" in reason.lower()
+
+
+def test_round_result_auto_resolution_reason_defaults_none():
+    """Real debate rounds (constructed by moderator) leave the field None."""
+    r = RoundResult(round_number=1, agent_a_position="x", agent_b_position="y",
+                    moderator_summary="z", resolution_status="RESOLVED",
+                    confidence=0.9, caveat=None)
+    assert r.auto_resolution_reason is None
+
 def test_debate_report_escalated_and_resolved():
     q1 = Question(id="Q1", text="Auth?", classification="REQUIRED",
                   domain="security", agent_a="SecuritySpecialist", agent_b="BackendArchitect")

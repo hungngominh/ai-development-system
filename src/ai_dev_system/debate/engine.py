@@ -86,6 +86,33 @@ def _apply_diversity_penalty(
     )
 
 
+def _lookup_dense_prompt(
+    registry: AgentRegistry | None,
+    agent_key: str,
+) -> str | None:
+    """Return the dense `.md`-loaded system prompt for `agent_key`,
+    or None if no registry was wired / agent missing.
+
+    Returning None tells run_debate_round to fall back to the legacy
+    AGENT_PROMPTS dict — preserving v1 behaviour when no registry is
+    available. A missing key with a wired registry warns once so the
+    operator notices the degraded mode.
+    """
+    if registry is None:
+        return None
+    try:
+        spec = registry.get(agent_key)
+    except KeyError:
+        warnings.warn(
+            f"AgentRegistry: no spec for {agent_key!r}; "
+            f"falling back to legacy 3-line prompt",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return None
+    return spec.system_prompt
+
+
 def _debate_one(
     question: Question,
     llm_client,
@@ -96,11 +123,17 @@ def _debate_one(
     embedding_client: EmbeddingClient | None,
     embedding_cache: EmbeddingCache | None,
     moderator_prompt: str,
+    registry: AgentRegistry | None = None,
 ) -> QuestionDebateResult:
     """Run the round loop for a single non-OPTIONAL question."""
     prev_summary: str | None = None
     rounds: list[RoundResult] = []
     inject_skeptic_next = False
+
+    # Spec D10: prefer registry-loaded dense prompts; fall back to
+    # legacy 3-line prompts when no registry is wired.
+    agent_a_prompt = _lookup_dense_prompt(registry, question.agent_a)
+    agent_b_prompt = _lookup_dense_prompt(registry, question.agent_b)
 
     for round_num in range(1, config.max_rounds + 1):
         result = run_debate_round(
@@ -113,6 +146,8 @@ def _debate_one(
             inject_skeptic=inject_skeptic_next,
             moderator_system_prompt=moderator_prompt,
             max_moderator_retries=config.max_moderator_retries,
+            agent_a_system_prompt=agent_a_prompt,
+            agent_b_system_prompt=agent_b_prompt,
         )
 
         # M5.D + D7 echo detection: only meaningful round 1 → round 2.
@@ -189,7 +224,9 @@ def run_debate(
     results: list[QuestionDebateResult] = []
     for q in questions:
         if q.classification == "OPTIONAL":
-            results.append(auto_resolve(q))
+            # Spec D9: pass the matched Decision (if any) so the
+            # auto_resolution_reason references the safe default.
+            results.append(auto_resolve(q, _resolve_decision(q, decision_map)))
             continue
 
         # M5.D pre-debate diversity check
@@ -210,6 +247,7 @@ def run_debate(
                 embedding_client=embedding_client,
                 embedding_cache=embedding_cache,
                 moderator_prompt=moderator_prompt,
+                registry=registry,
             )
         )
 

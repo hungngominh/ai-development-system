@@ -82,6 +82,21 @@ def build_agent_b_user(
     return base
 
 
+def _resolve_agent_system_prompt(agent_key: str) -> str:
+    """Look up an agent's system prompt.
+
+    Lookup order (spec D10 — favours dense .md when available):
+        1. Caller-supplied override (handled by run_debate_round kwarg).
+        2. Legacy 3-line prompt from AGENT_PROMPTS.
+
+    Engine.py is the primary caller that supplies dense prompts
+    (looked up via AgentRegistry when one is wired); this helper is the
+    fallback path for callers without a registry — keeps v1 behaviour
+    intact.
+    """
+    return AGENT_PROMPTS[agent_key]
+
+
 def run_debate_round(
     question: Question,
     round_num: int,
@@ -93,6 +108,8 @@ def run_debate_round(
     inject_skeptic: bool = False,
     moderator_system_prompt: str = MODERATOR_PROMPT,
     max_moderator_retries: int = MAX_MODERATOR_RETRIES,
+    agent_a_system_prompt: str | None = None,
+    agent_b_system_prompt: str | None = None,
 ) -> RoundResult:
     """Three sequential LLM calls: Agent A → Agent B → Moderator.
 
@@ -107,6 +124,13 @@ def run_debate_round(
         max_moderator_retries       — overrides moderator.MAX_MODERATOR_RETRIES
                                        per-call (rarely needed; usually
                                        set via DebateConfig).
+        agent_a_system_prompt,
+        agent_b_system_prompt       — D10: dense system prompts looked
+                                       up by the engine via AgentRegistry.
+                                       Falls back to the legacy 3-line
+                                       AGENT_PROMPTS dict when None,
+                                       preserving v1 behaviour for
+                                       callers without a registry.
 
     Moderator JSON parsing + retry is delegated to
     `debate.moderator.run_moderator` (M5.C). Unparseable responses
@@ -117,7 +141,7 @@ def run_debate_round(
         brief_digest=brief_digest, decision=decision,
     )
     agent_a_position = llm_client.complete(
-        system=AGENT_PROMPTS[question.agent_a],
+        system=agent_a_system_prompt or _resolve_agent_system_prompt(question.agent_a),
         user=agent_a_user,
     )
 
@@ -127,7 +151,7 @@ def run_debate_round(
         inject_skeptic=inject_skeptic,
     )
     agent_b_position = llm_client.complete(
-        system=AGENT_PROMPTS[question.agent_b],
+        system=agent_b_system_prompt or _resolve_agent_system_prompt(question.agent_b),
         user=agent_b_user,
     )
 
