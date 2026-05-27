@@ -1,4 +1,4 @@
-"""Unit tests for gate1_review.state (G10 — session state persistence).
+"""Unit tests for gate1_review.state (G10+G8 — session state persistence).
 
 Tests cover:
 - GateSessionState serialization round-trip (to_json / from_json)
@@ -8,6 +8,9 @@ Tests cover:
 - empty(): creates clean state for a run_id
 - save_state / load_state / clear_state DB operations
 - load_state returns empty state when column is NULL
+- G8: scope_affected set True when scope_in/scope_out edited
+- G8: scope_affected not set for non-scope fields
+- G8: scope_affected preserved in serialization round-trip
 - Finalize clears session state (via __main__.cmd_finalize)
 """
 
@@ -190,3 +193,65 @@ def test_load_state_missing_run_returns_empty(conn):
     loaded = load_state("nonexistent_run", conn)
     assert isinstance(loaded, GateSessionState)
     assert not loaded.resolved
+
+
+# ---- G8: scope_affected tracking ----
+
+
+def test_scope_affected_false_by_default():
+    state = _state()
+    assert not state.scope_affected
+
+
+def test_scope_affected_true_on_scope_in_edit():
+    state = _state()
+    state.record_brief_edit("scope_in", "append", "reporting")
+    assert state.scope_affected
+
+
+def test_scope_affected_true_on_scope_out_edit():
+    state = _state()
+    state.record_brief_edit("scope_out", "append", "analytics")
+    assert state.scope_affected
+
+
+def test_scope_affected_false_for_non_scope_field():
+    state = _state()
+    state.record_brief_edit("problem_statement", "set", "New problem")
+    assert not state.scope_affected
+
+
+def test_scope_affected_sticky_after_non_scope_edit():
+    state = _state()
+    state.record_brief_edit("scope_in", "append", "reporting")
+    state.record_brief_edit("deadline", "set", "Q3")
+    # scope_affected remains True even after subsequent non-scope edits
+    assert state.scope_affected
+
+
+def test_scope_affected_serialized_in_to_json():
+    state = _state()
+    state.record_brief_edit("scope_in", "append", "search")
+    payload = json.loads(state.to_json())
+    assert payload["scope_affected"] is True
+
+
+def test_scope_affected_round_trip_true():
+    state = GateSessionState.empty("r1")
+    state.record_brief_edit("scope_out", "remove", "chat")
+    restored = GateSessionState.from_json("r1", state.to_json())
+    assert restored.scope_affected is True
+
+
+def test_scope_affected_round_trip_false():
+    state = GateSessionState.empty("r1")
+    state.record_brief_edit("deadline", "set", "Q4")
+    restored = GateSessionState.from_json("r1", state.to_json())
+    assert restored.scope_affected is False
+
+
+def test_scope_affected_defaults_false_on_old_json():
+    # JSON without scope_affected key (e.g. from G10 before G8)
+    old_json = json.dumps({"schema": 1, "run_id": "r1", "resolved": {}, "brief_edits": [], "approved_all": False})
+    restored = GateSessionState.from_json("r1", old_json)
+    assert restored.scope_affected is False

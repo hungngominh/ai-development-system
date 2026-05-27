@@ -137,10 +137,19 @@ def cmd_finalize(args) -> None:
         for d in raw
     ]
 
+    # Load scope_affected flag before clearing state (G8)
+    session = load_state(args.run_id, conn)
+    scope_affected = session.scope_affected
+
     aa_id, dl_id = finalize_gate1(args.run_id, decisions, config.storage_root, conn)
     # Clear session state after successful finalize
     clear_state(args.run_id, conn)
-    print(json.dumps({"status": "ok", "aa_id": aa_id, "dl_id": dl_id}))
+    print(json.dumps({
+        "status": "ok",
+        "aa_id": aa_id,
+        "dl_id": dl_id,
+        "scope_affected": scope_affected,  # G8: skill shows warning if True
+    }))
 
 
 def cmd_save_state(args) -> None:
@@ -171,6 +180,7 @@ def cmd_load_state(args) -> None:
             for e in state.brief_edits
         ],
         "approved_all": state.approved_all,
+        "scope_affected": state.scope_affected,  # G8
     }, ensure_ascii=False))
 
 

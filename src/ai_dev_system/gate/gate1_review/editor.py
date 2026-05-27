@@ -1,9 +1,10 @@
 # src/ai_dev_system/gate/gate1_review/editor.py
-"""Gate 1 review — brief field editor (G7).
+"""Gate 1 review — brief field editor (G7+G8).
 
-Allows limited brief field edits at Gate 1 without re-triggering the
-debate pipeline. Re-trigger logic (G8) is deferred; this module handles
-the edit-only (assumption) path.
+Allows limited brief field edits at Gate 1. Scope-affecting edits
+(scope_in / scope_out) set scope_affected=True in GateSessionState (G8),
+which cmd_finalize surfaces so the skill can warn the user and offer to
+re-trigger the debate pipeline.
 
 Editable fields (whitelist from spec gate1-skill-redesign §Brief Edit at Gate):
     problem_statement, who_feels_pain, current_workaround,
@@ -216,8 +217,8 @@ def _apply_list_edit(brief: dict, field: str, operation: Operation, value: objec
     scope_affected = field in SCOPE_AFFECTING_FIELDS
     if scope_affected:
         msg += (
-            "\n\n⚠️ Bạn đã thay đổi scope — câu hỏi trong debate có thể không còn phản ánh "
-            "đúng scope mới. G8 (re-trigger) chưa được implement; assumption: tiếp tục với scope mới."
+            "\n\n⚠️ Scope thay đổi — câu hỏi debate có thể không còn phản ánh đúng scope mới. "
+            "Khi finalize, hệ thống sẽ cảnh báo để bạn xem xét re-trigger debate pipeline."
         )
 
     return EditResult(

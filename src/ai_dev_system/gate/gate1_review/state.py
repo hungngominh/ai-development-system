@@ -1,9 +1,13 @@
 # src/ai_dev_system/gate/gate1_review/state.py
-"""Gate 1 review session state (G10) — persist + resume mid-review.
+"""Gate 1 review session state (G10+G8) — persist + resume mid-review.
 
 GateSessionState stores per-question decisions made so far. It is serialised
 as JSON into the `runs.gate1_session_state` column so the review can be
 resumed if the skill is closed before `finalize`.
+
+G8: scope_affected=True when scope_in or scope_out were edited during this
+session. cmd_finalize includes this flag in its response so the skill can
+warn the user and optionally re-trigger the debate/question pipeline.
 
 Format (JSON):
 {
@@ -11,14 +15,14 @@ Format (JSON):
   "run_id": "...",
   "resolved": {
     "Q1": {"choice": "agent_a", "override": null, "resolution_type": "CHOICE_A"},
-    "Q2": {"choice": "moderator", "override": null, "resolution_type": "MODERATOR"},
-    "Q3": {"choice": "override", "override": "Use Redis", "resolution_type": "FORCED_HUMAN"},
+    ...
   },
   "brief_edits": [
     {"field": "scope_in", "operation": "append", "value": "reporting"},
     ...
   ],
-  "approved_all": false
+  "approved_all": false,
+  "scope_affected": false
 }
 """
 
@@ -29,6 +33,9 @@ from dataclasses import dataclass, field
 
 
 _SCHEMA_VERSION = 1
+
+# Fields whose edit marks scope_affected=True (G8)
+_SCOPE_AFFECTING_FIELDS: frozenset[str] = frozenset({"scope_in", "scope_out"})
 
 
 @dataclass
@@ -52,6 +59,7 @@ class GateSessionState:
     resolved: dict[str, ResolvedItem] = field(default_factory=dict)
     brief_edits: list[BriefEditEntry] = field(default_factory=list)
     approved_all: bool = False
+    scope_affected: bool = False   # G8: True if scope_in/scope_out edited
 
     def record_choice(
         self,
@@ -78,6 +86,8 @@ class GateSessionState:
             operation=operation,
             value=value,
         ))
+        if field_name in _SCOPE_AFFECTING_FIELDS:
+            self.scope_affected = True
 
     def is_resolved(self, question_id: str) -> bool:
         return question_id in self.resolved or self.approved_all
@@ -99,6 +109,7 @@ class GateSessionState:
                 for e in self.brief_edits
             ],
             "approved_all": self.approved_all,
+            "scope_affected": self.scope_affected,
         }
         return json.dumps(data, ensure_ascii=False)
 
@@ -107,6 +118,7 @@ class GateSessionState:
         data = json.loads(raw)
         state = cls(run_id=run_id)
         state.approved_all = data.get("approved_all", False)
+        state.scope_affected = data.get("scope_affected", False)
         for qid, r in (data.get("resolved") or {}).items():
             state.resolved[qid] = ResolvedItem(
                 question_id=qid,
