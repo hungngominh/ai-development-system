@@ -1,14 +1,20 @@
 # src/ai_dev_system/debate_pipeline.py
 import json
 import os
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
 from ai_dev_system.config import Config
+from ai_dev_system.feature_flags import FeatureFlags
 from ai_dev_system.normalize import normalize_idea
+from ai_dev_system.debate.agents import AgentRegistry
+from ai_dev_system.debate.config import DebateConfig
 from ai_dev_system.debate.questions import generate_questions
+from ai_dev_system.debate.questions.pipeline import run_pipeline as run_question_pipeline_v2
 from ai_dev_system.debate.engine import run_debate
 from ai_dev_system.debate.report import DebateReport
+from ai_dev_system.intake.digest import brief_digest as build_brief_digest
 from ai_dev_system.agents.base import PromotedOutput
 from ai_dev_system.db.repos.runs import RunRepo
 from ai_dev_system.db.repos.task_runs import TaskRunRepo
@@ -23,11 +29,107 @@ from ai_dev_system.engine.runner import run_execution, ExecutionResult
 from ai_dev_system.pipeline import PipelineAborted
 
 
+def _load_intake_brief(conn, run_id: str) -> dict | None:
+    """Read the INTAKE_BRIEF artifact for a run, if any. Returns the parsed
+    brief.json dict, or None when:
+      - the run is legacy (pre-v5 or pipeline_version=1) — never has a brief,
+      - the run has no intake_brief_id set,
+      - the artifact row / brief.json file is missing.
+    """
+    from ai_dev_system.migration.classify import is_legacy_run
+    if is_legacy_run(conn, run_id):
+        return None
+
+    row = conn.execute(
+        "SELECT intake_brief_id FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    if row is None or not row["intake_brief_id"]:
+        return None
+    art = conn.execute(
+        "SELECT content_ref FROM artifacts WHERE artifact_id = ?",
+        (row["intake_brief_id"],),
+    ).fetchone()
+    if art is None:
+        return None
+    brief_path = Path(art["content_ref"]) / "brief.json"
+    if not brief_path.exists():
+        return None
+    with open(brief_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
 @dataclass
 class DebatePipelineResult:
     run_id: str
     debate_report: DebateReport
     artifact_id: str
+
+
+def _question_path(
+    flags: FeatureFlags,
+    brief_v1: dict,
+    brief_v2: dict | None,
+    llm_client,
+):
+    """Spec phase1-migration §Dispatcher: question gen routes by flag.
+
+    Returns `(questions, decisions, digest)` where `decisions` and
+    `digest` are populated only on the v2 path (None otherwise).
+
+    Fallback contract: when `use_question_pipeline_v2` is on but no
+    brief_v2 is available, warn and degrade to v1 rather than failing
+    the run — the linear flag order requires `use_intake_wizard` first,
+    but legacy callers may still slip through.
+
+    NOTE: dispatch telemetry events (DISPATCH_*) are deferred — adding
+    them requires extending the events.event_type CHECK constraint via
+    a schema migration. The flag snapshot in DebateReport.brief + the
+    presence/absence of `decisions` already exposes which path ran for
+    eval purposes.
+    """
+    if flags.use_question_pipeline_v2 and brief_v2 is not None:
+        digest = build_brief_digest(brief_v2)
+        result = run_question_pipeline_v2(brief_v2, digest, llm_client)
+        return result.questions_final, result.decisions, digest
+
+    if flags.use_question_pipeline_v2 and brief_v2 is None:
+        warnings.warn(
+            "use_question_pipeline_v2=true but no brief_v2 supplied; "
+            "falling back to legacy generate_questions.",
+            stacklevel=2,
+        )
+
+    questions = generate_questions(brief_v1, llm_client)
+    return questions, None, None
+
+
+def _debate_path(
+    flags: FeatureFlags,
+    questions,
+    llm_client,
+    *,
+    run_id: str,
+    brief: dict,
+    decisions,
+    digest: str | None,
+) -> DebateReport:
+    """Spec phase1-migration §Dispatcher: debate routes by flag.
+
+    Flag-on (`use_debate_v2`) wires DebateConfig + AgentRegistry +
+    brief_digest + decisions into the engine. Flag-off keeps the v1
+    no-kwargs call shape so existing fixtures stay deterministic.
+    """
+    if flags.use_debate_v2:
+        registry = AgentRegistry.from_directory()
+        return run_debate(
+            questions, llm_client, run_id=run_id, brief=brief,
+            config=DebateConfig(),
+            registry=registry,
+            brief_digest=digest,
+            decisions=decisions,
+        )
+
+    return run_debate(questions, llm_client, run_id=run_id, brief=brief)
 
 
 def run_debate_pipeline(
@@ -36,31 +138,59 @@ def run_debate_pipeline(
     conn,
     project_id: str,
     llm_client,
+    *,
+    brief_v2: dict | None = None,
+    flags: FeatureFlags | None = None,
 ) -> DebatePipelineResult:
-    """Phase A: normalize → question gen → debate → DEBATE_REPORT artifact → PAUSED_AT_GATE_1."""
+    """Phase A: normalize → question gen → debate → DEBATE_REPORT artifact → PAUSED_AT_GATE_1.
+
+    Feature-flag dispatch (snapshot once at entry per
+    phase1-migration-plan §Dispatcher Pattern):
+        - `use_question_pipeline_v2` + `brief_v2` → 4-stage pipeline
+          (Inventory → Materializer → Critic → Coverage); else legacy.
+        - `use_debate_v2` → engine wired with AgentRegistry,
+          DebateConfig, brief_digest, and Decision list; else v1.
+
+    `brief_v2` is supplied by the caller (e.g. start-project skill
+    when use_intake_wizard is enabled). When omitted, the v2 question
+    pipeline silently degrades to v1 so legacy callers keep working.
+    """
     run_repo = RunRepo(conn)
     task_run_repo = TaskRunRepo(conn)
     event_repo = EventRepo(conn)
 
+    # Snapshot flags once at entry.
+    active_flags = flags or FeatureFlags.from_env()
+
     # Run created with status=RUNNING_PHASE_1A
     run_id = run_repo.create(project_id=project_id, pipeline_type="debate_pipeline")
 
-    # Step 1: Normalize
+    # Step 1: Normalize (legacy v1 brief — still needed as fallback
+    # input to v1 question gen + as the `brief` field of the
+    # DebateReport for backwards-compat downstream consumers).
     brief = normalize_idea(raw_idea)
+    # Stamp the flag snapshot onto the brief so it travels with the
+    # DebateReport artifact (eval/audit can read which path ran).
+    brief = {**brief, "_flags": active_flags.snapshot()}
 
-    # Step 2: Generate questions
+    # Step 2: Generate questions (flag-dispatched)
     task_run = task_run_repo.create_sync(run_id, task_type="generate_questions")
     task_run["input_artifact_ids"] = []
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run["task_run_id"])
-    questions = generate_questions(brief, llm_client)
+    questions, decisions, digest = _question_path(
+        active_flags, brief, brief_v2, llm_client,
+    )
 
-    # Step 3: Run debate
+    # Step 3: Run debate (flag-dispatched)
     run_repo.update_status(run_id, "RUNNING_PHASE_1B")
 
     task_run = task_run_repo.create_sync(run_id, task_type="run_debate")
     task_run["input_artifact_ids"] = []
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run["task_run_id"])
-    debate_report = run_debate(questions, llm_client, run_id=run_id, brief=brief)
+    debate_report = _debate_path(
+        active_flags, questions, llm_client,
+        run_id=run_id, brief=brief, decisions=decisions, digest=digest,
+    )
 
     # Step 4: Promote DEBATE_REPORT artifact
     temp_path = build_temp_path(
@@ -115,30 +245,44 @@ def run_phase_b_pipeline(
 
     # Guard: must be called after Gate 1
     row = conn.execute(
-        "SELECT status, current_artifacts FROM runs WHERE run_id = %s", (run_id,)
+        "SELECT status, current_artifacts FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
     assert row["status"] == "RUNNING_PHASE_1D", (
         f"Expected RUNNING_PHASE_1D, got {row['status']}"
     )
 
-    # Load approved_answers from artifact
-    aa_artifact_id = row["current_artifacts"]["approved_answers_id"]
+    # Load approved_answers from artifact (current_artifacts is JSON TEXT in SQLite)
+    from ai_dev_system.db.helpers import load_json
+    current_artifacts = load_json(row["current_artifacts"], default={}) or {}
+    aa_artifact_id = current_artifacts["approved_answers_id"]
     aa_artifact = conn.execute(
-        "SELECT content_ref FROM artifacts WHERE artifact_id = %s", (aa_artifact_id,)
+        "SELECT content_ref FROM artifacts WHERE artifact_id = ?", (aa_artifact_id,)
     ).fetchone()
     aa_path = os.path.join(aa_artifact["content_ref"], "approved_answers.json")
     with open(aa_path, encoding="utf-8") as f:
         approved_answers = json.load(f)
 
+    # Optional: load INTAKE_BRIEF v2 if this run has one (Phase 1 v2 path).
+    # Legacy runs (no intake_brief_id) get brief_v2=None → finalize_spec falls back
+    # to the v1 prompt unchanged.
+    brief_v2 = _load_intake_brief(conn, run_id)
+    intake_brief_id = current_artifacts.get("intake_brief_id")
+
     # Step 1: finalize_spec
     task_run = task_run_repo.create_sync(run_id, task_type="finalize_spec")
-    task_run["input_artifact_ids"] = [aa_artifact_id]
+    input_ids = [aa_artifact_id]
+    if intake_brief_id:
+        input_ids.append(intake_brief_id)
+    task_run["input_artifact_ids"] = input_ids
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run["task_run_id"])
 
     temp_path = build_temp_path(
         config.storage_root, run_id, task_run["task_id"], task_run["attempt_number"]
     )
-    bundle = finalize_spec(approved_answers, run_id, llm_client, output_dir=Path(temp_path))
+    bundle = finalize_spec(
+        approved_answers, run_id, llm_client,
+        output_dir=Path(temp_path), brief_v2=brief_v2,
+    )
 
     promoted = PromotedOutput(name="spec_bundle", artifact_type="SPEC_BUNDLE",
                               description="5-file spec bundle from Gate 1 answers")
@@ -146,7 +290,7 @@ def run_phase_b_pipeline(
 
     # Refresh bundle content from final artifact location
     spec_row = conn.execute(
-        "SELECT content_ref FROM artifacts WHERE artifact_id = %s", (spec_artifact_id,)
+        "SELECT content_ref FROM artifacts WHERE artifact_id = ?", (spec_artifact_id,)
     ).fetchone()
     bundle_root = Path(spec_row["content_ref"])
     spec_content = {
@@ -197,8 +341,8 @@ def run_phase_b_pipeline(
         if execution_result.status == "COMPLETED":
             if llm_client is not None:
                 conn.execute(
-                    "UPDATE runs SET status = 'RUNNING_PHASE_V', last_activity_at = now() "
-                    "WHERE run_id = %s AND status = 'COMPLETED'",
+                    "UPDATE runs SET status = 'RUNNING_PHASE_V', last_activity_at = CURRENT_TIMESTAMP "
+                    "WHERE run_id = ? AND status = 'COMPLETED'",
                     (run_id,),
                 )
                 from ai_dev_system.verification.pipeline import run_phase_v_pipeline
@@ -235,6 +379,9 @@ def _debate_report_to_dict(report: DebateReport) -> dict:
             "resolution_status": r.resolution_status,
             "confidence": r.confidence,
             "caveat": r.caveat,
+            # Spec D9: surface the auto-resolve reason so Gate 1 can
+            # render the OPTIONAL tier with context.
+            "auto_resolution_reason": r.auto_resolution_reason,
         }
 
     def qdr_to_dict(qdr):
@@ -246,6 +393,7 @@ def _debate_report_to_dict(report: DebateReport) -> dict:
                 "domain": qdr.question.domain,
                 "agent_a": qdr.question.agent_a,
                 "agent_b": qdr.question.agent_b,
+                "source_decision_id": qdr.question.source_decision_id,
             },
             "rounds": [round_to_dict(r) for r in qdr.rounds],
             "final": round_to_dict(qdr.final),
