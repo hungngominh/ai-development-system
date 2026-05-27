@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Optional
 
 REQUIRED_FILES = ["problem.md", "requirements.md", "constraints.md",
                   "success_criteria.md", "assumptions.md"]
@@ -9,6 +10,8 @@ class SpecBundle:
     version: int
     root_dir: Path
     files: dict[str, Path]
+    trace_map_path: Optional[Path] = None       # SP8 — set when trace map written
+    grounding_violations: list = field(default_factory=list)  # SP7 — remaining violations
 
 def generate_spec_bundle(approved_brief: dict, output_dir: Path) -> SpecBundle:
     """Write 5 spec files from approved brief. Returns SpecBundle."""

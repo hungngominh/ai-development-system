@@ -23,8 +23,9 @@ from ai_dev_system.spec.generators.functional import generate_functional
 from ai_dev_system.spec.generators.non_functional import generate_non_functional
 from ai_dev_system.spec.generators.acceptance_criteria import generate_acceptance_criteria
 from ai_dev_system.spec.planner import SectionOutline, build_outlines, PlannerOutput
-from ai_dev_system.spec.grounding import check_section, GroundingReport
+from ai_dev_system.spec.grounding import check_section, llm_grounding_check, GroundingReport
 from ai_dev_system.spec.repair import repair_section
+from ai_dev_system.spec.tracer import build_trace_map, write_trace_map
 from ai_dev_system.spec_bundle import SpecBundle
 
 # System prompts for repair — mirrors what each generator passes to LLM
@@ -123,6 +124,17 @@ def run_spec_pipeline(
                 section, repaired.content, outline, brief,
             )
 
+    # SP7: LLM hallucination check (optional, batched single call)
+    if cfg.grounding_llm_check:
+        live_sections = {sec: d.content for sec, d in drafts.items() if not d.degraded}
+        llm_violations = llm_grounding_check(live_sections, brief, decisions, llm_client)
+        for section, viols in llm_violations.items():
+            if section in grounding_reports:
+                grounding_reports[section].violations.extend(viols)
+            else:
+                rpt = GroundingReport(section=section, violations=list(viols))
+                grounding_reports[section] = rpt
+
     # Warn on degraded sections and grounding errors
     for draft in drafts.values():
         if draft.degraded:
@@ -141,6 +153,12 @@ def run_spec_pipeline(
                 stacklevel=2,
             )
 
+    # Collect remaining grounding violations for SpecBundle metadata
+    remaining_violations = [
+        v for report in grounding_reports.values()
+        for v in report.violations
+    ]
+
     # Stage 4: Write files
     files: dict[str, Path] = {}
     for section, filename in SECTION_FILES.items():
@@ -150,7 +168,19 @@ def run_spec_pipeline(
         path.write_text(content, encoding="utf-8")
         files[filename] = path
 
-    return SpecBundle(version=2, root_dir=output_dir, files=files)
+    # Stage 5: Trace map (SP8)
+    trace_map_path: Path | None = None
+    if cfg.require_trace_map:
+        trace_map = build_trace_map(drafts, brief, decisions, questions)
+        trace_map_path = write_trace_map(trace_map, output_dir)
+
+    return SpecBundle(
+        version=2,
+        root_dir=output_dir,
+        files=files,
+        trace_map_path=trace_map_path,
+        grounding_violations=remaining_violations,
+    )
 
 
 def _run_generators(

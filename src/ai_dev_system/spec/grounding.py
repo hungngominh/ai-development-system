@@ -1,15 +1,19 @@
 # src/ai_dev_system/spec/grounding.py
-"""Spec Generation v2 — Rule-based grounding checker (SP5).
+"""Spec Generation v2 — Grounding checker (SP5+SP7).
 
-Four rules checked per section draft:
+Rule-based checks (SP5) per section draft:
   1. scope_out_positive  — scope_out items not mentioned in a building/positive context
   2. inline_refs         — [brief:field] markers present for each must_reference field
   3. measurable_ac       — acceptance_criteria uses numbers, not vague words
   4. scope_in_coverage   — at least some scope_in items appear in functional/AC sections
+
+LLM-based check (SP7):
+  5. hallucination       — unsupported factual claims (number, tech, integration, behavior)
 """
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Literal
@@ -163,3 +167,64 @@ def _check_scope_in_coverage(content: str, brief: dict, report: GroundingReport)
         ))
     else:
         report.passed_rules.append("scope_in_coverage")
+
+
+# ---- SP7: LLM-based G5 hallucination check ----
+
+_G5_SYSTEM_PROMPT = """\
+You are auditing a software spec for hallucinations. List any factual claim
+(specific number, technology name, integration point, behaviour) in the spec
+sections that is NOT explicitly supported by the brief fields or approved decisions.
+
+Respond ONLY with a JSON object, no markdown:
+{"violations": [{"section": "<section_name>", "claim": "<exact claim>", "issue": "<why unsupported>"}]}
+
+If no violations found, respond: {"violations": []}
+"""
+
+
+def llm_grounding_check(
+    sections: dict[str, str],
+    brief: dict,
+    decisions: list,
+    llm_client,
+) -> dict[str, list[GroundingViolation]]:
+    """G5: LLM hallucination detection across all sections (SP7).
+
+    Returns a dict mapping section name -> list of GroundingViolation.
+    Returns empty dict on any LLM failure (non-blocking).
+    """
+    brief_digest = json.dumps(
+        {k: v for k, v in brief.items() if k not in ("brief_version",)},
+        ensure_ascii=False,
+    )
+    decisions_summary = json.dumps(
+        [d.get("rationale", str(d)) if isinstance(d, dict) else str(d) for d in decisions[:10]],
+        ensure_ascii=False,
+    )
+    sections_text = "\n\n".join(
+        f"=== {sec} ===\n{content}" for sec, content in sections.items()
+    )
+    user_msg = (
+        f"Brief: {brief_digest}\n\n"
+        f"Decisions: {decisions_summary}\n\n"
+        f"Spec sections:\n{sections_text}\n\n"
+        "Return JSON only."
+    )
+
+    try:
+        raw = llm_client.complete(system=_G5_SYSTEM_PROMPT, user=user_msg)
+        data = json.loads(raw.strip())
+        result: dict[str, list[GroundingViolation]] = {}
+        for entry in data.get("violations", []):
+            sec = str(entry.get("section", "unknown"))
+            claim = entry.get("claim", "?")
+            issue = entry.get("issue", "")
+            result.setdefault(sec, []).append(GroundingViolation(
+                rule="hallucination",
+                message=f"Unsupported claim: {claim} — {issue}",
+                severity="error",
+            ))
+        return result
+    except Exception:
+        return {}
