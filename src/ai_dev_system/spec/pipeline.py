@@ -23,7 +23,24 @@ from ai_dev_system.spec.generators.functional import generate_functional
 from ai_dev_system.spec.generators.non_functional import generate_non_functional
 from ai_dev_system.spec.generators.acceptance_criteria import generate_acceptance_criteria
 from ai_dev_system.spec.planner import SectionOutline, build_outlines, PlannerOutput
+from ai_dev_system.spec.grounding import check_section, GroundingReport
+from ai_dev_system.spec.repair import repair_section
 from ai_dev_system.spec_bundle import SpecBundle
+
+# System prompts for repair — mirrors what each generator passes to LLM
+from ai_dev_system.spec.generators.proposal import _SYSTEM_PROMPT as _PROMPT_PROPOSAL
+from ai_dev_system.spec.generators.design import _SYSTEM_PROMPT as _PROMPT_DESIGN
+from ai_dev_system.spec.generators.functional import _SYSTEM_PROMPT as _PROMPT_FUNCTIONAL
+from ai_dev_system.spec.generators.non_functional import _SYSTEM_PROMPT as _PROMPT_NON_FUNCTIONAL
+from ai_dev_system.spec.generators.acceptance_criteria import _SYSTEM_PROMPT as _PROMPT_AC
+
+_SYSTEM_PROMPT_MAP = {
+    "proposal": _PROMPT_PROPOSAL,
+    "design": _PROMPT_DESIGN,
+    "functional": _PROMPT_FUNCTIONAL,
+    "non_functional": _PROMPT_NON_FUNCTIONAL,
+    "acceptance_criteria": _PROMPT_AC,
+}
 
 
 @dataclass
@@ -83,12 +100,43 @@ def run_spec_pipeline(
     # Stage 2: Generate sections
     drafts = _run_generators(cfg, outline_by_section, brief, approved_answers, decisions, llm_client)
 
-    # Warn on degraded sections
+    # Stage 3: Grounding + repair (SP5-SP6)
+    grounding_reports: dict[str, GroundingReport] = {}
+    repair_budget = cfg.max_repair_calls
+    for section, draft in list(drafts.items()):
+        if draft.degraded or repair_budget <= 0:
+            continue
+        outline = outline_by_section.get(section) or _fallback_outline(section)
+        report = check_section(section, draft.content, outline, brief)
+        grounding_reports[section] = report
+
+        if report.has_errors and cfg.max_repair_iterations > 0 and repair_budget > 0:
+            repaired = repair_section(
+                draft, report.violations, outline,
+                brief, approved_answers, decisions, llm_client,
+                system_prompt=_SYSTEM_PROMPT_MAP[section],
+            )
+            repair_budget -= 1
+            drafts[section] = repaired
+            # Re-check after repair (informational — no further repair attempt)
+            grounding_reports[section] = check_section(
+                section, repaired.content, outline, brief,
+            )
+
+    # Warn on degraded sections and grounding errors
     for draft in drafts.values():
         if draft.degraded:
             warnings.warn(
                 f"Spec section '{draft.section}' generation degraded: {draft.error}. "
                 "Placeholder written — review and fill manually.",
+                UserWarning,
+                stacklevel=2,
+            )
+    for section, report in grounding_reports.items():
+        if report.has_errors:
+            violations_str = "; ".join(v.message for v in report.violations if v.severity == "error")
+            warnings.warn(
+                f"Spec section '{section}' has grounding violations after repair: {violations_str}",
                 UserWarning,
                 stacklevel=2,
             )
