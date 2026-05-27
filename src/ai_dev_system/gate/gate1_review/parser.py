@@ -32,6 +32,7 @@ from typing import Literal
 ActionType = Literal[
     "answer",
     "expand",
+    "edit_brief",
     "approve_all",
     "confirm",
     "abort",
@@ -100,6 +101,11 @@ _RE_ABORT = re.compile(
     r"^(?:abort|hủy|cancel|thoát)\b",
     re.IGNORECASE,
 )
+# edit brief: "edit <field>: <value>" or "edit <field> = <value>"
+_RE_EDIT_BRIEF = re.compile(
+    r"^edit\s+([\w_]+)\s*[:=]\s*(.+)$",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def parse_user_input(
@@ -150,6 +156,18 @@ def parse_user_input(
         return ParseResult(
             action_type="approve_all",
             message="Approve toàn bộ câu consensus. Gõ `confirm` để ghi artifacts.",
+        )
+
+    # edit brief
+    m = _RE_EDIT_BRIEF.match(stripped)
+    if m:
+        field = m.group(1).strip()
+        raw_value = m.group(2).strip()
+        return ParseResult(
+            action_type="edit_brief",
+            target=field,
+            payload=raw_value,
+            message=f"Hiểu là: sửa brief field `{field}` = {raw_value!r}. Đúng không?",
         )
 
     # show brief
