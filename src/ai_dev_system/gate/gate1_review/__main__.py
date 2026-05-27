@@ -1,24 +1,16 @@
 # src/ai_dev_system/gate/gate1_review/__main__.py
-"""CLI entry point for Gate 1 review module (G5).
+"""CLI entry point for Gate 1 review module (G5+G10).
 
 Usage:
     python -m ai_dev_system.gate.gate1_review load <run_id>
-        → JSON: {sections, brief_header, pending_count, is_legacy}
-
-    python -m ai_dev_system.gate.gate1_review parse --run-id <id> --input "<text>"
-                                                     [--pending-forced N]
-                                                     [--pending-pf N]
-        → JSON: {action, target, choice, payload, message, accepted}
-
     python -m ai_dev_system.gate.gate1_review render --run-id <id>
-        → Full markdown Gate 1 review output
+    python -m ai_dev_system.gate.gate1_review parse  --run-id <id> --input "<text>"
+    python -m ai_dev_system.gate.gate1_review finalize --run-id <id> --decisions-json '<json>'
+    python -m ai_dev_system.gate.gate1_review save-state --run-id <id> --state-json '<json>'
+    python -m ai_dev_system.gate.gate1_review load-state --run-id <id>
+    python -m ai_dev_system.gate.gate1_review clear-state --run-id <id>
 
-    python -m ai_dev_system.gate.gate1_review finalize --run-id <id>
-                                                       --decisions-json '<json>'
-        → JSON: {aa_id, dl_id, status}
-
-Called by the `/review-debate` skill. All output is JSON so the skill
-can parse structured results.
+Called by the review-debate skill. All output is JSON.
 """
 
 from __future__ import annotations
@@ -37,6 +29,12 @@ from ai_dev_system.gate.gate1_review.renderer import (
     render_brief_header,
 )
 from ai_dev_system.gate.gate1_review.sections import build_sections, total_pending
+from ai_dev_system.gate.gate1_review.state import (
+    GateSessionState,
+    load_state,
+    save_state,
+    clear_state,
+)
 
 
 def _get_conn():
@@ -95,10 +93,19 @@ def cmd_render(args) -> None:
 
 def cmd_parse(args) -> None:
     """Parse a user input string and emit structured ParseResult as JSON."""
+    llm = None
+    if getattr(args, "llm", False):
+        try:
+            from ai_dev_system.llm_factory import make_real_llm_client
+            llm = make_real_llm_client()
+        except Exception:
+            pass  # LLM unavailable — regex-only parse
+
     result = parse_user_input(
         args.input,
         pending_forced=args.pending_forced,
         pending_parse_failed=args.pending_pf,
+        llm_client=llm,
     )
     print(json.dumps({
         "action": result.action_type,
@@ -131,7 +138,47 @@ def cmd_finalize(args) -> None:
     ]
 
     aa_id, dl_id = finalize_gate1(args.run_id, decisions, config.storage_root, conn)
+    # Clear session state after successful finalize
+    clear_state(args.run_id, conn)
     print(json.dumps({"status": "ok", "aa_id": aa_id, "dl_id": dl_id}))
+
+
+def cmd_save_state(args) -> None:
+    """Persist in-progress review state to runs.gate1_session_state."""
+    conn = _get_conn()
+    state = GateSessionState.from_json(args.run_id, args.state_json)
+    save_state(args.run_id, state, conn)
+    print(json.dumps({"status": "ok", "run_id": args.run_id}))
+
+
+def cmd_load_state(args) -> None:
+    """Load persisted review state; returns empty state if none saved."""
+    conn = _get_conn()
+    state = load_state(args.run_id, conn)
+    print(json.dumps({
+        "status": "ok",
+        "run_id": state.run_id,
+        "resolved": {
+            qid: {
+                "choice": r.choice,
+                "override": r.override_text,
+                "resolution_type": r.resolution_type,
+            }
+            for qid, r in state.resolved.items()
+        },
+        "brief_edits": [
+            {"field": e.field_name, "operation": e.operation, "value": e.value}
+            for e in state.brief_edits
+        ],
+        "approved_all": state.approved_all,
+    }, ensure_ascii=False))
+
+
+def cmd_clear_state(args) -> None:
+    """Clear session state (e.g. on abort)."""
+    conn = _get_conn()
+    clear_state(args.run_id, conn)
+    print(json.dumps({"status": "ok", "run_id": args.run_id}))
 
 
 def main() -> None:
@@ -150,16 +197,31 @@ def main() -> None:
     p_render.add_argument("--run-id", required=True)
 
     # parse
-    p_parse = sub.add_parser("parse", help="Parse user input → JSON action")
+    p_parse = sub.add_parser("parse", help="Parse user input -> JSON action")
     p_parse.add_argument("--run-id", required=True)
     p_parse.add_argument("--input", required=True)
     p_parse.add_argument("--pending-forced", type=int, default=0)
     p_parse.add_argument("--pending-pf", type=int, default=0)
+    p_parse.add_argument("--llm", action="store_true", default=False,
+                         help="Enable LLM NLU fallback for ambiguous input (G9)")
 
     # finalize
-    p_fin = sub.add_parser("finalize", help="Finalize Gate 1 → write artifacts")
+    p_fin = sub.add_parser("finalize", help="Finalize Gate 1 -> write artifacts")
     p_fin.add_argument("--run-id", required=True)
     p_fin.add_argument("--decisions-json", required=True)
+
+    # save-state (G10)
+    p_ss = sub.add_parser("save-state", help="Persist review session state to DB")
+    p_ss.add_argument("--run-id", required=True)
+    p_ss.add_argument("--state-json", required=True)
+
+    # load-state (G10)
+    p_ls = sub.add_parser("load-state", help="Load persisted review session state from DB")
+    p_ls.add_argument("--run-id", required=True)
+
+    # clear-state (G10)
+    p_cs = sub.add_parser("clear-state", help="Clear review session state (after finalize or abort)")
+    p_cs.add_argument("--run-id", required=True)
 
     args = parser.parse_args()
     try:
@@ -168,6 +230,9 @@ def main() -> None:
             "render": cmd_render,
             "parse": cmd_parse,
             "finalize": cmd_finalize,
+            "save-state": cmd_save_state,
+            "load-state": cmd_load_state,
+            "clear-state": cmd_clear_state,
         }[args.command](args)
     except Exception as exc:
         print(json.dumps({"error": str(exc), "status": "error"}), file=sys.stderr)

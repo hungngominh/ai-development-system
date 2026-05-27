@@ -1,9 +1,9 @@
 # src/ai_dev_system/gate/gate1_review/parser.py
-"""Gate 1 review — input parser (G4).
+"""Gate 1 review — input parser (G4+G9).
 
 Regex-first parsing of user commands in the Gate 1 review session.
-NLU fallback (G9) is not implemented here — ambiguous input returns
-`action_type="unknown"` so the skill can ask the user to rephrase.
+G9: when no regex matches, optionally calls llm_parse() from nlu.py if
+an llm_client is provided. Falls back to action_type="unknown" otherwise.
 
 Recognized actions (spec gate1-skill-redesign §Input Parser):
 
@@ -113,6 +113,7 @@ def parse_user_input(
     *,
     pending_forced: int = 0,
     pending_parse_failed: int = 0,
+    llm_client=None,
 ) -> ParseResult:
     """Parse a raw user message into a structured ParseResult.
 
@@ -233,6 +234,11 @@ def parse_user_input(
             action_type="answer", target=qid, choice="override", payload=override_text,
             message=f"Hiểu là: {qid} = override với text: <<{override_text}>>. Đúng không?",
         )
+
+    # G9: LLM NLU fallback when client provided and regex didn't match
+    if llm_client is not None:
+        from ai_dev_system.gate.gate1_review.nlu import llm_parse
+        return llm_parse(stripped, llm_client)
 
     return ParseResult(
         action_type="unknown",
