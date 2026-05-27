@@ -4,10 +4,9 @@ import uuid
 import threading
 import time
 import pytest
-import psycopg
-import psycopg.rows
 from ai_dev_system.engine.runner import run_execution
 from ai_dev_system.engine.escalation import resolve_escalation
+from ai_dev_system.db.connection import get_connection
 from ai_dev_system.db.repos.escalations import EscalationRepo
 from ai_dev_system.agents.base import AgentResult
 from ai_dev_system.config import Config
@@ -30,7 +29,7 @@ def _setup_failing_run(conn, project_id, tmp_path):
     run_id = str(uuid.uuid4())
     conn.execute("""
         INSERT INTO runs (run_id, project_id, status, title, current_artifacts, metadata)
-        VALUES (%s, %s, 'RUNNING_PHASE_3', 'Escalation Test', '{}', '{}')
+        VALUES (?, ?, 'RUNNING_PHASE_3', 'Escalation Test', '{}', '{}')
     """, (run_id, project_id))
 
     graph = {
@@ -68,24 +67,23 @@ def _setup_failing_run(conn, project_id, tmp_path):
         INSERT INTO artifacts (
             artifact_id, run_id, artifact_type, version, status, created_by,
             input_artifact_ids, content_ref, content_checksum, content_size
-        ) VALUES (%s, %s, 'TASK_GRAPH_APPROVED', 1, 'ACTIVE', 'system',
-                  '{}', %s, 'stub', 0)
+        ) VALUES (?, ?, 'TASK_GRAPH_APPROVED', 1, 'ACTIVE', 'system',
+                  '[]', ?, 'stub', 0)
     """, (artifact_id, run_id, str(graph_dir)))
-    conn.execute("""
-        UPDATE runs SET current_artifacts = jsonb_set(
-            current_artifacts, '{task_graph_approved_id}', to_jsonb(%s::text))
-        WHERE run_id = %s
-    """, (artifact_id, run_id))
+    conn.execute(
+        "UPDATE runs SET current_artifacts = json_set(current_artifacts, '$.task_graph_approved_id', ?) WHERE run_id = ?",
+        (artifact_id, run_id),
+    )
     conn.commit()
     return run_id, artifact_id
 
 
 @pytest.mark.integration
-def test_escalation_skip_resumes_to_completed(config, project_id, tmp_path):
+def test_escalation_skip_resumes_to_completed(file_config, project_id, tmp_path):
     """TASK-IMPL fails → BLOCKED VALIDATE → human skips → VALIDATE runs → COMPLETED."""
     test_config = Config(
         storage_root=str(tmp_path / "storage_esc"),
-        database_url=config.database_url,
+        database_url=file_config.database_url,
         poll_interval_s=0.1,
         heartbeat_interval_s=60.0,
         heartbeat_timeout_s=300.0,
@@ -98,9 +96,7 @@ def test_escalation_skip_resumes_to_completed(config, project_id, tmp_path):
         },
     )
 
-    setup_conn = psycopg.connect(
-        config.database_url, autocommit=False, row_factory=psycopg.rows.dict_row
-    )
+    setup_conn = get_connection(file_config.database_url)
     run_id, artifact_id = _setup_failing_run(setup_conn, project_id, tmp_path)
     setup_conn.close()
 
@@ -112,20 +108,19 @@ def test_escalation_skip_resumes_to_completed(config, project_id, tmp_path):
             graph_artifact_id=artifact_id,
             config=test_config,
             agent=FailingAgent(),
+            poll_interval_s=test_config.poll_interval_s,
         )
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
     # Wait for PAUSED_FOR_DECISION
-    resolve_conn = psycopg.connect(
-        config.database_url, autocommit=False, row_factory=psycopg.rows.dict_row
-    )
+    resolve_conn = get_connection(file_config.database_url)
     try:
         for _ in range(100):
             time.sleep(0.2)
             row = resolve_conn.execute(
-                "SELECT status FROM runs WHERE run_id = %s", (run_id,)
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
             if row and row["status"] == "PAUSED_FOR_DECISION":
                 break

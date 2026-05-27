@@ -1,14 +1,18 @@
 # src/ai_dev_system/engine/runner.py
+"""Execution runner (SQLite).
+
+psycopg → sqlite3: conn_factory now returns sqlite3.Connection via get_connection.
+SQLite is single-writer; we still pass a factory so worker_loop and background_loop
+each get their own connection (sqlite3 connections are not thread-safe to share).
+"""
 import dataclasses
 import logging
 import threading
 import time
 from dataclasses import dataclass
 
-import psycopg
-import psycopg.rows
-
 from ai_dev_system.config import Config
+from ai_dev_system.db.connection import get_connection
 from ai_dev_system.engine.background import background_loop
 from ai_dev_system.engine.materializer import materialize_task_runs
 from ai_dev_system.engine.worker import worker_loop
@@ -19,7 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExecutionResult:
     run_id: str
-    status: str   # COMPLETED | PAUSED_FOR_DECISION | FAILED | ABORTED
+    status: str   # COMPLETED | FAILED | ABORTED
 
 
 def run_execution(
@@ -29,47 +33,27 @@ def run_execution(
     agent,
     poll_interval_s: float = 5.0,
 ) -> ExecutionResult:
-    """Full lifecycle: materialize → spawn threads → wait for terminal state.
-
-    Args:
-        run_id:              UUID of the run (status must be RUNNING_PHASE_3 or similar)
-        graph_artifact_id:   UUID of TASK_GRAPH_APPROVED artifact
-        config:              Config
-        agent:               Agent protocol implementation
-        poll_interval_s:     Poll interval override
-
-    Returns:
-        ExecutionResult with final run status.
-    """
+    """Full lifecycle: materialize → spawn threads → wait for terminal state."""
     effective_config = config
     if poll_interval_s != config.poll_interval_s:
         effective_config = dataclasses.replace(config, poll_interval_s=poll_interval_s)
 
     def conn_factory():
-        """autocommit=True: worker_loop and background_loop manage transactions
-        explicitly with BEGIN/COMMIT/ROLLBACK."""
-        return psycopg.connect(
-            effective_config.database_url,
-            autocommit=True,
-            row_factory=psycopg.rows.dict_row,
-        )
-
-    def tx_conn_factory():
-        """autocommit=False: for short-lived transactional work (materialization)."""
-        return psycopg.connect(
-            effective_config.database_url,
-            autocommit=False,
-            row_factory=psycopg.rows.dict_row,
-        )
+        """Open a fresh SQLite connection. Each thread gets its own."""
+        return get_connection(effective_config.database_url)
 
     # Step 1: Materialize (idempotent, safe to run multiple times)
-    with tx_conn_factory() as conn:
+    conn = conn_factory()
+    try:
+        conn.execute("BEGIN")
         try:
             materialize_task_runs(conn, run_id, graph_artifact_id, effective_config)
-            conn.commit()
+            conn.execute("COMMIT")
         except Exception:
-            conn.rollback()
+            conn.execute("ROLLBACK")
             raise
+    finally:
+        conn.close()
 
     stop_event = threading.Event()
 
@@ -109,12 +93,15 @@ def _wait_for_terminal_state(
     conn_factory,
 ) -> str:
     """Poll runs.status until terminal. Returns the terminal status string."""
-    terminal = {"COMPLETED", "FAILED", "ABORTED", "PAUSED_FOR_DECISION"}
+    # PAUSED_FOR_DECISION is intentionally excluded: threads keep running so
+    # a human resolver (external or in a test) can unblock the run and let it
+    # proceed to COMPLETED without restarting.
+    terminal = {"COMPLETED", "FAILED", "ABORTED"}
     conn = conn_factory()
     try:
         while True:
             row = conn.execute(
-                "SELECT status FROM runs WHERE run_id = %s", (run_id,)
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
             if row and row["status"] in terminal:
                 return row["status"]

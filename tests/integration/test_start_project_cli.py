@@ -7,9 +7,10 @@ import sys
 import pytest
 
 
-def _run_cli(idea: str, project_name: str, constraints: str = "", env_override: dict = None):
+def _run_cli(idea: str, project_name: str, database_url: str, constraints: str = "", env_override: dict = None):
     env = os.environ.copy()
     env["AI_DEV_STUB_LLM"] = "1"   # dùng StubDebateLLMClient
+    env["DATABASE_URL"] = database_url   # file-backed SQLite accessible to subprocess
     if env_override:
         env.update(env_override)
     return subprocess.run(
@@ -24,14 +25,14 @@ def _run_cli(idea: str, project_name: str, constraints: str = "", env_override: 
 
 
 @pytest.mark.integration
-def test_happy_path_exit_0(config):
-    result = _run_cli("Build a forum for knowledge sharing", "forum-test")
+def test_happy_path_exit_0(file_config):
+    result = _run_cli("Build a forum for knowledge sharing", "forum-test", file_config.database_url)
     assert result.returncode == 0, f"stderr: {result.stderr}"
 
 
 @pytest.mark.integration
-def test_stdout_is_valid_json(config):
-    result = _run_cli("Build a forum for knowledge sharing", "forum-test")
+def test_stdout_is_valid_json(file_config):
+    result = _run_cli("Build a forum for knowledge sharing", "forum-test", file_config.database_url)
     assert result.returncode == 0
     data = json.loads(result.stdout)
     assert data["status"] == "PAUSED_AT_GATE_1"
@@ -40,9 +41,9 @@ def test_stdout_is_valid_json(config):
 
 
 @pytest.mark.integration
-def test_count_invariant(config):
+def test_count_invariant(file_config):
     """questions_count == escalated + resolved + optional."""
-    result = _run_cli("Build a forum for knowledge sharing", "forum-test")
+    result = _run_cli("Build a forum for knowledge sharing", "forum-test", file_config.database_url)
     data = json.loads(result.stdout)
     assert (
         data["questions_count"]
@@ -51,8 +52,8 @@ def test_count_invariant(config):
 
 
 @pytest.mark.integration
-def test_stderr_has_progress_stdout_only_json(config):
-    result = _run_cli("Build a task manager", "task-mgr-test")
+def test_stderr_has_progress_stdout_only_json(file_config):
+    result = _run_cli("Build a task manager", "task-mgr-test", file_config.database_url)
     assert result.returncode == 0
     # stderr phải có progress lines
     assert "[Phase" in result.stderr
@@ -62,11 +63,12 @@ def test_stderr_has_progress_stdout_only_json(config):
 
 
 @pytest.mark.integration
-def test_constraints_appended_to_idea(config):
+def test_constraints_appended_to_idea(file_config):
     """Chạy với constraints — chỉ cần không crash và trả về valid JSON."""
     result = _run_cli(
         "Build a forum",
         "forum-constraint-test",
+        file_config.database_url,
         constraints="Python only, no cloud",
     )
     assert result.returncode == 0
@@ -74,10 +76,10 @@ def test_constraints_appended_to_idea(config):
 
 
 @pytest.mark.integration
-def test_idempotent_project_id(config):
+def test_idempotent_project_id(file_config):
     """Cùng project name → cùng project_id trong cả 2 lần chạy."""
-    r1 = _run_cli("Build a forum", "same-project-name")
-    r2 = _run_cli("Build something else", "same-project-name")
+    r1 = _run_cli("Build a forum", "same-project-name", file_config.database_url)
+    r2 = _run_cli("Build something else", "same-project-name", file_config.database_url)
     assert r1.returncode == 0 and r2.returncode == 0
     id1 = json.loads(r1.stdout)["project_id"]
     id2 = json.loads(r2.stdout)["project_id"]
@@ -85,26 +87,29 @@ def test_idempotent_project_id(config):
 
 
 @pytest.mark.integration
-def test_empty_idea_exits_1(config):
-    result = _run_cli("", "my-project")
+def test_empty_idea_exits_1(file_config):
+    result = _run_cli("", "my-project", file_config.database_url)
     assert result.returncode == 1
     assert "Error: --idea must be non-empty" in result.stderr
     assert result.stdout.strip() == ""
 
 
 @pytest.mark.integration
-def test_empty_project_name_exits_1(config):
-    result = _run_cli("Build something", "")
+def test_empty_project_name_exits_1(file_config):
+    result = _run_cli("Build something", "", file_config.database_url)
     assert result.returncode == 1
     assert "Error: --project-name must be non-empty" in result.stderr
     assert result.stdout.strip() == ""
 
 
 @pytest.mark.integration
-def test_llm_error_exits_1_stdout_empty(config):
-    """Khi LLM_STUB không set và không có real client → exit 1, stdout trống."""
+def test_llm_error_exits_1_stdout_empty(file_config):
+    """Khi LLM_STUB=0 và không có real API key → exit 1, stdout trống."""
     env = os.environ.copy()
-    env.pop("AI_DEV_STUB_LLM", None)   # force real client path
+    env["AI_DEV_STUB_LLM"] = "0"   # disable stub; dotenv won't override (override=False)
+    env["ANTHROPIC_API_KEY"] = ""   # no valid key → LLM init fails
+    env["OPENAI_API_KEY"] = ""
+    env["DATABASE_URL"] = file_config.database_url
     result = subprocess.run(
         [
             sys.executable, "-m", "ai_dev_system.cli.start_project",
@@ -119,7 +124,7 @@ def test_llm_error_exits_1_stdout_empty(config):
 
 
 @pytest.mark.integration
-def test_bad_database_url_exits_1(config):
+def test_bad_database_url_exits_1(file_config):
     env = os.environ.copy()
     env["DATABASE_URL"] = "postgresql://invalid:invalid@localhost:9999/noexist"
     env["AI_DEV_STUB_LLM"] = "1"

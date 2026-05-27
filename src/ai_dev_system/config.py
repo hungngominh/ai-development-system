@@ -9,8 +9,14 @@ from dotenv import load_dotenv
 _GLOBAL_ENV = Path.home() / ".ai-dev-system" / ".env"
 if _GLOBAL_ENV.exists():
     load_dotenv(_GLOBAL_ENV)
-# Also load project-local .env if present (overrides global)
-load_dotenv(override=True)
+# Also load project-local .env if present (provides defaults — does NOT override
+# env vars already set in the process environment, e.g. via subprocess tests)
+load_dotenv(override=False)
+
+
+# SQLite-first defaults: zero-install local dev.
+DEFAULT_STORAGE_ROOT = str(Path.home() / ".ai-dev-system" / "storage")
+DEFAULT_DATABASE_URL = f"sqlite:///{Path.home() / '.ai-dev-system' / 'control.db'}"
 
 
 def _default_retry_policy() -> dict[str, dict[str, Any]]:
@@ -35,10 +41,11 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        storage_root = os.environ.get("STORAGE_ROOT")
-        if not storage_root:
-            raise ValueError("STORAGE_ROOT environment variable is required")
-        database_url = os.environ.get("DATABASE_URL")
-        if not database_url:
-            raise ValueError("DATABASE_URL environment variable is required")
+        """Build Config from env vars, falling back to SQLite defaults.
+
+        STORAGE_ROOT → ~/.ai-dev-system/storage
+        DATABASE_URL → sqlite:///~/.ai-dev-system/control.db
+        """
+        storage_root = os.environ.get("STORAGE_ROOT") or DEFAULT_STORAGE_ROOT
+        database_url = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
         return cls(storage_root=storage_root, database_url=database_url)

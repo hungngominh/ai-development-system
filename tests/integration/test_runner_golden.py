@@ -6,15 +6,16 @@ import uuid
 import pytest
 from ai_dev_system.engine.runner import run_execution
 from ai_dev_system.agents.stub import StubAgent
+from ai_dev_system.db.connection import get_connection
 from ai_dev_system.config import Config
 
 
-def _setup_run(conn, project_id, tmp_path, db_url):
+def _setup_run(conn, project_id, tmp_path):
     """Create run + graph artifact backed by a real file."""
     run_id = str(uuid.uuid4())
     conn.execute("""
         INSERT INTO runs (run_id, project_id, status, title, current_artifacts, metadata)
-        VALUES (%s, %s, 'RUNNING_PHASE_3', 'Golden Test', '{}', '{}')
+        VALUES (?, ?, 'RUNNING_PHASE_3', 'Golden Test', '{}', '{}')
     """, (run_id, project_id))
 
     graph = {
@@ -47,41 +48,30 @@ def _setup_run(conn, project_id, tmp_path, db_url):
         INSERT INTO artifacts (
             artifact_id, run_id, artifact_type, version, status, created_by,
             input_artifact_ids, content_ref, content_checksum, content_size
-        ) VALUES (%s, %s, 'TASK_GRAPH_APPROVED', 1, 'ACTIVE', 'system',
-                  '{}', %s, 'stub', 0)
+        ) VALUES (?, ?, 'TASK_GRAPH_APPROVED', 1, 'ACTIVE', 'system',
+                  '[]', ?, 'stub', 0)
     """, (artifact_id, run_id, str(graph_dir)))
-    conn.execute("""
-        UPDATE runs SET current_artifacts = jsonb_set(
-            current_artifacts, '{task_graph_approved_id}', to_jsonb(%s::text)
-        ) WHERE run_id = %s
-    """, (artifact_id, run_id))
+    conn.execute(
+        "UPDATE runs SET current_artifacts = json_set(current_artifacts, '$.task_graph_approved_id', ?) WHERE run_id = ?",
+        (artifact_id, run_id),
+    )
     conn.commit()
     return run_id, artifact_id
 
 
 @pytest.mark.integration
-def test_golden_run_completes_all_tasks(config, project_id, tmp_path):
+def test_golden_run_completes_all_tasks(file_config, project_id, tmp_path):
     """Full run: materialize → background resolves deps → worker executes → COMPLETED."""
-    import psycopg
-    import psycopg.rows
-
-    conn = psycopg.connect(config.database_url, autocommit=False,
-                           row_factory=psycopg.rows.dict_row)
+    conn = get_connection(file_config.database_url)
     try:
-        test_config = Config(
-            storage_root=str(tmp_path / "storage"),
-            database_url=config.database_url,
-            poll_interval_s=0.1,
-            heartbeat_interval_s=60.0,
-            heartbeat_timeout_s=300.0,
-        )
-        run_id, artifact_id = _setup_run(conn, project_id, tmp_path, config.database_url)
+        run_id, artifact_id = _setup_run(conn, project_id, tmp_path)
 
         result = run_execution(
             run_id=run_id,
             graph_artifact_id=artifact_id,
-            config=test_config,
+            config=file_config,
             agent=StubAgent(),
+            poll_interval_s=file_config.poll_interval_s,
         )
 
         assert result.status == "COMPLETED", f"Expected COMPLETED, got {result.status}"
@@ -89,7 +79,7 @@ def test_golden_run_completes_all_tasks(config, project_id, tmp_path):
         task_statuses = {
             r["task_id"]: r["status"]
             for r in conn.execute(
-                "SELECT task_id, status FROM task_runs WHERE run_id = %s", (run_id,)
+                "SELECT task_id, status FROM task_runs WHERE run_id = ?", (run_id,)
             ).fetchall()
         }
         assert task_statuses.get("TASK-PARSE") == "SUCCESS"
@@ -98,7 +88,7 @@ def test_golden_run_completes_all_tasks(config, project_id, tmp_path):
         events = [
             r["event_type"]
             for r in conn.execute(
-                "SELECT event_type FROM events WHERE run_id = %s ORDER BY occurred_at",
+                "SELECT event_type FROM events WHERE run_id = ? ORDER BY occurred_at",
                 (run_id,)
             ).fetchall()
         ]
