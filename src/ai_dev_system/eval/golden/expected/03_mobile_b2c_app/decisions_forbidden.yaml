@@ -1,0 +1,17 @@
+forbidden_decisions:
+  - id: "shipper_app"
+    why: "scope_out explicitly excludes shipper app"
+    reject_question_patterns:
+      - "(?i)(shipper|driver|deliverer).*(app|feature|implement|build)"
+      - "(?i)(giao hàng|delivery.?person).*(app|module|xây)"
+
+  - id: "web_desktop_version"
+    why: "scope_out: web responsive only for MVP, desktop web is not primary"
+    reject_question_patterns:
+      - "(?i)(web.?app|desktop.?web|browser).*(build|xây|develop|thêm).*(app|version)"
+
+  - id: "ml_recommendations"
+    why: "scope_out: AI/ML recommendation is V2"
+    reject_question_patterns:
+      - "(?i)(ml|machine.?learn|ai|recommend).*(implement|build|xây).*(v1|mvp|ban đầu)"
+      - "(?i)(gợi ý|recommendation.?engine|collaborative.?filter).*(implement|xây)"

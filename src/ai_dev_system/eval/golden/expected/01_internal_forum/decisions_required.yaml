@@ -1,0 +1,81 @@
+# Required decisions for 01_internal_forum
+#
+# Generator MUST produce a question that matches one of accept_question_patterns for each entry.
+# Coverage metric: (covered_required / total_required) >= 0.85
+#
+# Pattern matching: case-insensitive regex, tries Vietnamese + English forms.
+# At least one pattern per decision must match SOME question's `text` field.
+
+required_decisions:
+  - id: "search_engine_choice"
+    why: "scope_in includes 'search full-text', known_unknowns explicitly lists this"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)search.*(engine|backend|elastic|postgres.*fts|meili|typesense|opensearch)"
+      - "(?i)(elastic|meili|typesense|opensearch|postgres.*full.?text)"
+      - "(?i)search.*(chọn|dùng|implement|công cụ)"
+
+  - id: "moderation_policy"
+    why: "known_unknowns mentions moderation; user-generated content needs moderation strategy"
+    domain_expected: ["product", "qa"]
+    accept_question_patterns:
+      - "(?i)moderat(ion|or|e)"
+      - "(?i)(spam|abuse|report|kiểm duyệt).*(polic|chiến lược|cơ chế)"
+      - "(?i)(báo cáo|report|flag).*(nội dung|post|comment)"
+
+  - id: "voting_anti_abuse"
+    why: "scope_in has voting; need anti-abuse (sock puppet, gaming leaderboard)"
+    domain_expected: ["security", "backend"]
+    accept_question_patterns:
+      - "(?i)vot.*(sock.?puppet|abuse|rate.?limit|fraud|gaming|spam)"
+      - "(?i)(rate.?limit|throttle).*(vot|like)"
+      - "(?i)chống.*(abuse|gian lận).*(vot|like)"
+
+  - id: "leaderboard_refresh_strategy"
+    why: "scope_in has leaderboard; need decision on realtime vs batch"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)leaderboard.*(realtime|batch|cron|refresh|update|tính)"
+      - "(?i)(ranking|xếp hạng).*(cập nhật|refresh|tính lại)"
+
+  - id: "search_indexing_strategy"
+    why: "search needs index; sync vs async vs scheduled?"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)index.*(sync|async|cron|realtime|trigger|update)"
+      - "(?i)(reindex|re-index|cập nhật index)"
+
+  - id: "notification_channel"
+    why: "must_integrate_with mentions Slack notification; channel + frequency unclear"
+    domain_expected: ["product", "backend"]
+    accept_question_patterns:
+      - "(?i)notif(ication|y).*(slack|email|in.?app|channel)"
+      - "(?i)(thông báo|notify).*(qua|bằng|đâu)"
+
+  - id: "tags_or_categories"
+    why: "scope_in mentions BOTH tags (post) and categories — clarification needed"
+    domain_expected: ["product", "database"]
+    accept_question_patterns:
+      - "(?i)(tag|categor).*(vs|hay|or|khác)"
+      - "(?i)(phân loại|categorize).*(post|bài)"
+
+  - id: "comment_depth_limit"
+    why: "scope_in says 'threaded, 2 level' — enforce at DB or UI?"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)comment.*(depth|nest|level|2.{0,5}level)"
+      - "(?i)threaded.*(comment|reply)"
+
+  - id: "leaderboard_scoring_rule"
+    why: "leaderboard requires scoring formula (post=N, comment=M, upvote=K?)"
+    domain_expected: ["product", "backend"]
+    accept_question_patterns:
+      - "(?i)(score|điểm|tính điểm).*(contributor|leaderboard|user)"
+      - "(?i)(formula|công thức).*(rank|leaderboard)"
+
+  - id: "search_result_ranking"
+    why: "search produces multiple results; ranking algorithm?"
+    domain_expected: ["backend"]
+    accept_question_patterns:
+      - "(?i)search.*(rank|order|sort|relevance)"
+      - "(?i)(ranking|xếp hạng).*(kết quả search|result)"

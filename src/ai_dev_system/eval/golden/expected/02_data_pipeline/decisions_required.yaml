@@ -1,0 +1,59 @@
+required_decisions:
+  - id: "streaming_vs_batch"
+    why: "known_unknowns explicitly lists Kafka vs Airflow; architecture determines latency SLA feasibility"
+    domain_expected: ["data_engineering", "backend"]
+    accept_question_patterns:
+      - "(?i)(kafka|kinesis|flink|spark.?streaming|stream).*(batch|airflow|cron|dag)"
+      - "(?i)(streaming|realtime|near.?real.?time|micro.?batch).*(vs|hay|hoặc|thay vì)"
+      - "(?i)pipeline.*(kiến trúc|architecture|streaming|batch)"
+      - "(?i)(event.?driven|message.?queue|pub.?sub).*(pipeline|ingestion)"
+
+  - id: "warehouse_choice"
+    why: "known_unknowns lists BigQuery/ClickHouse/Redshift; must respect constraint no BigQuery"
+    domain_expected: ["data_engineering", "database"]
+    accept_question_patterns:
+      - "(?i)(clickhouse|redshift|snowflake|druid|duckdb|warehouse).*(chọn|dùng|phù hợp|budget)"
+      - "(?i)data.?warehouse.*(nào|which|option|chọn)"
+      - "(?i)(OLAP|analytical.?store|warehouse).*(chọn|architecture)"
+
+  - id: "schema_evolution"
+    why: "known_unknowns lists schema evolution; event schemas change over time breaking downstream"
+    domain_expected: ["data_engineering"]
+    accept_question_patterns:
+      - "(?i)schema.*(evolv|change|versioning|thay đổi|backward|compatible)"
+      - "(?i)(schema.?registry|avro|protobuf).*(event|message)"
+      - "(?i)(breaking.?change|backward.?compat).*(schema|event)"
+      - "(?i)event.*(schema|format).*(thay đổi|change|version)"
+
+  - id: "event_deduplication"
+    why: "SDK retries on failure produce duplicate events; dedup strategy needed for correctness"
+    domain_expected: ["data_engineering", "backend"]
+    accept_question_patterns:
+      - "(?i)duplic.*(event|message|record)"
+      - "(?i)(dedup|idempoten|exactly.?once)"
+      - "(?i)(retry|at.?least.?once).*(trùng|duplicate|dedup)"
+
+  - id: "data_quality_at_ingest"
+    why: "scope_in includes schema validation; where and how to enforce quality"
+    domain_expected: ["data_engineering"]
+    accept_question_patterns:
+      - "(?i)data.?qualit.*(check|validate|ingest|pipeline)"
+      - "(?i)(validate|schema).*(ingest|at entry|ingestion point|gateway)"
+      - "(?i)(invalid.?event|bad.?data|malform).*(handle|reject|dead.?letter)"
+      - "(?i)dead.?letter.*(queue|strategy|retry)"
+
+  - id: "backfill_strategy"
+    why: "scope_in includes backfill API; historical data reprocessing strategy needed"
+    domain_expected: ["data_engineering"]
+    accept_question_patterns:
+      - "(?i)backfill.*(strateg|approach|historical|cách)"
+      - "(?i)(reprocess|replay|historical).*(event|data|pipeline)"
+      - "(?i)(lịch sử|historical).*(ingest|load|pipeline)"
+
+  - id: "gdpr_pii_handling"
+    why: "compliance=GDPR; user email/IP in events requires deletion/anonymization plan"
+    domain_expected: ["security", "data_engineering"]
+    accept_question_patterns:
+      - "(?i)(gdpr|pii|personal.?data).*(event|pipeline|delete|erasure)"
+      - "(?i)(xóa dữ liệu|right.?to.?erasure|deletion).*(pipeline|event)"
+      - "(?i)(anonymize|pseudonym|mask).*(pii|email|ip|personal)"

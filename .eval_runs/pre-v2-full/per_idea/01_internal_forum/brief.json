@@ -1,0 +1,230 @@
+{
+  "brief_version": 2,
+  "template_id": "generic_v1",
+  "schema_hash": "a14a30d9e70ef433",
+  "run_id": "eval-01_internal_forum",
+  "project_id": "01_internal_forum",
+  "source_hash": "eval-01_internal_forum",
+  "created_at": "2026-05-28T10:03:40+00:00",
+  "completed_at": null,
+  "fields": {
+    "problem_statement": {
+      "value": "Nhân viên không tìm được kiến thức cũ, mỗi lần hỏi lại trên Slack. Người mới onboard mất 2-3 tuần để biết các quyết định kỹ thuật trong quá khứ.",
+      "source": "user",
+      "rationale": null
+    },
+    "who_feels_pain": {
+      "value": "~500 nhân viên engineering + PM tại VN, đặc biệt new hires",
+      "source": "user",
+      "rationale": null
+    },
+    "current_workaround": {
+      "value": "Slack search (kém), Notion phân mảnh theo team, Google Drive cá nhân",
+      "source": "user",
+      "rationale": null
+    },
+    "cost_of_doing_nothing": {
+      "value": "~2h/tuần/người tìm lại thông tin → ~1000h/tuần toàn công ty",
+      "source": "user",
+      "rationale": null
+    },
+    "scope_in": {
+      "value": [
+        "post (tiêu đề + nội dung markdown + tags)",
+        "comments (threaded, 2 level)",
+        "upvote/downvote cho post và comment",
+        "leaderboard top contributors theo tháng",
+        "search full-text trên post và comment",
+        "categories (kỹ thuật, sản phẩm, sự kiện)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "scope_out": {
+      "value": [
+        "direct message",
+        "file upload >10MB",
+        "mobile native app (web-only)",
+        "video upload",
+        "polls/surveys"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "success_metric": {
+      "value": "WAU >= 200 trong tháng đầu, search NPS >= 7, contributor count >= 50 cuối tháng đầu",
+      "source": "user",
+      "rationale": null
+    },
+    "done_definition": {
+      "value": "Deploy lên prod intranet + 50 user thật dùng 1 tuần không bug critical, search latency p95 < 500ms",
+      "source": "user",
+      "rationale": null
+    },
+    "deadline": {
+      "value": "2026-08-01 (hard, kỷ niệm công ty)",
+      "source": "user",
+      "rationale": null
+    },
+    "primary_user": {
+      "value": "Software engineer (junior → senior) + PM + một số non-tech",
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_now": {
+      "value": 500,
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_year1": {
+      "value": 800,
+      "source": "user",
+      "rationale": null
+    },
+    "user_languages": {
+      "value": [
+        "vi",
+        "en"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "accessibility": {
+      "value": "không yêu cầu đặc biệt (intranet, không phải public)",
+      "source": "user",
+      "rationale": null
+    },
+    "must_use_stack": {
+      "value": [
+        "PostgreSQL",
+        "Python backend",
+        "React frontend"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_not_use": {
+      "value": [
+        "MongoDB",
+        "MySQL",
+        "any vendor-locked SaaS"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "compliance": {
+      "value": "none (intranet, không lưu PII bên thứ 3)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_residency": {
+      "value": "VN (data trong infra công ty)",
+      "source": "user",
+      "rationale": null
+    },
+    "budget_infra": {
+      "value": "$200/month (dùng on-prem hoặc Azure region SEA)",
+      "source": "user",
+      "rationale": null
+    },
+    "team_skills": {
+      "value": [
+        "Python",
+        "FastAPI",
+        "React",
+        "PostgreSQL",
+        "Docker"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "greenfield_or_brownfield": {
+      "value": "greenfield (không tích hợp hệ thống forum cũ)",
+      "source": "user",
+      "rationale": null
+    },
+    "existing_auth": {
+      "value": "Azure AD SSO (toàn công ty đang dùng)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_sources": {
+      "value": [],
+      "source": "user",
+      "rationale": null
+    },
+    "must_integrate_with": {
+      "value": [
+        "Azure AD (SSO)",
+        "Slack (notification cho post mới của team mình follow)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "deployment_target": {
+      "value": "(stub AI suggestion)",
+      "source": "ai_suggested_confirmed",
+      "rationale": "stub-mode: scripted '?' → simulated AI confirm"
+    },
+    "nfr_priority": {
+      "value": [
+        "Time-to-market",
+        "Maintainability",
+        "Performance",
+        "Security"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "expected_rps": {
+      "value": 50,
+      "source": "user",
+      "rationale": null
+    },
+    "expected_data_volume": {
+      "value": "10GB sau 1 năm (post + comment)",
+      "source": "user",
+      "rationale": null
+    },
+    "availability_target": {
+      "value": "99% (intranet, downtime business hours = critical only)",
+      "source": "user",
+      "rationale": null
+    },
+    "latency_target": {
+      "value": "p95 < 300ms cho page load, p95 < 500ms cho search",
+      "source": "user",
+      "rationale": null
+    },
+    "known_unknowns": {
+      "value": [
+        "search engine selection (PostgreSQL FTS vs Meilisearch vs Elasticsearch)",
+        "moderation policy (manual vs auto vs hybrid)",
+        "notification delivery (email vs Slack vs in-app)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "failed_attempts": {
+      "value": [],
+      "source": "user",
+      "rationale": null
+    },
+    "inspiration_refs": {
+      "value": [
+        "Discourse (open source forum)",
+        "StackOverflow Teams",
+        "Notion comments"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "political_constraints": {
+      "value": "Tránh tool có vendor lock-in (board đã từ chối 2 SaaS forum trước)",
+      "source": "user",
+      "rationale": null
+    }
+  },
+  "assumptions": [],
+  "audit": []
+}

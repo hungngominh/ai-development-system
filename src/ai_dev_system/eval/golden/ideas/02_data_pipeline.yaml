@@ -1,0 +1,95 @@
+# Golden Idea: 02_data_pipeline
+#
+# Profile: medium complexity, platform-type, multi-domain (data-eng, backend, devops).
+# Tests: pipeline architecture decisions, data quality, schema evolution, streaming vs batch.
+
+id: "02_data_pipeline"
+profile:
+  scope_type: platform
+  complexity: medium
+  primary_domains: [data_engineering, backend, devops]
+
+raw_idea: |
+  Xây data pipeline để collect event từ web app và mobile app, transform, và load
+  vào data warehouse cho analytics team. Hiện tại data nằm rải rác, team BI phải
+  query trực tiếp production DB gây chậm cho user. Cần pipeline near-realtime.
+
+intake_script:
+  # Section 1: Context
+  problem_statement: "Team BI query thẳng vào DB prod, làm chậm production. Event từ web/mobile không có trung tâm. Analytics lag 24h vì batch job chạy mỗi đêm."
+  who_feels_pain: "6 người team BI/Data, CTO lo performance prod, PM thiếu realtime dashboard"
+  current_workaround: "Cronjob pg_dump mỗi đêm, copy sang staging, BI query staging. Mobile event không capture được."
+  cost_of_doing_nothing: "Mỗi BI query nặng làm prod slow 5-10s. Không có mobile analytics → mù trên 40% traffic."
+
+  # Section 2: Scope
+  scope_in:
+    - "Event ingestion từ web app (REST API endpoint)"
+    - "Event ingestion từ mobile app (iOS + Android SDK)"
+    - "Schema validation khi ingest"
+    - "Transform + enrich (user lookup, geo-IP)"
+    - "Load vào data warehouse"
+    - "Dead letter queue cho failed events"
+    - "Backfill API cho historical data"
+    - "Basic monitoring: lag, error rate, throughput"
+  scope_out:
+    - "BI dashboard / visualization"
+    - "ML feature store"
+    - "PII anonymization ngoài scope ban đầu"
+    - "Stream processing joins phức tạp (chỉ enrichment đơn giản)"
+    - "Multi-region replication"
+  success_metric: "Event lag p95 < 5 phút, 0 event loss sau dead letter retry, prod DB query load giảm 80%"
+  done_definition: "Web + mobile SDK gửi event, pipeline chạy 7 ngày liên tục không alert, BI team confirm dùng được dashboard mới"
+  deadline: "2026-09-01 (soft, trước fiscal year end)"
+
+  # Section 3: User persona
+  primary_user: "Data engineer + BI analyst"
+  user_count_now: 6
+  user_count_year1: 12
+  user_languages: ["vi", "en"]
+  accessibility: "internal tool, không yêu cầu"
+
+  # Section 4: Hard constraints
+  must_use_stack: ["Python", "PostgreSQL (source DB)", "Docker"]
+  must_not_use: ["vendor-locked proprietary pipeline (no Fivetran/Airbyte SaaS)"]
+  compliance: "GDPR (user event data có email/IP)"
+  data_residency: "EU (user data GDPR, warehouse cũng phải EU region)"
+  budget_infra: "$500/month total (pipeline + warehouse)"
+  team_skills: ["Python", "PostgreSQL", "Docker", "Airflow basics", "SQL"]
+
+  # Section 5: Integration
+  greenfield_or_brownfield: "brownfield (web app đã có, thêm tracking SDK)"
+  existing_auth: "internal service, không cần user auth"
+  data_sources: ["PostgreSQL (prod DB)", "web app REST events", "iOS SDK", "Android SDK"]
+  must_integrate_with: ["Slack (alert khi pipeline fail)", "Grafana (metrics)"]
+  deployment_target: "?"  # cố tình để AI suggest (on-prem vs cloud, dựa vào GDPR + budget)
+
+  # Section 6: NFR priorities
+  nfr_priority:
+    - "Reliability"
+    - "Latency"
+    - "Cost"
+    - "Maintainability"
+  expected_rps: 200  # 200 events/s peak (web + mobile combined)
+  expected_data_volume: "50GB raw events/year"
+  availability_target: "99.5% (pipeline, không phải prod)"
+  latency_target: "p95 event-to-warehouse < 5 phút"
+
+  # Section 7: Risk & unknown
+  known_unknowns:
+    - "streaming vs micro-batch (Kafka vs Airflow DAG)"
+    - "warehouse chọn gì (BigQuery vs ClickHouse vs Redshift) phù hợp budget $500"
+    - "schema evolution strategy khi event schema thay đổi"
+  failed_attempts:
+    - "Đã thử dùng Fivetran, quá đắt ($2k/month)"
+  inspiration_refs:
+    - "Segment (event collection model)"
+    - "dbt (transform layer)"
+    - "Apache Kafka + Flink (streaming reference)"
+  political_constraints: "Không dùng BigQuery vì CTO phản đối vendor lock-in Google"
+
+expected_behavior_notes: |
+  Pipeline architecture decisions là core của brief này.
+  Required questions: streaming vs batch, warehouse choice, schema evolution, dedup, backfill.
+  AI suggest deployment_target nên propose EU cloud (AWS eu-west hoặc Hetzner EU) vì GDPR.
+  Forbidden: questions về BI dashboard, ML, user-facing UI.
+  Test "constraint-aware question gen" — must_not_use BigQuery nên không xuất hiện trong câu hỏi warehouse.

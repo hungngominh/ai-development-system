@@ -1,0 +1,16 @@
+forbidden_decisions:
+  - id: "mobile_native_app"
+    why: "scope_out: mobile native app explicitly excluded for MVP"
+    reject_question_patterns:
+      - "(?i)(mobile.?native|react.?native|flutter|ios|android).*(build|develop|implement|thêm).*(app)"
+
+  - id: "ai_ml_features"
+    why: "scope_out: AI-powered task suggestions deferred to v2"
+    reject_question_patterns:
+      - "(?i)(ai|ml|machine.?learn|nlp).*(feature|suggest|recommend).*(v1|mvp|ban đầu|implement)"
+
+  - id: "mongodb_usage"
+    why: "must_not_use: MongoDB explicitly excluded"
+    reject_question_patterns:
+      - "(?i)mongodb.*(use|dùng|consider|hay không)"
+      - "(?i)(nosql|document.?db).*(mongodb).*(thay|replace|dùng)"

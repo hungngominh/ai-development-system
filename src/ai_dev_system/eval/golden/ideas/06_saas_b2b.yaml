@@ -1,0 +1,98 @@
+# Golden Idea: 06_saas_b2b
+#
+# Profile: high complexity, product-type, multi-domain (backend, security, product, database).
+# Tests: multi-tenancy model, billing, SSO for enterprise, data isolation.
+
+id: "06_saas_b2b"
+profile:
+  scope_type: product
+  complexity: high
+  primary_domains: [backend, security, product, database]
+
+raw_idea: |
+  Xây SaaS B2B quản lý dự án và sprint planning cho SME và mid-market.
+  Multi-tenant, subscription billing (monthly/annual), SSO cho enterprise customers.
+  Target: 500 paying customers năm đầu, ARPU $50/tháng.
+
+intake_script:
+  # Section 1: Context
+  problem_statement: "SME dùng Jira (quá phức tạp, đắt) hoặc Trello (quá đơn giản). Không có tool middle-ground tiếng Việt với giá hợp lý cho thị trường SEA."
+  who_feels_pain: "Project manager + engineering lead ở SME 10-100 người, chủ yếu VN + SEA"
+  current_workaround: "Google Sheets + Slack + Notion hybrid. Mất nhiều công phối hợp."
+  cost_of_doing_nothing: "Market window đang mở, Jira bị ghét, Linear đang grow nhanh nhưng chưa có tiếng Việt"
+
+  # Section 2: Scope
+  scope_in:
+    - "Projects + Boards (kanban + sprint mode)"
+    - "Tasks với sub-tasks, assignee, due date, priority, labels"
+    - "Sprint planning + velocity tracking"
+    - "Team workspace (invite member, roles: admin/member/viewer)"
+    - "Subscription billing (free tier + Pro + Business)"
+    - "SSO (Google OAuth + SAML cho enterprise)"
+    - "Notifications (in-app + email digest)"
+    - "Basic reporting (burndown, velocity)"
+    - "Import từ Trello + Jira (CSV)"
+  scope_out:
+    - "Mobile native app (web responsive only cho MVP)"
+    - "Time tracking"
+    - "Invoice / accounting integration"
+    - "AI-powered task suggestions (v2)"
+    - "Video meetings"
+  success_metric: "500 paying orgs cuối năm 1, churn rate < 5%/tháng, NPS > 40"
+  done_definition: "Public launch, payment flow hoạt động, 10 paying customer trong tuần đầu, SSO Google hoạt động"
+  deadline: "2026-11-01 (soft, cuối Q4)"
+
+  # Section 3: User persona
+  primary_user: "Project Manager + Engineering Lead tại SME 10-100 người"
+  user_count_now: 0
+  user_count_year1: 5000  # 500 orgs × avg 10 users
+  user_languages: ["vi", "en"]
+  accessibility: "WCAG 2.1 AA (enterprise requirement)"
+
+  # Section 4: Hard constraints
+  must_use_stack: ["Python hoặc Node.js backend", "React frontend", "PostgreSQL"]
+  must_not_use: ["MongoDB (team không có skill)", "PHP"]
+  compliance: "SOC 2 Type 1 (enterprise sales requirement), GDPR"
+  data_residency: "?"  # cố tình để AI suggest dựa vào market SEA + GDPR + SOC 2
+  budget_infra: "$2000/month khi đạt 500 orgs"
+  team_skills: ["Python/Django hoặc FastAPI", "React", "PostgreSQL", "Redis", "Stripe"]
+
+  # Section 5: Integration
+  greenfield_or_brownfield: "greenfield"
+  existing_auth: null  # tự xây auth
+  data_sources: []
+  must_integrate_with: ["Stripe (billing)", "Google OAuth (SSO)", "SendGrid hoặc SES (email)", "Slack (notification webhook)"]
+  deployment_target: "AWS (multi-region capable sau này, ap-southeast-1 trước)"
+
+  # Section 6: NFR priorities
+  nfr_priority:
+    - "Reliability"
+    - "Security"
+    - "Performance"
+    - "Maintainability"
+  expected_rps: 100  # 5000 users × low activity
+  expected_data_volume: "50GB/year (tasks, comments, attachments)"
+  availability_target: "99.9% (SLA cam kết với enterprise)"
+  latency_target: "API p95 < 300ms, board load < 1s"
+
+  # Section 7: Risk & unknown
+  known_unknowns:
+    - "multi-tenancy model: schema-per-tenant vs shared schema + tenant_id (row-level security)"
+    - "billing: Stripe Billing vs Paddle vs tự xây subscription logic"
+    - "SAML SSO cho enterprise: tự implement vs dùng Auth0/WorkOS"
+    - "free tier limits: feature-gated vs usage-based (storage/members)"
+    - "data isolation level: logical (RLS) hay physical (separate DB per enterprise)"
+  failed_attempts: []
+  inspiration_refs:
+    - "Linear (UX, performance)"
+    - "ClickUp (feature breadth)"
+    - "Basecamp (pricing simplicity)"
+    - "Notion (block-based)"
+  political_constraints: "Investor SEA yêu cầu hỗ trợ tiếng Việt từ ngày 1. CTO chọn PostgreSQL vì team strong."
+
+expected_behavior_notes: |
+  SaaS B2B — test cho architecture decisions đặc thù multi-tenant product.
+  Required: multi-tenancy model (schema-per vs shared), billing provider, SAML SSO provider choice,
+  data isolation, free tier gate strategy, RLS implementation.
+  Forbidden: questions về mobile native, AI features, time tracking.
+  Test: AI suggest data_residency nên đề xuất AWS ap-southeast-1 vì market SEA + SOC 2 compliant.

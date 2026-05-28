@@ -1,0 +1,24 @@
+{
+  "critical_fill_rate": 1.0,
+  "ai_suggest_acceptance": 1.0,
+  "assumption_count": 0,
+  "consistency_violations": 0,
+  "field_coverage_per_section": 0.75,
+  "followup_question_count": 0,
+  "pass_critical_fill": true,
+  "pass_ai_suggest": true,
+  "pass_assumption": true,
+  "pass_consistency": true,
+  "pass_field_coverage": true,
+  "pass_followup": true,
+  "section_coverage": {
+    "context": 1.0,
+    "scope": 1.0,
+    "persona": 1.0,
+    "constraints": 1.0,
+    "integration": 0.8,
+    "nfr": 1.0,
+    "risk": 0.75
+  },
+  "missing_critical": []
+}

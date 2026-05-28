@@ -1,0 +1,18 @@
+forbidden_decisions:
+  - id: "model_training_pipeline"
+    why: "scope_out: model training is explicitly out of scope"
+    reject_question_patterns:
+      - "(?i)(train|retrain|training.?pipeline).*(build|implement|xây|schedule)"
+      - "(?i)(mlflow|kubeflow|airflow).*(training|retrain).*(pipeline|schedule)"
+
+  - id: "batch_inference"
+    why: "scope_out: batch inference is explicitly excluded"
+    reject_question_patterns:
+      - "(?i)batch.*(inference|predict|score).*(implement|build|endpoint)"
+      - "(?i)(offline|batch).*(prediction|inference).*(add|thêm|build)"
+
+  - id: "sagemaker_usage"
+    why: "must_not_use: SageMaker explicitly excluded (CTO wants on-prem)"
+    reject_question_patterns:
+      - "(?i)sagemaker.*(use|dùng|deploy|consider)"
+      - "(?i)aws.*(ml.?platform|sagemaker).*(có nên|should)"

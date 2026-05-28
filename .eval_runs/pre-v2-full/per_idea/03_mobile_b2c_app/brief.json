@@ -1,0 +1,238 @@
+{
+  "brief_version": 2,
+  "template_id": "generic_v1",
+  "schema_hash": "a14a30d9e70ef433",
+  "run_id": "eval-03_mobile_b2c_app",
+  "project_id": "03_mobile_b2c_app",
+  "source_hash": "eval-03_mobile_b2c_app",
+  "created_at": "2026-05-28T10:03:40+00:00",
+  "completed_at": null,
+  "fields": {
+    "problem_statement": {
+      "value": "Thị trường food delivery VN đang tăng trưởng, startup muốn vào phân khúc mid-range với UX tốt hơn GrabFood. Không có product hiện tại.",
+      "source": "user",
+      "rationale": null
+    },
+    "who_feels_pain": {
+      "value": "Người dùng 22-35 tuổi thành thị, chủ nhà hàng muốn thêm kênh bán hàng",
+      "source": "user",
+      "rationale": null
+    },
+    "current_workaround": {
+      "value": "Dùng GrabFood/ShopeeFood. Nhà hàng phàn nàn phí commission 25-30%.",
+      "source": "user",
+      "rationale": null
+    },
+    "cost_of_doing_nothing": {
+      "value": "Mất cửa sổ thị trường, đối thủ chiếm thị phần mid-range trước",
+      "source": "user",
+      "rationale": null
+    },
+    "scope_in": {
+      "value": [
+        "Browse nhà hàng theo vị trí + danh mục",
+        "Xem menu + chi tiết món ăn (ảnh, giá, option)",
+        "Giỏ hàng + đặt đơn",
+        "Thanh toán VNPay + MoMo + COD",
+        "Realtime order tracking (user side)",
+        "Push notification (order status updates)",
+        "Rating + review sau khi nhận đơn",
+        "Restaurant partner portal (web, manage menu + orders)",
+        "iOS + Android apps"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "scope_out": {
+      "value": [
+        "Shipper app (out of scope - external delivery partner)",
+        "In-house delivery management",
+        "Subscription / membership tier",
+        "Live chat với nhà hàng",
+        "AR food preview"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "success_metric": {
+      "value": "10k DAU tháng 6, order conversion rate >= 8%, thanh toán success rate >= 95%",
+      "source": "user",
+      "rationale": null
+    },
+    "done_definition": {
+      "value": "App live trên App Store + Google Play, 50 nhà hàng onboard, 1000 đơn thành công trong tuần đầu",
+      "source": "user",
+      "rationale": null
+    },
+    "deadline": {
+      "value": "2026-10-01 (hard, funding milestone)",
+      "source": "user",
+      "rationale": null
+    },
+    "primary_user": {
+      "value": "Người dùng cuối 22-35 tuổi, smartphone Android/iOS, 3G/4G/WiFi",
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_now": {
+      "value": 0,
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_year1": {
+      "value": 100000,
+      "source": "user",
+      "rationale": null
+    },
+    "user_languages": {
+      "value": [
+        "vi"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "accessibility": {
+      "value": "WCAG 2.1 AA (không bắt buộc nhưng nên có cho screen reader)",
+      "source": "user",
+      "rationale": null
+    },
+    "must_use_stack": {
+      "value": [
+        "React Native (cross-platform)",
+        "Node.js hoặc Python backend"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_not_use": {
+      "value": [
+        "Flutter (team không có skill)",
+        "in-house payment gateway"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "compliance": {
+      "value": "PCI-DSS level 4 (payment data), PDPD VN (cá nhân)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_residency": {
+      "value": "VN (theo PDPD yêu cầu lưu dữ liệu VN công dân trong lãnh thổ)",
+      "source": "user",
+      "rationale": null
+    },
+    "budget_infra": {
+      "value": "$1000/month cho đến 10k DAU",
+      "source": "user",
+      "rationale": null
+    },
+    "team_skills": {
+      "value": [
+        "React Native",
+        "Node.js",
+        "PostgreSQL",
+        "Redis",
+        "AWS"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "greenfield_or_brownfield": {
+      "value": "greenfield",
+      "source": "user",
+      "rationale": null
+    },
+    "existing_auth": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "data_sources": {
+      "value": [
+        "Google Maps API (geo)",
+        "VNPay API",
+        "MoMo API"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_integrate_with": {
+      "value": [
+        "VNPay",
+        "MoMo",
+        "Google Maps/Goong (bản đồ VN)",
+        "Firebase (push notif)",
+        "OneSignal hoặc FCM/APNs"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "deployment_target": {
+      "value": "AWS ap-southeast-1 (Singapore, gần VN + PDPD compliant)",
+      "source": "user",
+      "rationale": null
+    },
+    "nfr_priority": {
+      "value": [
+        "Performance",
+        "Reliability",
+        "Security",
+        "Time-to-market"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "expected_rps": {
+      "value": 500,
+      "source": "user",
+      "rationale": null
+    },
+    "expected_data_volume": {
+      "value": "20GB/year (orders, menu images, reviews)",
+      "source": "user",
+      "rationale": null
+    },
+    "availability_target": {
+      "value": "99.9% (payment và order creation critical)",
+      "source": "user",
+      "rationale": null
+    },
+    "latency_target": {
+      "value": "API p95 < 500ms, map load < 2s trên 3G",
+      "source": "user",
+      "rationale": null
+    },
+    "known_unknowns": {
+      "value": [
+        "auth method: OTP phone (chuẩn VN) vs social login (Google/Facebook)",
+        "map provider: Google Maps vs Goong (VN-made, cheaper) vs OpenStreetMap",
+        "realtime tracking: WebSocket vs polling vs long-polling",
+        "offline mode khi mất mạng giữa chừng đặt đơn"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "failed_attempts": {
+      "value": [],
+      "source": "user",
+      "rationale": null
+    },
+    "inspiration_refs": {
+      "value": [
+        "GrabFood (UX reference)",
+        "Shopee Food (payment integration VN)",
+        "DoorDash (technical architecture)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "political_constraints": {
+      "value": "Investor yêu cầu data lưu tại VN (PDPD), không dùng dịch vụ Trung Quốc",
+      "source": "user",
+      "rationale": null
+    }
+  },
+  "assumptions": [],
+  "audit": []
+}

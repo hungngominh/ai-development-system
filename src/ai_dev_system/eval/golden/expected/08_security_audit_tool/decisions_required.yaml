@@ -1,0 +1,56 @@
+required_decisions:
+  - id: "sast_engine"
+    why: "known_unknowns lists Semgrep vs Bandit vs CodeQL; must be self-hosted (constraint)"
+    domain_expected: ["security", "devops"]
+    accept_question_patterns:
+      - "(?i)(semgrep|bandit|codeql|sonarqube|pmd).*(chọn|use|dùng|engine|scanner)"
+      - "(?i)(sast|static.?analysis).*(engine|tool|scanner).*(chọn|nào|which)"
+      - "(?i)(code.?scan|scan.?code).*(tool|engine).*(chọn|approach)"
+
+  - id: "dependency_scan_tool"
+    why: "known_unknowns lists OSV Scanner vs OWASP Dependency-Check vs pip-audit"
+    domain_expected: ["security", "devops"]
+    accept_question_patterns:
+      - "(?i)(osv|owasp.?depend|pip.?audit|dependabot|safety).*(chọn|use|scan)"
+      - "(?i)(dependency|cve).*(scan|check).*(tool|approach|chọn)"
+      - "(?i)(vulnerability|cve).*(dependency|package|lib).*(detect|scan|tool)"
+
+  - id: "secret_scanner"
+    why: "known_unknowns lists truffleHog vs detect-secrets vs git-secrets"
+    domain_expected: ["security"]
+    accept_question_patterns:
+      - "(?i)(trufflehog|detect.?secret|git.?secret|gitleaks).*(use|chọn|approach)"
+      - "(?i)secret.?(scan|detect).*(tool|approach|chọn|engine)"
+      - "(?i)(api.?key|hardcode|credential).*(scan|detect|find).*(tool)"
+
+  - id: "report_format"
+    why: "known_unknowns: SARIF vs JUnit XML vs custom JSON; affects CI integration"
+    domain_expected: ["devops", "security"]
+    accept_question_patterns:
+      - "(?i)(sarif|junit.?xml|json).*(report|format|output)"
+      - "(?i)report.*(format|output|sarif|junit).*(chọn|dùng|which)"
+      - "(?i)(ci|github.?action|gitlab).*(report|finding|format).*(integrate)"
+
+  - id: "severity_threshold_policy"
+    why: "known_unknowns: which severity levels block pipeline vs warn; threshold known_unknown"
+    domain_expected: ["security", "devops"]
+    accept_question_patterns:
+      - "(?i)(severity|critical|high|medium).*(block|fail|threshold|gate)"
+      - "(?i)(pipeline.?block|break.?build|fail.?build).*(severity|critical)"
+      - "(?i)(ngưỡng|threshold).*(severity|critical|high).*(block|fail|warn)"
+
+  - id: "false_positive_suppression"
+    why: "scope_in includes allow-list; false positive handling critical for developer acceptance"
+    domain_expected: ["security", "devops"]
+    accept_question_patterns:
+      - "(?i)(false.?positive|allow.?list|suppress|ignore).*(finding|rule|vulnerability)"
+      - "(?i)(suppress|whitelist|allowlist).*(false.?positive|finding|scan)"
+      - "(?i)(bỏ qua|ignore|suppress).*(false.?positive|kết quả sai|finding)"
+
+  - id: "jira_integration_approach"
+    why: "scope_in: auto-create Jira ticket for critical; Jira API integration has nuances"
+    domain_expected: ["devops", "backend"]
+    accept_question_patterns:
+      - "(?i)(jira|ticket).*(auto|tự động).*(create|tạo|finding|critical)"
+      - "(?i)(jira.?api|jira.?integration).*(approach|implement|tạo ticket)"
+      - "(?i)(dedup|duplicate).*(jira.?ticket|ticket).*(finding|issue)"

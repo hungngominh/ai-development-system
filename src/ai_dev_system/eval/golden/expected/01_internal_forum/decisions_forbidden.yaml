@@ -1,0 +1,50 @@
+# Forbidden decisions for 01_internal_forum
+#
+# Generator MUST NOT ask these questions — they are already decided by brief.
+# Metric: forbidden_decision_rate = (questions matching forbidden pattern) / total → must == 0
+
+forbidden_decisions:
+  - id: "database_choice"
+    why: "brief.fields.must_use_stack=[PostgreSQL], brief.must_not_use=[MongoDB, MySQL]"
+    reject_question_patterns:
+      - "(?i)(which|what|chọn).*(database|db|cơ sở dữ liệu)"
+      - "(?i)postgres.*(or|vs|hay).*(mongo|mysql)"
+      - "(?i)nosql.*(vs|hay|or).*sql"
+
+  - id: "authentication_method"
+    why: "brief.existing_auth=Azure AD SSO, must integrate"
+    reject_question_patterns:
+      - "(?i)(jwt|session|oauth).*(or|vs|hay|chọn)"
+      - "(?i)(authent|auth).*(mechanism|method|cách)"
+      - "(?i)which.*auth"
+
+  - id: "frontend_framework"
+    why: "brief.must_use_stack=[React]"
+    reject_question_patterns:
+      - "(?i)react.*(or|vs|hay).*(vue|angular|svelte)"
+      - "(?i)which.*frontend.*framework"
+      - "(?i)chọn.*frontend.*framework"
+
+  - id: "backend_language"
+    why: "brief.must_use_stack=[Python backend]"
+    reject_question_patterns:
+      - "(?i)python.*(or|vs|hay).*(go|node|java|rust)"
+      - "(?i)which.*backend.*language"
+
+  - id: "compliance_framework"
+    why: "brief.compliance=none (intranet only)"
+    reject_question_patterns:
+      - "(?i)(gdpr|hipaa|soc2|pci|iso27001)"
+      - "(?i)compliance.*(framework|requirement)"
+
+  - id: "general_authentication_existence"
+    why: "binary 'should we have auth' — already yes via Azure AD"
+    reject_question_patterns:
+      - "(?i)should.*have.*(auth|login)"
+      - "(?i)(có|nên).*có.*(authentication|login)"
+
+  - id: "cloud_vendor_choice"
+    why: "data_residency=VN + budget $200/mo strongly implies Azure SEA; AI should suggest, not debate"
+    reject_question_patterns:
+      - "(?i)(aws|gcp|azure).*(or|vs|hay).*(aws|gcp|azure)"
+      - "(?i)which.*cloud.*provider"

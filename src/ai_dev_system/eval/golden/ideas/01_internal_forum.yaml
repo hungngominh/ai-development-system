@@ -1,0 +1,97 @@
+# Golden Idea: 01_internal_forum
+#
+# Profile: medium complexity, product-type, multi-domain (auth, search, leaderboard, moderation).
+# Tests: domain coverage breadth, integration awareness (Azure AD), constraint adherence (PostgreSQL forced).
+
+id: "01_internal_forum"
+profile:
+  scope_type: product
+  complexity: medium
+  primary_domains: [backend, security, product, database]
+
+raw_idea: |
+  Xây forum chia sẻ kiến thức nội bộ cho công ty.
+  Có leaderboard contributor để khuyến khích đóng góp.
+  Khoảng 500 nhân viên, chủ yếu engineering và PM.
+
+# Scripted answers for the intake wizard runner.
+# Format: every field in `generic_v1` template with its expected value.
+# Use "?" to simulate user gõ "không biết" → AI should suggest, runner accepts.
+# Use null to simulate user skip → field stays empty.
+intake_script:
+  # Section 1: Context
+  problem_statement: "Nhân viên không tìm được kiến thức cũ, mỗi lần hỏi lại trên Slack. Người mới onboard mất 2-3 tuần để biết các quyết định kỹ thuật trong quá khứ."
+  who_feels_pain: "~500 nhân viên engineering + PM tại VN, đặc biệt new hires"
+  current_workaround: "Slack search (kém), Notion phân mảnh theo team, Google Drive cá nhân"
+  cost_of_doing_nothing: "~2h/tuần/người tìm lại thông tin → ~1000h/tuần toàn công ty"
+
+  # Section 2: Scope
+  scope_in:
+    - "post (tiêu đề + nội dung markdown + tags)"
+    - "comments (threaded, 2 level)"
+    - "upvote/downvote cho post và comment"
+    - "leaderboard top contributors theo tháng"
+    - "search full-text trên post và comment"
+    - "categories (kỹ thuật, sản phẩm, sự kiện)"
+  scope_out:
+    - "direct message"
+    - "file upload >10MB"
+    - "mobile native app (web-only)"
+    - "video upload"
+    - "polls/surveys"
+  success_metric: "WAU >= 200 trong tháng đầu, search NPS >= 7, contributor count >= 50 cuối tháng đầu"
+  done_definition: "Deploy lên prod intranet + 50 user thật dùng 1 tuần không bug critical, search latency p95 < 500ms"
+  deadline: "2026-08-01 (hard, kỷ niệm công ty)"
+
+  # Section 3: User persona
+  primary_user: "Software engineer (junior → senior) + PM + một số non-tech"
+  user_count_now: 500
+  user_count_year1: 800
+  user_languages: ["vi", "en"]
+  accessibility: "không yêu cầu đặc biệt (intranet, không phải public)"
+
+  # Section 4: Hard constraints
+  must_use_stack: ["PostgreSQL", "Python backend", "React frontend"]
+  must_not_use: ["MongoDB", "MySQL", "any vendor-locked SaaS"]
+  compliance: "none (intranet, không lưu PII bên thứ 3)"
+  data_residency: "VN (data trong infra công ty)"
+  budget_infra: "$200/month (dùng on-prem hoặc Azure region SEA)"
+  team_skills: ["Python", "FastAPI", "React", "PostgreSQL", "Docker"]
+
+  # Section 5: Integration
+  greenfield_or_brownfield: "greenfield (không tích hợp hệ thống forum cũ)"
+  existing_auth: "Azure AD SSO (toàn công ty đang dùng)"
+  data_sources: []  # no external data import for MVP
+  must_integrate_with: ["Azure AD (SSO)", "Slack (notification cho post mới của team mình follow)"]
+  deployment_target: "?"  # ← cố tình skip → tests AI suggest (sẽ propose Azure SEA region từ data_residency + existing_auth)
+
+  # Section 6: NFR priorities (ranked, no hard limit per decision)
+  nfr_priority:
+    - "Time-to-market"
+    - "Maintainability"
+    - "Performance"
+    - "Security"
+  expected_rps: 50  # 500 user × ~0.1 rps trung bình peak hour
+  expected_data_volume: "10GB sau 1 năm (post + comment)"
+  availability_target: "99% (intranet, downtime business hours = critical only)"
+  latency_target: "p95 < 300ms cho page load, p95 < 500ms cho search"
+
+  # Section 7: Risk & unknown
+  known_unknowns:
+    - "search engine selection (PostgreSQL FTS vs Meilisearch vs Elasticsearch)"
+    - "moderation policy (manual vs auto vs hybrid)"
+    - "notification delivery (email vs Slack vs in-app)"
+  failed_attempts: []
+  inspiration_refs: ["Discourse (open source forum)", "StackOverflow Teams", "Notion comments"]
+  political_constraints: "Tránh tool có vendor lock-in (board đã từ chối 2 SaaS forum trước)"
+
+# Expected behavior notes (human-readable, for eval debugging)
+expected_behavior_notes: |
+  Brief có 8 critical fields filled, 1 skip (deployment_target) cần AI suggest.
+  AI suggest cho deployment_target nên đề xuất "Azure SEA region" vì:
+    - data_residency=VN → cần region gần VN
+    - existing_auth=Azure AD → integration tự nhiên
+    - budget=$200/month → Azure cheaper than AWS cho workload nhỏ
+  Followup nên catch:
+    - known_unknowns liệt kê 3 thứ → generate questions cover hết
+    - Không có inconsistency cứng (deadline 2 tháng đủ cho scope)

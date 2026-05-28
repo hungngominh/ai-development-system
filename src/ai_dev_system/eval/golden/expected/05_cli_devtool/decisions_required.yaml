@@ -1,0 +1,48 @@
+# Required decisions for 05_cli_devtool
+#
+# Fewer than internal_forum (low complexity); generator should not over-ask.
+
+required_decisions:
+  - id: "migration_naming_convention"
+    why: "known_unknowns explicitly lists this; Flyway/Atlas have different conventions"
+    domain_expected: ["backend"]
+    accept_question_patterns:
+      - "(?i)(naming|filename).*(convention|format|pattern).*(migration|file)"
+      - "(?i)(timestamp|sequence|version).*(migration|file)"
+      - "(?i)(quy ước|convention).*(đặt tên|naming)"
+
+  - id: "plugin_system"
+    why: "known_unknowns lists this; extensibility decision impacts architecture early"
+    domain_expected: ["backend"]
+    accept_question_patterns:
+      - "(?i)plugin.*(system|architecture|support)"
+      - "(?i)(extensible|extensibility|extension).*(custom|rule|diff)"
+      - "(?i)hệ thống.*plugin"
+
+  - id: "column_rename_detection"
+    why: "diffing schema is non-trivial — rename vs drop+add must be decided"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)(rename|đổi tên).*(column|cột).*(detect|nhận diện)"
+      - "(?i)(column.*rename|drop.*add)"
+
+  - id: "rollback_semantics"
+    why: "scope_in mentions rollback; transaction-based vs down-migration is a hard choice"
+    domain_expected: ["backend"]
+    accept_question_patterns:
+      - "(?i)rollback.*(transaction|down.?migration|reverse|undo)"
+      - "(?i)(down.?migration|reverse migration)"
+
+  - id: "schema_format_spec"
+    why: "scope_in says 'schema YAML' but YAML structure unspecified — DDL-like or higher-level?"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)(yaml|schema).*(format|structure|syntax|spec)"
+      - "(?i)(declarative|imperative).*(schema|migration)"
+
+  - id: "concurrent_migration_safety"
+    why: "two devs running apply simultaneously? lock strategy?"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)(concurrent|concurrency|lock).*(migration|apply)"
+      - "(?i)(advisory.?lock|migration.?lock)"

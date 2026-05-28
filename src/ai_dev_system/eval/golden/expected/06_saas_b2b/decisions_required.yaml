@@ -1,0 +1,57 @@
+required_decisions:
+  - id: "multi_tenancy_model"
+    why: "known_unknowns explicitly lists schema-per-tenant vs shared schema + RLS; core architecture"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)(schema.per.tenant|tenant.?isolation|row.?level.?security|rls).*(approach|strategy|chọn)"
+      - "(?i)multi.?tenancy.*(model|approach|architecture|kiến trúc)"
+      - "(?i)(shared.?schema|separate.?schema|schema.?per).*(tenant|customer|org)"
+      - "(?i)(tenant.?id|tenant.?isolation).*(database|db|schema)"
+
+  - id: "billing_provider"
+    why: "known_unknowns lists Stripe vs Paddle; must_integrate_with has Stripe only — confirm or expand"
+    domain_expected: ["product", "backend"]
+    accept_question_patterns:
+      - "(?i)(stripe|paddle|chargebee|billing).*(chọn|dùng|integrate|provider)"
+      - "(?i)(subscription|billing).*(provider|platform|approach)"
+      - "(?i)(thanh toán|payment).*(subscription|định kỳ|recurring)"
+
+  - id: "sso_provider"
+    why: "known_unknowns: SAML vs OIDC vs Auth0/WorkOS; enterprise customers require SSO"
+    domain_expected: ["security", "backend"]
+    accept_question_patterns:
+      - "(?i)(saml|oidc|sso|auth0|workos|okta).*(enterprise|implement|provider|chọn)"
+      - "(?i)(single.?sign.?on|sso).*(implement|approach|library|framework)"
+      - "(?i)enterprise.*(sso|authentication|login).*(saml|oidc|implement)"
+
+  - id: "data_isolation_level"
+    why: "known_unknowns: logical RLS vs physical separate DB per enterprise tenant"
+    domain_expected: ["database", "security"]
+    accept_question_patterns:
+      - "(?i)(physical.?isolation|logical.?isolation|separate.?db|shared.?db).*(tenant|customer)"
+      - "(?i)(rls|row.?level.?security).*(vs|hay).*(separate.?db|schema)"
+      - "(?i)(data.?isolation|tenant.?data).*(level|approach|strategy)"
+
+  - id: "free_tier_limits"
+    why: "known_unknowns: feature-gated vs usage-based limits affect growth and conversion"
+    domain_expected: ["product", "backend"]
+    accept_question_patterns:
+      - "(?i)(free.?tier|freemium).*(limit|gate|feature|strategy)"
+      - "(?i)(usage.?based|feature.?gate|seat.?limit).*(free|trial|tier)"
+      - "(?i)(gói miễn phí|free plan).*(giới hạn|limit|feature)"
+
+  - id: "soc2_compliance_readiness"
+    why: "compliance=SOC 2 Type 1; enterprise sales requirement — implementation choices constrained"
+    domain_expected: ["security", "backend"]
+    accept_question_patterns:
+      - "(?i)(soc.?2|soc2).*(implement|prepare|comply|audit)"
+      - "(?i)(audit.?log|access.?control|encryption.?at.?rest).*(soc.?2|compliance)"
+      - "(?i)(compliance|security.?control).*(soc|enterprise.?customer)"
+
+  - id: "trial_flow"
+    why: "SaaS B2B needs clear trial-to-paid conversion; credit card upfront or not"
+    domain_expected: ["product"]
+    accept_question_patterns:
+      - "(?i)(trial|free.?trial).*(credit.?card|payment|flow|period|duration)"
+      - "(?i)(dùng thử|trial).*(yêu cầu thẻ|credit.?card|convert)"
+      - "(?i)(conversion|upgrade).*(trial|dùng thử).*(paid|trả phí|billing)"

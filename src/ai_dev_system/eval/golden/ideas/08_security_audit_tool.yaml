@@ -1,0 +1,101 @@
+# Golden Idea: 08_security_audit_tool
+#
+# Profile: medium complexity, tool-type, multi-domain (security, devops, backend).
+# Tests: SAST tool choices, report formats, severity thresholds, CI/CD integration.
+
+id: "08_security_audit_tool"
+profile:
+  scope_type: tool
+  complexity: medium
+  primary_domains: [security, devops, backend]
+
+raw_idea: |
+  Công cụ security audit tự động cho CI/CD pipeline. Scan code để phát hiện
+  vulnerability (SAST), check dependency CVE, và scan secrets bị hardcode.
+  Tích hợp với GitHub Actions và GitLab CI. Tạo report gửi email + tạo Jira ticket
+  tự động cho critical issue.
+
+intake_script:
+  # Section 1: Context
+  problem_statement: "Team không có process security review. Code được merge mà không scan. Đã có 2 incident từ hardcoded API key và SQL injection trong 6 tháng qua."
+  who_feels_pain: "Security lead (thiếu visibility), developer (bị blame khi security issue tìm ra muộn), CTO (risk)"
+  current_workaround: "Manual code review một phần, Snyk free tier (chỉ dependency scan, không SAST)"
+  cost_of_doing_nothing: "1 incident/quarter, mỗi incident ~$20k impact (fix + khách hàng bị ảnh hưởng)"
+
+  # Section 2: Scope
+  scope_in:
+    - "SAST scan: Python + JavaScript/TypeScript (2 ngôn ngữ chính)"
+    - "Dependency CVE scan (requirements.txt, package.json)"
+    - "Secret scanning (hardcoded API keys, passwords, tokens)"
+    - "Tích hợp GitHub Actions (ci.yaml)"
+    - "Tích hợp GitLab CI (.gitlab-ci.yml)"
+    - "Severity classification: critical/high/medium/low"
+    - "Block pipeline nếu critical/high severity"
+    - "Report: SARIF file + human-readable summary"
+    - "Jira ticket tự động cho critical finding"
+    - "False positive suppression (allow-list per-repo)"
+  scope_out:
+    - "DAST (dynamic analysis, runtime testing)"
+    - "Infrastructure scan (Terraform, K8s config)"
+    - "Mobile app security scan"
+    - "Penetration testing automation"
+    - "Compliance audit (SOC 2, PCI formal)"
+    - "IDE plugin (chỉ CI pipeline)"
+  success_metric: "100% PR scan coverage trong 2 tháng, zero critical finding không được triage trong 48h, false positive rate < 10%"
+  done_definition: "Tool chạy trong CI của 3 repo chính, 1 tháng không có undetected critical security issue, team security confirm workflow acceptable"
+  deadline: "2026-07-01 (hard, sau security audit của enterprise customer)"
+
+  # Section 3: User persona
+  primary_user: "Developer (thấy result trong CI) + Security engineer (review dashboard)"
+  user_count_now: 20  # developers running CI
+  user_count_year1: 35
+  user_languages: ["en"]
+  accessibility: "không yêu cầu (CI tool)"
+
+  # Section 4: Hard constraints
+  must_use_stack: ["Python 3.10+", "Docker (để đóng gói tool)"]
+  must_not_use: ["Snyk SaaS (đang dùng miễn phí nhưng muốn self-hosted)", "commercial SAST (budget)"]
+  compliance: "không yêu cầu formal (internal tool)"
+  data_residency: "on-prem (code không được gửi ra ngoài)"
+  budget_infra: "$0 (phải dùng open source)"
+  team_skills: ["Python", "Docker", "GitHub Actions", "GitLab CI", "Jira API"]
+
+  # Section 5: Integration
+  greenfield_or_brownfield: "greenfield (tool mới, tích hợp vào existing CI)"
+  existing_auth: "GitHub App / GitLab token (CI/CD auth)"
+  data_sources: ["GitHub repos", "GitLab repos", "NVD/OSV (CVE database)"]
+  must_integrate_with: ["GitHub Actions", "GitLab CI", "Jira (ticket creation)", "email (SMTP)"]
+  deployment_target: "self-hosted Docker (runner trong CI infrastructure, không phải SaaS)"
+
+  # Section 6: NFR priorities
+  nfr_priority:
+    - "Reliability"
+    - "Performance"
+    - "Maintainability"
+  expected_rps: null  # CI tool, không phải server
+  expected_data_volume: null
+  availability_target: "tool chạy khi CI chạy, không có SLA"
+  latency_target: "full scan < 5 phút cho repo 100k LOC"
+
+  # Section 7: Risk & unknown
+  known_unknowns:
+    - "SAST engine: Semgrep (free, customizable) vs Bandit (Python-only) vs CodeQL (GitHub-only)"
+    - "dependency scan: OSV Scanner vs OWASP Dependency-Check vs pip-audit"
+    - "secret scanning: truffleHog vs detect-secrets vs git-secrets"
+    - "report format: SARIF (GitHub native) vs JUnit XML vs custom JSON"
+    - "severity thresholds: critical/high block, medium/low warn chỉ — có đúng không?"
+  failed_attempts:
+    - "Đã thử tích hợp SonarQube Community, quá nặng cho CI, scan mất 15 phút"
+  inspiration_refs:
+    - "Semgrep (SAST, OSS)"
+    - "GitHub Advanced Security (reference, quá đắt)"
+    - "OWASP ASVS (checklist reference)"
+    - "OSV Scanner (Google, OSS dependency scan)"
+  political_constraints: "CTO hard requirement: không gửi source code ra ngoài (air-gap consideration)"
+
+expected_behavior_notes: |
+  Security tool — test cho security domain knowledge và tooling decisions.
+  Required: SAST engine, dependency scan tool, secret scanner, report format,
+  severity threshold policy, false positive suppression mechanism, Jira integration approach.
+  Forbidden: questions về DAST, infrastructure scan, IDE plugin, compliance audit.
+  Test: câu hỏi phải reflect constraint "on-prem, no code leaves" — tools phải self-hosted.

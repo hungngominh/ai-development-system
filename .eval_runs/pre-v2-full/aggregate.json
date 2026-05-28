@@ -1,0 +1,20 @@
+{
+  "idea_count": 8,
+  "metrics": {
+    "critical_fill_rate": 1.0,
+    "ai_suggest_acceptance": 1.0,
+    "assumption_count": 0.0,
+    "consistency_violations": 0.0,
+    "field_coverage_per_section": 0.7625,
+    "followup_question_count": 0.0
+  },
+  "passes": {
+    "pass_critical_fill": 8,
+    "pass_ai_suggest": 8,
+    "pass_assumption": 8,
+    "pass_consistency": 8,
+    "pass_field_coverage": 7,
+    "pass_followup": 8
+  },
+  "overall_pass_count": 7
+}

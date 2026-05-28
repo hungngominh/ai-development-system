@@ -1,0 +1,58 @@
+required_decisions:
+  - id: "auth_method"
+    why: "known_unknowns lists OTP phone vs social login — VN market standard is phone OTP"
+    domain_expected: ["security", "backend"]
+    accept_question_patterns:
+      - "(?i)(otp|phone.?number|sms).*(auth|đăng nhập|login|verify)"
+      - "(?i)(social.?login|google.?oauth|facebook).*(vs|hay|hoặc|auth)"
+      - "(?i)auth.*(method|approach|strategy|phone|otp)"
+      - "(?i)(đăng nhập|login).*(bằng số điện thoại|phone|otp|social)"
+
+  - id: "map_provider"
+    why: "known_unknowns lists Google Maps vs Goong vs OSM; cost and VN coverage differ significantly"
+    domain_expected: ["product", "backend"]
+    accept_question_patterns:
+      - "(?i)(google.?maps|goong|openstreet|mapbox|vietmap).*(chọn|dùng|provider)"
+      - "(?i)map.*(provider|vendor|service).*(chọn|which|nào)"
+      - "(?i)(bản đồ|location|geo).*(provider|api|service|dùng)"
+
+  - id: "realtime_order_tracking"
+    why: "known_unknowns lists WebSocket vs polling; affects server load and mobile battery"
+    domain_expected: ["backend", "mobile"]
+    accept_question_patterns:
+      - "(?i)(websocket|long.?polling|sse|server.?sent|polling).*(order|tracking|realtime)"
+      - "(?i)realtime.*(order|tracking|update).*(websocket|polling|push)"
+      - "(?i)(track|theo dõi).*(đơn|order).*(realtime|cập nhật|update)"
+
+  - id: "push_notification_provider"
+    why: "scope_in includes push notifications; must integrate with FCM/APNs; provider choice matters"
+    domain_expected: ["backend", "mobile"]
+    accept_question_patterns:
+      - "(?i)(fcm|firebase|apns|onesignal|push.?notif).*(provider|dùng|chọn)"
+      - "(?i)push.?notification.*(provider|service|platform)"
+      - "(?i)(thông báo|notification).*(push|firebase|onesignal)"
+
+  - id: "offline_order_handling"
+    why: "known_unknowns lists offline mode; mobile users lose connection mid-checkout"
+    domain_expected: ["mobile", "product"]
+    accept_question_patterns:
+      - "(?i)offline.*(order|checkout|mode|đặt hàng)"
+      - "(?i)(mất mạng|no.?internet|network.?loss).*(đặt|order|cart)"
+      - "(?i)(optimistic.?update|local.?cache|sync).*(cart|order|offline)"
+
+  - id: "payment_webhook_reliability"
+    why: "VNPay + MoMo use webhooks for payment confirmation; reliability is critical"
+    domain_expected: ["backend", "security"]
+    accept_question_patterns:
+      - "(?i)(vnpay|momo).*(webhook|callback|ipn|confirm)"
+      - "(?i)payment.*(webhook|callback|confirm).*(fail|retry|reliable)"
+      - "(?i)(idempoten|retry|duplicate).*(payment|webhook|confirm)"
+      - "(?i)(thanh toán|payment).*(xác nhận|confirm).*(thất bại|fail|retry)"
+
+  - id: "pdpd_compliance"
+    why: "compliance=PDPD VN; personal data storage requires specific measures"
+    domain_expected: ["security", "backend"]
+    accept_question_patterns:
+      - "(?i)(pdpd|nghị định 13|personal.?data.?protection).*(comply|implement|lưu|store)"
+      - "(?i)(dữ liệu cá nhân|personal.?data).*(VN|việt nam|lưu trữ|consent)"
+      - "(?i)(consent|đồng ý).*(data|dữ liệu|thu thập)"

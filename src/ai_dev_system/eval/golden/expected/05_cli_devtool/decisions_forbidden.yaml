@@ -1,0 +1,52 @@
+# Forbidden decisions for 05_cli_devtool
+#
+# CLI tool — many topics that apply to web apps DO NOT apply here.
+
+forbidden_decisions:
+  - id: "language_choice"
+    why: "brief.must_use_stack=[Python 3.10+]"
+    reject_question_patterns:
+      - "(?i)python.*(or|vs|hay).*(go|node|rust|java)"
+      - "(?i)which.*language"
+
+  - id: "cli_framework"
+    why: "brief.must_use_stack=[Click hoặc Typer] — explicit shortlist already"
+    reject_question_patterns:
+      - "(?i)click.*(or|vs|hay).*typer"
+      - "(?i)which.*cli.*(framework|library)"
+
+  - id: "authentication"
+    why: "CLI tool, no auth — brief.existing_auth=null"
+    reject_question_patterns:
+      - "(?i)(jwt|oauth|session|sso).*(auth|login)"
+      - "(?i)authent.*(mechanism|method)"
+
+  - id: "availability_sla"
+    why: "CLI tool, no availability SLA — brief.availability_target=null"
+    reject_question_patterns:
+      - "(?i)(availability|uptime).*(target|sla|percent)"
+      - "(?i)(99\\.9|99\\.99|99\\.999).*%"
+
+  - id: "data_residency"
+    why: "CLI tool, runs on dev machine"
+    reject_question_patterns:
+      - "(?i)data.*resid"
+      - "(?i)(region|location).*data"
+
+  - id: "scaling_strategy"
+    why: "CLI tool runs locally; no horizontal scaling concept"
+    reject_question_patterns:
+      - "(?i)horizontal.*scal"
+      - "(?i)(load.?balance|auto.?scal)"
+
+  - id: "ui_framework"
+    why: "scope_out has 'GUI / web UI'"
+    reject_question_patterns:
+      - "(?i)(web|gui|ui).*(framework|library)"
+      - "(?i)(react|vue|angular)"
+
+  - id: "general_distribution_method"
+    why: "brief.deployment_target='PyPI + GitHub Releases' — already decided"
+    reject_question_patterns:
+      - "(?i)distribut.*(method|via|how)"
+      - "(?i)how.*publish"

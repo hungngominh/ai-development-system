@@ -8,7 +8,7 @@ import threading as _threading
 from pathlib import Path
 from typing import Optional
 
-import psycopg
+import sqlite3
 
 from ai_dev_system.agents.base import AgentResult, PromotedOutput
 from ai_dev_system.config import Config
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def pickup_task(
-    conn: psycopg.Connection,
+    conn: sqlite3.Connection,
     config: Config,
     run_id: str,
     worker_id: str,
@@ -57,7 +57,7 @@ def pickup_task(
 
 
 def execute_and_promote(
-    conn: psycopg.Connection,
+    conn: sqlite3.Connection,
     config: Config,
     task: dict,
     result: AgentResult,
@@ -127,7 +127,7 @@ def worker_loop(
         while not stop_event.is_set():
             # Abort guard at loop head (autocommit=True — no tx)
             run_status_row = conn.execute(
-                "SELECT status FROM runs WHERE run_id = %s", (run_id,)
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
             if run_status_row and run_status_row["status"] in ("ABORTED", "FAILED", "COMPLETED"):
                 break
@@ -159,9 +159,10 @@ def worker_loop(
             try:
                 # Resolve artifact paths
                 try:
-                    context = _resolve_artifact_paths(
-                        conn, run_id, task.get("context_snapshot") or {}
-                    )
+                    ctx_raw = task.get("context_snapshot") or {}
+                    if isinstance(ctx_raw, str):
+                        ctx_raw = json.loads(ctx_raw) if ctx_raw.strip() else {}
+                    context = _resolve_artifact_paths(conn, run_id, ctx_raw)
                 except ArtifactResolutionError as e:
                     result = _make_error_result(task, str(e))
                 else:
@@ -189,12 +190,12 @@ def worker_loop(
 
             # Abort guard before promoting
             run_status_row = conn.execute(
-                "SELECT status FROM runs WHERE run_id = %s", (run_id,)
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
             if run_status_row and run_status_row["status"] in ("ABORTED", "FAILED"):
                 conn.execute("""
                     UPDATE task_runs SET status = 'ABORTED'
-                    WHERE task_run_id = %s AND status = 'RUNNING'
+                    WHERE task_run_id = ? AND status = 'RUNNING'
                 """, (task["task_run_id"],))
                 break
 
@@ -222,29 +223,49 @@ def _make_error_result(task: dict, error: str):
 
 
 def _pickup_for_runner(conn, config, run_id: str, worker_id: str):
-    """Pickup with dep double-check + run status guard. Called inside BEGIN."""
-    task = conn.execute("""
+    """Pickup with dep double-check + run status guard. Called inside BEGIN.
+
+    SQLite has no FOR UPDATE SKIP LOCKED or ANY(array); we do dep check in Python.
+    SQLite is single-writer so the "skip locked" need is moot.
+    """
+    candidates = conn.execute("""
         SELECT tr.*
         FROM task_runs tr
-        WHERE tr.run_id = %s
+        WHERE tr.run_id = ?
           AND tr.status = 'READY'
-          AND NOT EXISTS (
-              SELECT 1 FROM task_runs dep
-              WHERE dep.run_id = tr.run_id
-                AND dep.task_id = ANY(tr.resolved_dependencies)
-                AND dep.status NOT IN ('SUCCESS', 'SKIPPED')
-          )
         ORDER BY tr.retry_count ASC, tr.materialized_at ASC
-        LIMIT 1
-        FOR UPDATE SKIP LOCKED
-    """, (run_id,)).fetchone()
+    """, (run_id,)).fetchall()
+
+    task = None
+    for cand in candidates:
+        deps_raw = cand["resolved_dependencies"]
+        if isinstance(deps_raw, str):
+            deps = json.loads(deps_raw) if deps_raw.strip() else []
+        else:
+            deps = list(deps_raw or [])
+        if not deps:
+            task = cand
+            break
+        placeholders = ",".join("?" for _ in deps)
+        bad = conn.execute(
+            f"""
+            SELECT 1 FROM task_runs
+            WHERE run_id = ? AND task_id IN ({placeholders})
+              AND status NOT IN ('SUCCESS', 'SKIPPED')
+            LIMIT 1
+            """,
+            (run_id, *deps),
+        ).fetchone()
+        if bad is None:
+            task = cand
+            break
 
     if task is None:
         return None
 
     # Run guard inside lock
     run_status = conn.execute(
-        "SELECT status FROM runs WHERE run_id = %s", (run_id,)
+        "SELECT status FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
     if run_status and run_status["status"] != "RUNNING_EXECUTION":
         return None
@@ -256,23 +277,22 @@ def _pickup_for_runner(conn, config, run_id: str, worker_id: str):
 
     conn.execute("""
         UPDATE task_runs
-        SET status = 'RUNNING', worker_id = %s,
-            locked_at = now(), heartbeat_at = now(), started_at = now()
-        WHERE task_run_id = %s
+        SET status = 'RUNNING', worker_id = ?,
+            locked_at = CURRENT_TIMESTAMP, heartbeat_at = CURRENT_TIMESTAMP, started_at = CURRENT_TIMESTAMP
+        WHERE task_run_id = ?
     """, (worker_id, task["task_run_id"]))
 
     EventRepo(conn).insert(run_id, "TASK_STARTED", f"worker:{worker_id}",
                            task_run_id=task["task_run_id"])
 
-    promoted_raw = task.get("promoted_outputs") or []
+    task_dict = dict(task)
+    promoted_raw = task_dict.get("promoted_outputs") or []
     if isinstance(promoted_raw, str):
         promoted_raw = json.loads(promoted_raw)
     elif not isinstance(promoted_raw, list):
         promoted_raw = list(promoted_raw)
     promoted_outputs = [PromotedOutput(**po) if isinstance(po, dict) else po
                         for po in promoted_raw]
-
-    task_dict = dict(task)
     # Ensure UUID fields are plain strings (psycopg returns uuid columns as uuid.UUID objects
     # when the connection doesn't have a custom UUID loader registered).
     for key in ("task_run_id", "run_id", "task_graph_artifact_id",

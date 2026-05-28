@@ -1,0 +1,95 @@
+# Golden Idea: 05_cli_devtool
+#
+# Profile: low complexity, product-type, single-domain (developer tooling).
+# Tests: handling of small ideas where many fields legitimately = "not applicable / skip".
+
+id: "05_cli_devtool"
+profile:
+  scope_type: product
+  complexity: low
+  primary_domains: [backend, devops]
+
+raw_idea: |
+  Một CLI tool để dev có thể chạy các DB migration tự động hóa theo schema YAML.
+  Hỗ trợ PostgreSQL và MySQL. Phân phối qua pip.
+
+intake_script:
+  # Section 1: Context
+  problem_statement: "Dev team phải viết SQL migration tay, dễ sai và khó review. Migration giữa các môi trường không nhất quán."
+  who_feels_pain: "~30 backend dev trong công ty, đặc biệt DB owners"
+  current_workaround: "SQL script trong git, chạy tay với psql/mysql client"
+  cost_of_doing_nothing: "~1-2 sự cố migration sai/tháng, mỗi sự cố ~2-4h rollback"
+
+  # Section 2: Scope
+  scope_in:
+    - "parse schema YAML (table, column, index, constraint)"
+    - "diff schema YAML với DB hiện tại → tạo migration SQL"
+    - "apply migration với transaction + rollback on error"
+    - "dry-run mode (chỉ in SQL, không chạy)"
+    - "command: init, diff, apply, status, rollback"
+  scope_out:
+    - "GUI / web UI"
+    - "ORM-like query builder"
+    - "data migration (chỉ schema, không touch data)"
+    - "multi-DB transaction"
+  success_metric: "100% adoption trong team backend trong 2 tháng, 0 migration failure trong môi trường dev"
+  done_definition: "Publish lên PyPI + 5 dev khác trong công ty dùng được không cần hỏi tác giả"
+  deadline: "2026-07-15 (soft, nội bộ)"
+
+  # Section 3: User persona
+  primary_user: "Senior backend developer, comfortable với CLI"
+  user_count_now: 30
+  user_count_year1: 50
+  user_languages: ["en"]   # CLI tool, English only
+  accessibility: "không yêu cầu (CLI internal tool)"
+
+  # Section 4: Hard constraints
+  must_use_stack: ["Python 3.10+", "Click hoặc Typer (CLI framework)"]
+  must_not_use: ["external SaaS"]
+  compliance: "none"
+  data_residency: null  # not applicable for CLI tool
+  budget_infra: null    # CLI tool, no infra
+  team_skills: ["Python", "SQL", "PostgreSQL", "MySQL"]
+
+  # Section 5: Integration
+  greenfield_or_brownfield: "greenfield"
+  existing_auth: null   # CLI tool, no auth
+  data_sources: ["PostgreSQL", "MySQL"]
+  must_integrate_with: ["pip (PyPI distribution)", "PostgreSQL 13+", "MySQL 8+"]
+  deployment_target: "PyPI + GitHub Releases"
+
+  # Section 6: NFR priorities
+  nfr_priority:
+    - "Maintainability"
+    - "Reliability"      # migration failures are catastrophic
+    - "Performance"
+  expected_rps: null     # not applicable
+  expected_data_volume: null
+  availability_target: null   # CLI tool, no SLA
+  latency_target: "diff command < 5s for typical schema (100 tables)"
+
+  # Section 7: Risk & unknown
+  known_unknowns:
+    - "naming convention cho generated migration files (timestamp vs sequence)"
+    - "có cần plugin system không (vd custom diff rule)"
+  failed_attempts:
+    - "Đã thử Alembic, quá phức tạp cho use case đơn giản"
+    - "Đã thử yoyo-migrations, không support MySQL tốt"
+  inspiration_refs:
+    - "Flyway (idea naming convention)"
+    - "Atlas (golang, schema-as-config)"
+    - "Skeema (MySQL only, declarative)"
+  political_constraints: null
+
+expected_behavior_notes: |
+  Brief có 8 critical fields filled, một số field legitimate null (data_residency, budget, availability_target,
+  existing_auth — CLI tool không có concept này).
+  Generator nên:
+    - KHÔNG hỏi về availability/SLA (null)
+    - KHÔNG hỏi về data residency
+    - KHÔNG hỏi về authentication
+    - HỎI về naming convention (known_unknown)
+    - HỎI về plugin system (known_unknown)
+    - HỎI về diff strategy (column rename detection — không rõ trong scope)
+    - HỎI về rollback semantics (transaction-based hay separate down migration)
+  Đây là test "không over-ask" — brief đã có đủ context, generator không nên fabricate questions.

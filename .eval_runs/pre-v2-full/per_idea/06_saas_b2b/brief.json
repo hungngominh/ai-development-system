@@ -1,0 +1,237 @@
+{
+  "brief_version": 2,
+  "template_id": "generic_v1",
+  "schema_hash": "a14a30d9e70ef433",
+  "run_id": "eval-06_saas_b2b",
+  "project_id": "06_saas_b2b",
+  "source_hash": "eval-06_saas_b2b",
+  "created_at": "2026-05-28T10:03:40+00:00",
+  "completed_at": null,
+  "fields": {
+    "problem_statement": {
+      "value": "SME dùng Jira (quá phức tạp, đắt) hoặc Trello (quá đơn giản). Không có tool middle-ground tiếng Việt với giá hợp lý cho thị trường SEA.",
+      "source": "user",
+      "rationale": null
+    },
+    "who_feels_pain": {
+      "value": "Project manager + engineering lead ở SME 10-100 người, chủ yếu VN + SEA",
+      "source": "user",
+      "rationale": null
+    },
+    "current_workaround": {
+      "value": "Google Sheets + Slack + Notion hybrid. Mất nhiều công phối hợp.",
+      "source": "user",
+      "rationale": null
+    },
+    "cost_of_doing_nothing": {
+      "value": "Market window đang mở, Jira bị ghét, Linear đang grow nhanh nhưng chưa có tiếng Việt",
+      "source": "user",
+      "rationale": null
+    },
+    "scope_in": {
+      "value": [
+        "Projects + Boards (kanban + sprint mode)",
+        "Tasks với sub-tasks, assignee, due date, priority, labels",
+        "Sprint planning + velocity tracking",
+        "Team workspace (invite member, roles: admin/member/viewer)",
+        "Subscription billing (free tier + Pro + Business)",
+        "SSO (Google OAuth + SAML cho enterprise)",
+        "Notifications (in-app + email digest)",
+        "Basic reporting (burndown, velocity)",
+        "Import từ Trello + Jira (CSV)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "scope_out": {
+      "value": [
+        "Mobile native app (web responsive only cho MVP)",
+        "Time tracking",
+        "Invoice / accounting integration",
+        "AI-powered task suggestions (v2)",
+        "Video meetings"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "success_metric": {
+      "value": "500 paying orgs cuối năm 1, churn rate < 5%/tháng, NPS > 40",
+      "source": "user",
+      "rationale": null
+    },
+    "done_definition": {
+      "value": "Public launch, payment flow hoạt động, 10 paying customer trong tuần đầu, SSO Google hoạt động",
+      "source": "user",
+      "rationale": null
+    },
+    "deadline": {
+      "value": "2026-11-01 (soft, cuối Q4)",
+      "source": "user",
+      "rationale": null
+    },
+    "primary_user": {
+      "value": "Project Manager + Engineering Lead tại SME 10-100 người",
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_now": {
+      "value": 0,
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_year1": {
+      "value": 5000,
+      "source": "user",
+      "rationale": null
+    },
+    "user_languages": {
+      "value": [
+        "vi",
+        "en"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "accessibility": {
+      "value": "WCAG 2.1 AA (enterprise requirement)",
+      "source": "user",
+      "rationale": null
+    },
+    "must_use_stack": {
+      "value": [
+        "Python hoặc Node.js backend",
+        "React frontend",
+        "PostgreSQL"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_not_use": {
+      "value": [
+        "MongoDB (team không có skill)",
+        "PHP"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "compliance": {
+      "value": "SOC 2 Type 1 (enterprise sales requirement), GDPR",
+      "source": "user",
+      "rationale": null
+    },
+    "data_residency": {
+      "value": "(stub AI suggestion)",
+      "source": "ai_suggested_confirmed",
+      "rationale": "stub-mode: scripted '?' → simulated AI confirm"
+    },
+    "budget_infra": {
+      "value": "$2000/month khi đạt 500 orgs",
+      "source": "user",
+      "rationale": null
+    },
+    "team_skills": {
+      "value": [
+        "Python/Django hoặc FastAPI",
+        "React",
+        "PostgreSQL",
+        "Redis",
+        "Stripe"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "greenfield_or_brownfield": {
+      "value": "greenfield",
+      "source": "user",
+      "rationale": null
+    },
+    "existing_auth": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "data_sources": {
+      "value": [],
+      "source": "user",
+      "rationale": null
+    },
+    "must_integrate_with": {
+      "value": [
+        "Stripe (billing)",
+        "Google OAuth (SSO)",
+        "SendGrid hoặc SES (email)",
+        "Slack (notification webhook)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "deployment_target": {
+      "value": "AWS (multi-region capable sau này, ap-southeast-1 trước)",
+      "source": "user",
+      "rationale": null
+    },
+    "nfr_priority": {
+      "value": [
+        "Reliability",
+        "Security",
+        "Performance",
+        "Maintainability"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "expected_rps": {
+      "value": 100,
+      "source": "user",
+      "rationale": null
+    },
+    "expected_data_volume": {
+      "value": "50GB/year (tasks, comments, attachments)",
+      "source": "user",
+      "rationale": null
+    },
+    "availability_target": {
+      "value": "99.9% (SLA cam kết với enterprise)",
+      "source": "user",
+      "rationale": null
+    },
+    "latency_target": {
+      "value": "API p95 < 300ms, board load < 1s",
+      "source": "user",
+      "rationale": null
+    },
+    "known_unknowns": {
+      "value": [
+        "multi-tenancy model: schema-per-tenant vs shared schema + tenant_id (row-level security)",
+        "billing: Stripe Billing vs Paddle vs tự xây subscription logic",
+        "SAML SSO cho enterprise: tự implement vs dùng Auth0/WorkOS",
+        "free tier limits: feature-gated vs usage-based (storage/members)",
+        "data isolation level: logical (RLS) hay physical (separate DB per enterprise)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "failed_attempts": {
+      "value": [],
+      "source": "user",
+      "rationale": null
+    },
+    "inspiration_refs": {
+      "value": [
+        "Linear (UX, performance)",
+        "ClickUp (feature breadth)",
+        "Basecamp (pricing simplicity)",
+        "Notion (block-based)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "political_constraints": {
+      "value": "Investor SEA yêu cầu hỗ trợ tiếng Việt từ ngày 1. CTO chọn PostgreSQL vì team strong.",
+      "source": "user",
+      "rationale": null
+    }
+  },
+  "assumptions": [],
+  "audit": []
+}

@@ -1,0 +1,57 @@
+required_decisions:
+  - id: "model_serving_framework"
+    why: "known_unknowns lists raw FastAPI vs BentoML vs Seldon; framework determines ops complexity"
+    domain_expected: ["ml", "backend"]
+    accept_question_patterns:
+      - "(?i)(bentoml|seldon|torchserve|mlserver|fastapi).*(serve|framework|chọn)"
+      - "(?i)model.?serving.*(framework|tool|platform|chọn|nào)"
+      - "(?i)(inference|serving).*(framework|library|approach).*(chọn|dùng)"
+
+  - id: "model_registry"
+    why: "known_unknowns lists MLflow vs DVC vs S3; versioning required for rollback + A/B"
+    domain_expected: ["ml", "devops"]
+    accept_question_patterns:
+      - "(?i)(mlflow|dvc|model.?registry|s3.?versioning).*(chọn|dùng|approach)"
+      - "(?i)model.*(registry|version|artifact).*(store|manage|lưu)"
+      - "(?i)(quản lý|manage|track).*(model.?version|artifact)"
+
+  - id: "deploy_strategy"
+    why: "known_unknowns lists canary vs blue/green; scope_in requires zero-downtime model swap"
+    domain_expected: ["devops", "ml"]
+    accept_question_patterns:
+      - "(?i)(canary|blue.?green|shadow|a.?b.?test).*(deploy|rollout|model)"
+      - "(?i)zero.?downtime.*(deploy|swap|update|model)"
+      - "(?i)model.*(rollout|deploy).*(canary|blue.?green|strategy)"
+
+  - id: "feature_store_decision"
+    why: "known_unknowns asks if feature store needed; online features vs payload-only"
+    domain_expected: ["ml", "backend"]
+    accept_question_patterns:
+      - "(?i)(feature.?store|feast|tecton|redis.?feature).*(cần|need|decision)"
+      - "(?i)online.?feature.*(store|retrieval|latency)"
+      - "(?i)(payload.?only|input.?feature).*(vs|hay).*(feature.?store)"
+
+  - id: "drift_detection"
+    why: "known_unknowns lists drift detection method; fraud model degrades silently without it"
+    domain_expected: ["ml", "devops"]
+    accept_question_patterns:
+      - "(?i)(drift|distribution.?shift).*(detect|monitor|measure)"
+      - "(?i)model.*(degradation|performance.?monitor|drift)"
+      - "(?i)(psi|ks.?test|evidently|whylogs).*(drift|monitor)"
+      - "(?i)(reference.?dataset|baseline).*(drift|monitor)"
+
+  - id: "pci_log_masking"
+    why: "compliance=PCI-DSS; request logs contain transaction data that must be masked"
+    domain_expected: ["security", "backend"]
+    accept_question_patterns:
+      - "(?i)(pci|payment.?card|transaction).*(log|mask|redact|comply)"
+      - "(?i)(mask|redact|anonymize).*(log|transaction.?data|card)"
+      - "(?i)log.*(pci|sensitive|mask|transaction)"
+
+  - id: "rollback_strategy"
+    why: "scope_in requires rollback plan; bad model can cause false fraud blocks impacting revenue"
+    domain_expected: ["ml", "devops"]
+    accept_question_patterns:
+      - "(?i)(rollback|roll.?back).*(model|version|deploy)"
+      - "(?i)(revert|khôi phục).*(model|version|bad.?deploy)"
+      - "(?i)model.*(rollback|revert|restore).*(strategy|plan|cách)"

@@ -1,0 +1,18 @@
+forbidden_decisions:
+  - id: "bi_dashboard_visualization"
+    why: "scope_out explicitly excludes BI dashboard/visualization"
+    reject_question_patterns:
+      - "(?i)(dashboard|visualization|chart|graph|tableau|metabase|superset).*(build|xây|implement)"
+      - "(?i)(BI|business.?intel).*(tool|dashboard|report).*(chọn|xây|build)"
+
+  - id: "bigquery_choice"
+    why: "must_not_use constraint: CTO phản đối vendor lock-in Google"
+    reject_question_patterns:
+      - "(?i)bigquery.*(có nên|should|use|dùng|deploy)"
+      - "(?i)(chọn|use|dùng).*(bigquery)"
+
+  - id: "ml_feature_store"
+    why: "scope_out explicitly excludes ML feature store"
+    reject_question_patterns:
+      - "(?i)(feature.?store|feast|tecton).*(cần không|build|implement)"
+      - "(?i)ml.*(feature|pipeline).*(implement|build)"

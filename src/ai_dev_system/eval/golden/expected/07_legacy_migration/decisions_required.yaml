@@ -1,0 +1,56 @@
+required_decisions:
+  - id: "migration_pattern"
+    why: "known_unknowns lists strangler fig vs big bang vs parallel run; failed_attempts includes big bang"
+    domain_expected: ["backend", "devops"]
+    accept_question_patterns:
+      - "(?i)(strangler.?fig|big.?bang|parallel.?run|incremental).*(migration|strategy|pattern)"
+      - "(?i)(migration.?strategy|migrate).*(approach|pattern|phương án)"
+      - "(?i)(phương pháp|approach).*(migrate|chuyển đổi).*(từng phần|dần dần|incremental)"
+
+  - id: "service_decomposition_order"
+    why: "known_unknowns: which service to migrate first affects risk and dependency graph"
+    domain_expected: ["backend", "devops"]
+    accept_question_patterns:
+      - "(?i)(service|module).*(migrate|chuyển).*(first|đầu tiên|thứ tự|order)"
+      - "(?i)(catalog|order|user|payment).*(migrate|chuyển).*(trước|first|priority)"
+      - "(?i)(thứ tự|sequence|order).*(service|module).*(migrate|chuyển đổi)"
+
+  - id: "data_sync_during_coexistence"
+    why: "known_unknowns: dual-write vs event sourcing vs periodic sync; both systems live during migration"
+    domain_expected: ["backend", "database"]
+    accept_question_patterns:
+      - "(?i)(dual.?write|event.?sourc|change.?data.?capture|cdc|sync).*(coexist|migration|both)"
+      - "(?i)(data.?sync|đồng bộ dữ liệu).*(monolith|microservice|coexistence)"
+      - "(?i)(hai hệ thống|both systems|coexist).*(data|đồng bộ|sync|consistent)"
+
+  - id: "database_strategy"
+    why: "known_unknowns: shared DB during coexistence vs separate DB per service from start"
+    domain_expected: ["database", "backend"]
+    accept_question_patterns:
+      - "(?i)(shared.?db|separate.?db|database.?per.?service).*(coexistence|migration)"
+      - "(?i)(db.?split|tách.?db|database).*(service|microservice).*(khi nào|when|strategy)"
+      - "(?i)(chung.?database|chia sẻ.?db|share.?database).*(service|monolith)"
+
+  - id: "rollback_per_service"
+    why: "political_constraints: CTO requires tested rollback plan; each service needs rollback path"
+    domain_expected: ["devops", "backend"]
+    accept_question_patterns:
+      - "(?i)(rollback|roll.?back).*(service|per.?service|từng service)"
+      - "(?i)(kế hoạch.?rollback|rollback.?plan).*(test|verify|service)"
+      - "(?i)(revert|khôi phục).*(service|migration).*(plan|strategy|cách)"
+
+  - id: "api_versioning_coexistence"
+    why: "known_unknowns: API contract versioning when both monolith and microservice expose endpoints"
+    domain_expected: ["backend"]
+    accept_question_patterns:
+      - "(?i)(api.?version|versioning).*(monolith|microservice|coexist|route)"
+      - "(?i)(api.?gateway|routing).*(old|new|monolith|microservice).*(during|coexist)"
+      - "(?i)(backward.?compat|api.?contract).*(migration|monolith|new.?service)"
+
+  - id: "test_coverage_before_cutover"
+    why: "political_constraints and migration risk; need clear quality gate before switching traffic"
+    domain_expected: ["devops", "backend"]
+    accept_question_patterns:
+      - "(?i)(test.?coverage|coverage.?threshold).*(cutover|go.?live|switch|migrate)"
+      - "(?i)(smoke.?test|integration.?test|acceptance.?test).*(before.?switch|migration|cutover)"
+      - "(?i)(bộ test|test suite).*(bắt buộc|required|cutover|migrate)"

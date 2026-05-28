@@ -1,0 +1,240 @@
+{
+  "brief_version": 2,
+  "template_id": "generic_v1",
+  "schema_hash": "a14a30d9e70ef433",
+  "run_id": "eval-04_ml_inference_service",
+  "project_id": "04_ml_inference_service",
+  "source_hash": "eval-04_ml_inference_service",
+  "created_at": "2026-05-28T10:03:40+00:00",
+  "completed_at": null,
+  "fields": {
+    "problem_statement": {
+      "value": "Fraud detection chạy batch mỗi 24h, transaction fraud bị phát hiện quá muộn. Cần realtime prediction khi mỗi transaction xảy ra.",
+      "source": "user",
+      "rationale": null
+    },
+    "who_feels_pain": {
+      "value": "Team risk (phát hiện chậm), team product (user complain về blocked transaction), finance (loss do fraud)",
+      "source": "user",
+      "rationale": null
+    },
+    "current_workaround": {
+      "value": "Batch scikit-learn predict mỗi 24h, dùng rule-based heuristic tạm cho realtime (miss nhiều fraud)",
+      "source": "user",
+      "rationale": null
+    },
+    "cost_of_doing_nothing": {
+      "value": "~$50k/tháng fraud loss, rate 0.3% hiện tại, target xuống dưới 0.1%",
+      "source": "user",
+      "rationale": null
+    },
+    "scope_in": {
+      "value": [
+        "REST API endpoint nhận transaction features → trả về fraud score (0-1)",
+        "Model versioning: deploy model mới không downtime (blue/green hoặc canary)",
+        "A/B testing giữa 2 model version với traffic split",
+        "Model monitoring: input distribution drift detection",
+        "Feature validation trước khi inference",
+        "Request logging cho audit và retraining dataset",
+        "Health check + readiness probe cho K8s"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "scope_out": {
+      "value": [
+        "Model training pipeline (đã có, out of scope)",
+        "Feature engineering (features được tính sẵn bởi upstream)",
+        "Explainability UI (SHAP values in response, nhưng không có dashboard)",
+        "Batch inference endpoint",
+        "Multi-model ensemble (chỉ 1 model tại 1 thời điểm)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "success_metric": {
+      "value": "p99 latency < 50ms, throughput >= 1000 req/s, model swap < 30s downtime",
+      "source": "user",
+      "rationale": null
+    },
+    "done_definition": {
+      "value": "API serve trong prod 30 ngày, fraud rate xuống < 0.15%, 0 unplanned downtime",
+      "source": "user",
+      "rationale": null
+    },
+    "deadline": {
+      "value": "2026-08-15 (hard, Q3 target)",
+      "source": "user",
+      "rationale": null
+    },
+    "primary_user": {
+      "value": "ML engineer + backend engineer (internal API consumer)",
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_now": {
+      "value": 3,
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_year1": {
+      "value": 5,
+      "source": "user",
+      "rationale": null
+    },
+    "user_languages": {
+      "value": [
+        "en"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "accessibility": {
+      "value": "không yêu cầu (internal API)",
+      "source": "user",
+      "rationale": null
+    },
+    "must_use_stack": {
+      "value": [
+        "Python 3.10+",
+        "scikit-learn",
+        "FastAPI hoặc Flask",
+        "Kubernetes"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_not_use": {
+      "value": [
+        "TensorFlow Serving (model không phải TF)",
+        "SageMaker (tự quản lý infra)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "compliance": {
+      "value": "PCI-DSS (transaction data trong log phải masked)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_residency": {
+      "value": "EU (payment data)",
+      "source": "user",
+      "rationale": null
+    },
+    "budget_infra": {
+      "value": "$800/month (inference service only)",
+      "source": "user",
+      "rationale": null
+    },
+    "team_skills": {
+      "value": [
+        "Python",
+        "scikit-learn",
+        "FastAPI",
+        "Docker",
+        "Kubernetes",
+        "Prometheus"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "greenfield_or_brownfield": {
+      "value": "brownfield (tích hợp vào payment pipeline đang chạy)",
+      "source": "user",
+      "rationale": null
+    },
+    "existing_auth": {
+      "value": "internal mTLS (service-to-service, không có user auth)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_sources": {
+      "value": [
+        "model artifacts từ S3/GCS",
+        "feature payload từ payment service"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_integrate_with": {
+      "value": [
+        "Kubernetes (deployment)",
+        "Prometheus + Grafana (metrics)",
+        "S3/GCS (model registry)",
+        "payment pipeline (consumer)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "deployment_target": {
+      "value": "Kubernetes cluster on-prem (EU datacenter, PCI compliant)",
+      "source": "user",
+      "rationale": null
+    },
+    "nfr_priority": {
+      "value": [
+        "Latency",
+        "Reliability",
+        "Observability",
+        "Maintainability"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "expected_rps": {
+      "value": 1000,
+      "source": "user",
+      "rationale": null
+    },
+    "expected_data_volume": {
+      "value": "500MB/day request logs",
+      "source": "user",
+      "rationale": null
+    },
+    "availability_target": {
+      "value": "99.95% (payment critical path)",
+      "source": "user",
+      "rationale": null
+    },
+    "latency_target": {
+      "value": "p99 < 50ms, p50 < 10ms",
+      "source": "user",
+      "rationale": null
+    },
+    "known_unknowns": {
+      "value": [
+        "model serving framework: raw FastAPI vs BentoML vs Seldon Core vs custom",
+        "model registry: MLflow vs DVC vs simple S3 versioning",
+        "canary vs blue/green deploy strategy",
+        "feature store cần không hay payload đủ",
+        "input drift detection: reference dataset hay statistical test nào"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "failed_attempts": {
+      "value": [
+        "Đã thử deploy Flask app thủ công, không scale được, deploy gây downtime 5-10 phút"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "inspiration_refs": {
+      "value": [
+        "Uber Michelangelo (ML platform reference)",
+        "Seldon Core (K8s-native model serving)",
+        "BentoML (Python-native, simpler)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "political_constraints": {
+      "value": "Không dùng cloud ML platform (AWS SageMaker, Vertex AI) — CTO muốn on-prem",
+      "source": "user",
+      "rationale": null
+    }
+  },
+  "assumptions": [],
+  "audit": []
+}

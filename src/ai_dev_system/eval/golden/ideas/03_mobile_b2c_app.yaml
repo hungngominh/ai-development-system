@@ -1,0 +1,95 @@
+# Golden Idea: 03_mobile_b2c_app
+#
+# Profile: high complexity, product-type, multi-domain (mobile, backend, security, product).
+# Tests: mobile-specific decisions, payment integration VN market, offline handling, push notifications.
+
+id: "03_mobile_b2c_app"
+profile:
+  scope_type: product
+  complexity: high
+  primary_domains: [mobile, backend, security, product]
+
+raw_idea: |
+  App đặt đồ ăn cho thị trường Việt Nam. Hỗ trợ iOS và Android. User có thể browse
+  nhà hàng, đặt món, track đơn realtime, thanh toán VNPay và MoMo. Shipper dùng app
+  riêng (out of scope). Mục tiêu 10k DAU trong 6 tháng đầu.
+
+intake_script:
+  # Section 1: Context
+  problem_statement: "Thị trường food delivery VN đang tăng trưởng, startup muốn vào phân khúc mid-range với UX tốt hơn GrabFood. Không có product hiện tại."
+  who_feels_pain: "Người dùng 22-35 tuổi thành thị, chủ nhà hàng muốn thêm kênh bán hàng"
+  current_workaround: "Dùng GrabFood/ShopeeFood. Nhà hàng phàn nàn phí commission 25-30%."
+  cost_of_doing_nothing: "Mất cửa sổ thị trường, đối thủ chiếm thị phần mid-range trước"
+
+  # Section 2: Scope
+  scope_in:
+    - "Browse nhà hàng theo vị trí + danh mục"
+    - "Xem menu + chi tiết món ăn (ảnh, giá, option)"
+    - "Giỏ hàng + đặt đơn"
+    - "Thanh toán VNPay + MoMo + COD"
+    - "Realtime order tracking (user side)"
+    - "Push notification (order status updates)"
+    - "Rating + review sau khi nhận đơn"
+    - "Restaurant partner portal (web, manage menu + orders)"
+    - "iOS + Android apps"
+  scope_out:
+    - "Shipper app (out of scope - external delivery partner)"
+    - "In-house delivery management"
+    - "Subscription / membership tier"
+    - "Live chat với nhà hàng"
+    - "AR food preview"
+  success_metric: "10k DAU tháng 6, order conversion rate >= 8%, thanh toán success rate >= 95%"
+  done_definition: "App live trên App Store + Google Play, 50 nhà hàng onboard, 1000 đơn thành công trong tuần đầu"
+  deadline: "2026-10-01 (hard, funding milestone)"
+
+  # Section 3: User persona
+  primary_user: "Người dùng cuối 22-35 tuổi, smartphone Android/iOS, 3G/4G/WiFi"
+  user_count_now: 0  # greenfield
+  user_count_year1: 100000
+  user_languages: ["vi"]
+  accessibility: "WCAG 2.1 AA (không bắt buộc nhưng nên có cho screen reader)"
+
+  # Section 4: Hard constraints
+  must_use_stack: ["React Native (cross-platform)", "Node.js hoặc Python backend"]
+  must_not_use: ["Flutter (team không có skill)", "in-house payment gateway"]
+  compliance: "PCI-DSS level 4 (payment data), PDPD VN (cá nhân)"
+  data_residency: "VN (theo PDPD yêu cầu lưu dữ liệu VN công dân trong lãnh thổ)"
+  budget_infra: "$1000/month cho đến 10k DAU"
+  team_skills: ["React Native", "Node.js", "PostgreSQL", "Redis", "AWS"]
+
+  # Section 5: Integration
+  greenfield_or_brownfield: "greenfield"
+  existing_auth: null  # greenfield, tự xây auth
+  data_sources: ["Google Maps API (geo)", "VNPay API", "MoMo API"]
+  must_integrate_with: ["VNPay", "MoMo", "Google Maps/Goong (bản đồ VN)", "Firebase (push notif)", "OneSignal hoặc FCM/APNs"]
+  deployment_target: "AWS ap-southeast-1 (Singapore, gần VN + PDPD compliant)"
+
+  # Section 6: NFR priorities
+  nfr_priority:
+    - "Performance"
+    - "Reliability"
+    - "Security"
+    - "Time-to-market"
+  expected_rps: 500  # peak giờ ăn (12h, 18-20h)
+  expected_data_volume: "20GB/year (orders, menu images, reviews)"
+  availability_target: "99.9% (payment và order creation critical)"
+  latency_target: "API p95 < 500ms, map load < 2s trên 3G"
+
+  # Section 7: Risk & unknown
+  known_unknowns:
+    - "auth method: OTP phone (chuẩn VN) vs social login (Google/Facebook)"
+    - "map provider: Google Maps vs Goong (VN-made, cheaper) vs OpenStreetMap"
+    - "realtime tracking: WebSocket vs polling vs long-polling"
+    - "offline mode khi mất mạng giữa chừng đặt đơn"
+  failed_attempts: []
+  inspiration_refs:
+    - "GrabFood (UX reference)"
+    - "Shopee Food (payment integration VN)"
+    - "DoorDash (technical architecture)"
+  political_constraints: "Investor yêu cầu data lưu tại VN (PDPD), không dùng dịch vụ Trung Quốc"
+
+expected_behavior_notes: |
+  Mobile B2C với payment VN market là test cho domain coverage rộng.
+  Required: auth method, map provider, realtime tracking, offline handling, push notif provider, payment webhook.
+  Forbidden: questions về shipper app, web desktop version, ML recommendation.
+  Test: câu hỏi phải reflect VN-specific constraints (PDPD, VNPay/MoMo, Goong maps).

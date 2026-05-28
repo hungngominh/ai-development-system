@@ -1,0 +1,23 @@
+forbidden_decisions:
+  - id: "dast_dynamic_analysis"
+    why: "scope_out: DAST explicitly excluded"
+    reject_question_patterns:
+      - "(?i)(dast|dynamic.?analysis|runtime.?test|penetration).*(implement|add|build)"
+      - "(?i)(owasp.?zap|burpsuite|dynamic).*(scan|testing).*(implement|thêm)"
+
+  - id: "snyk_saas"
+    why: "must_not_use: Snyk SaaS explicitly excluded (want self-hosted)"
+    reject_question_patterns:
+      - "(?i)(snyk.?saas|snyk.?cloud|snyk.?platform).*(use|dùng|consider)"
+
+  - id: "ide_plugin"
+    why: "scope_out: IDE plugin explicitly excluded (CI only)"
+    reject_question_patterns:
+      - "(?i)(ide.?plugin|vscode.?extension|jetbrains).*(build|implement|add)"
+      - "(?i)(plugin|extension).*(ide|vscode|intellij).*(develop|tạo)"
+
+  - id: "compliance_audit"
+    why: "scope_out: formal compliance audit (SOC 2, PCI) excluded"
+    reject_question_patterns:
+      - "(?i)(soc.?2|pci|iso.?27001).*(formal.?audit|compliance.?report|certif)"
+      - "(?i)(compliance.?audit|formal.?certif).*(implement|build|add)"

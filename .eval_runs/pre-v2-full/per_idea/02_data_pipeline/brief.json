@@ -1,0 +1,237 @@
+{
+  "brief_version": 2,
+  "template_id": "generic_v1",
+  "schema_hash": "a14a30d9e70ef433",
+  "run_id": "eval-02_data_pipeline",
+  "project_id": "02_data_pipeline",
+  "source_hash": "eval-02_data_pipeline",
+  "created_at": "2026-05-28T10:03:40+00:00",
+  "completed_at": null,
+  "fields": {
+    "problem_statement": {
+      "value": "Team BI query thẳng vào DB prod, làm chậm production. Event từ web/mobile không có trung tâm. Analytics lag 24h vì batch job chạy mỗi đêm.",
+      "source": "user",
+      "rationale": null
+    },
+    "who_feels_pain": {
+      "value": "6 người team BI/Data, CTO lo performance prod, PM thiếu realtime dashboard",
+      "source": "user",
+      "rationale": null
+    },
+    "current_workaround": {
+      "value": "Cronjob pg_dump mỗi đêm, copy sang staging, BI query staging. Mobile event không capture được.",
+      "source": "user",
+      "rationale": null
+    },
+    "cost_of_doing_nothing": {
+      "value": "Mỗi BI query nặng làm prod slow 5-10s. Không có mobile analytics → mù trên 40% traffic.",
+      "source": "user",
+      "rationale": null
+    },
+    "scope_in": {
+      "value": [
+        "Event ingestion từ web app (REST API endpoint)",
+        "Event ingestion từ mobile app (iOS + Android SDK)",
+        "Schema validation khi ingest",
+        "Transform + enrich (user lookup, geo-IP)",
+        "Load vào data warehouse",
+        "Dead letter queue cho failed events",
+        "Backfill API cho historical data",
+        "Basic monitoring: lag, error rate, throughput"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "scope_out": {
+      "value": [
+        "BI dashboard / visualization",
+        "ML feature store",
+        "PII anonymization ngoài scope ban đầu",
+        "Stream processing joins phức tạp (chỉ enrichment đơn giản)",
+        "Multi-region replication"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "success_metric": {
+      "value": "Event lag p95 < 5 phút, 0 event loss sau dead letter retry, prod DB query load giảm 80%",
+      "source": "user",
+      "rationale": null
+    },
+    "done_definition": {
+      "value": "Web + mobile SDK gửi event, pipeline chạy 7 ngày liên tục không alert, BI team confirm dùng được dashboard mới",
+      "source": "user",
+      "rationale": null
+    },
+    "deadline": {
+      "value": "2026-09-01 (soft, trước fiscal year end)",
+      "source": "user",
+      "rationale": null
+    },
+    "primary_user": {
+      "value": "Data engineer + BI analyst",
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_now": {
+      "value": 6,
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_year1": {
+      "value": 12,
+      "source": "user",
+      "rationale": null
+    },
+    "user_languages": {
+      "value": [
+        "vi",
+        "en"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "accessibility": {
+      "value": "internal tool, không yêu cầu",
+      "source": "user",
+      "rationale": null
+    },
+    "must_use_stack": {
+      "value": [
+        "Python",
+        "PostgreSQL (source DB)",
+        "Docker"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_not_use": {
+      "value": [
+        "vendor-locked proprietary pipeline (no Fivetran/Airbyte SaaS)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "compliance": {
+      "value": "GDPR (user event data có email/IP)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_residency": {
+      "value": "EU (user data GDPR, warehouse cũng phải EU region)",
+      "source": "user",
+      "rationale": null
+    },
+    "budget_infra": {
+      "value": "$500/month total (pipeline + warehouse)",
+      "source": "user",
+      "rationale": null
+    },
+    "team_skills": {
+      "value": [
+        "Python",
+        "PostgreSQL",
+        "Docker",
+        "Airflow basics",
+        "SQL"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "greenfield_or_brownfield": {
+      "value": "brownfield (web app đã có, thêm tracking SDK)",
+      "source": "user",
+      "rationale": null
+    },
+    "existing_auth": {
+      "value": "internal service, không cần user auth",
+      "source": "user",
+      "rationale": null
+    },
+    "data_sources": {
+      "value": [
+        "PostgreSQL (prod DB)",
+        "web app REST events",
+        "iOS SDK",
+        "Android SDK"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_integrate_with": {
+      "value": [
+        "Slack (alert khi pipeline fail)",
+        "Grafana (metrics)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "deployment_target": {
+      "value": "(stub AI suggestion)",
+      "source": "ai_suggested_confirmed",
+      "rationale": "stub-mode: scripted '?' → simulated AI confirm"
+    },
+    "nfr_priority": {
+      "value": [
+        "Reliability",
+        "Latency",
+        "Cost",
+        "Maintainability"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "expected_rps": {
+      "value": 200,
+      "source": "user",
+      "rationale": null
+    },
+    "expected_data_volume": {
+      "value": "50GB raw events/year",
+      "source": "user",
+      "rationale": null
+    },
+    "availability_target": {
+      "value": "99.5% (pipeline, không phải prod)",
+      "source": "user",
+      "rationale": null
+    },
+    "latency_target": {
+      "value": "p95 event-to-warehouse < 5 phút",
+      "source": "user",
+      "rationale": null
+    },
+    "known_unknowns": {
+      "value": [
+        "streaming vs micro-batch (Kafka vs Airflow DAG)",
+        "warehouse chọn gì (BigQuery vs ClickHouse vs Redshift) phù hợp budget $500",
+        "schema evolution strategy khi event schema thay đổi"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "failed_attempts": {
+      "value": [
+        "Đã thử dùng Fivetran, quá đắt ($2k/month)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "inspiration_refs": {
+      "value": [
+        "Segment (event collection model)",
+        "dbt (transform layer)",
+        "Apache Kafka + Flink (streaming reference)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "political_constraints": {
+      "value": "Không dùng BigQuery vì CTO phản đối vendor lock-in Google",
+      "source": "user",
+      "rationale": null
+    }
+  },
+  "assumptions": [],
+  "audit": []
+}

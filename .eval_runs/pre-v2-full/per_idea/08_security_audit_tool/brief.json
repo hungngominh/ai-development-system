@@ -1,0 +1,242 @@
+{
+  "brief_version": 2,
+  "template_id": "generic_v1",
+  "schema_hash": "a14a30d9e70ef433",
+  "run_id": "eval-08_security_audit_tool",
+  "project_id": "08_security_audit_tool",
+  "source_hash": "eval-08_security_audit_tool",
+  "created_at": "2026-05-28T10:03:40+00:00",
+  "completed_at": null,
+  "fields": {
+    "problem_statement": {
+      "value": "Team không có process security review. Code được merge mà không scan. Đã có 2 incident từ hardcoded API key và SQL injection trong 6 tháng qua.",
+      "source": "user",
+      "rationale": null
+    },
+    "who_feels_pain": {
+      "value": "Security lead (thiếu visibility), developer (bị blame khi security issue tìm ra muộn), CTO (risk)",
+      "source": "user",
+      "rationale": null
+    },
+    "current_workaround": {
+      "value": "Manual code review một phần, Snyk free tier (chỉ dependency scan, không SAST)",
+      "source": "user",
+      "rationale": null
+    },
+    "cost_of_doing_nothing": {
+      "value": "1 incident/quarter, mỗi incident ~$20k impact (fix + khách hàng bị ảnh hưởng)",
+      "source": "user",
+      "rationale": null
+    },
+    "scope_in": {
+      "value": [
+        "SAST scan: Python + JavaScript/TypeScript (2 ngôn ngữ chính)",
+        "Dependency CVE scan (requirements.txt, package.json)",
+        "Secret scanning (hardcoded API keys, passwords, tokens)",
+        "Tích hợp GitHub Actions (ci.yaml)",
+        "Tích hợp GitLab CI (.gitlab-ci.yml)",
+        "Severity classification: critical/high/medium/low",
+        "Block pipeline nếu critical/high severity",
+        "Report: SARIF file + human-readable summary",
+        "Jira ticket tự động cho critical finding",
+        "False positive suppression (allow-list per-repo)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "scope_out": {
+      "value": [
+        "DAST (dynamic analysis, runtime testing)",
+        "Infrastructure scan (Terraform, K8s config)",
+        "Mobile app security scan",
+        "Penetration testing automation",
+        "Compliance audit (SOC 2, PCI formal)",
+        "IDE plugin (chỉ CI pipeline)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "success_metric": {
+      "value": "100% PR scan coverage trong 2 tháng, zero critical finding không được triage trong 48h, false positive rate < 10%",
+      "source": "user",
+      "rationale": null
+    },
+    "done_definition": {
+      "value": "Tool chạy trong CI của 3 repo chính, 1 tháng không có undetected critical security issue, team security confirm workflow acceptable",
+      "source": "user",
+      "rationale": null
+    },
+    "deadline": {
+      "value": "2026-07-01 (hard, sau security audit của enterprise customer)",
+      "source": "user",
+      "rationale": null
+    },
+    "primary_user": {
+      "value": "Developer (thấy result trong CI) + Security engineer (review dashboard)",
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_now": {
+      "value": 20,
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_year1": {
+      "value": 35,
+      "source": "user",
+      "rationale": null
+    },
+    "user_languages": {
+      "value": [
+        "en"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "accessibility": {
+      "value": "không yêu cầu (CI tool)",
+      "source": "user",
+      "rationale": null
+    },
+    "must_use_stack": {
+      "value": [
+        "Python 3.10+",
+        "Docker (để đóng gói tool)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_not_use": {
+      "value": [
+        "Snyk SaaS (đang dùng miễn phí nhưng muốn self-hosted)",
+        "commercial SAST (budget)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "compliance": {
+      "value": "không yêu cầu formal (internal tool)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_residency": {
+      "value": "on-prem (code không được gửi ra ngoài)",
+      "source": "user",
+      "rationale": null
+    },
+    "budget_infra": {
+      "value": "$0 (phải dùng open source)",
+      "source": "user",
+      "rationale": null
+    },
+    "team_skills": {
+      "value": [
+        "Python",
+        "Docker",
+        "GitHub Actions",
+        "GitLab CI",
+        "Jira API"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "greenfield_or_brownfield": {
+      "value": "greenfield (tool mới, tích hợp vào existing CI)",
+      "source": "user",
+      "rationale": null
+    },
+    "existing_auth": {
+      "value": "GitHub App / GitLab token (CI/CD auth)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_sources": {
+      "value": [
+        "GitHub repos",
+        "GitLab repos",
+        "NVD/OSV (CVE database)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_integrate_with": {
+      "value": [
+        "GitHub Actions",
+        "GitLab CI",
+        "Jira (ticket creation)",
+        "email (SMTP)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "deployment_target": {
+      "value": "self-hosted Docker (runner trong CI infrastructure, không phải SaaS)",
+      "source": "user",
+      "rationale": null
+    },
+    "nfr_priority": {
+      "value": [
+        "Reliability",
+        "Performance",
+        "Maintainability"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "expected_rps": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "expected_data_volume": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "availability_target": {
+      "value": "tool chạy khi CI chạy, không có SLA",
+      "source": "user",
+      "rationale": null
+    },
+    "latency_target": {
+      "value": "full scan < 5 phút cho repo 100k LOC",
+      "source": "user",
+      "rationale": null
+    },
+    "known_unknowns": {
+      "value": [
+        "SAST engine: Semgrep (free, customizable) vs Bandit (Python-only) vs CodeQL (GitHub-only)",
+        "dependency scan: OSV Scanner vs OWASP Dependency-Check vs pip-audit",
+        "secret scanning: truffleHog vs detect-secrets vs git-secrets",
+        "report format: SARIF (GitHub native) vs JUnit XML vs custom JSON",
+        "severity thresholds: critical/high block, medium/low warn chỉ — có đúng không?"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "failed_attempts": {
+      "value": [
+        "Đã thử tích hợp SonarQube Community, quá nặng cho CI, scan mất 15 phút"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "inspiration_refs": {
+      "value": [
+        "Semgrep (SAST, OSS)",
+        "GitHub Advanced Security (reference, quá đắt)",
+        "OWASP ASVS (checklist reference)",
+        "OSV Scanner (Google, OSS dependency scan)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "political_constraints": {
+      "value": "CTO hard requirement: không gửi source code ra ngoài (air-gap consideration)",
+      "source": "user",
+      "rationale": null
+    }
+  },
+  "assumptions": [],
+  "audit": []
+}

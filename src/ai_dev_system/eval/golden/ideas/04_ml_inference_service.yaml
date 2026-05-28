@@ -1,0 +1,97 @@
+# Golden Idea: 04_ml_inference_service
+#
+# Profile: medium complexity, platform-type, multi-domain (ml, backend, devops).
+# Tests: model serving decisions, versioning, monitoring, A/B testing.
+
+id: "04_ml_inference_service"
+profile:
+  scope_type: platform
+  complexity: medium
+  primary_domains: [ml, backend, devops]
+
+raw_idea: |
+  Xây inference service để serve ML model cho fraud detection trong payment pipeline.
+  Model train offline bằng Python/scikit-learn, cần API endpoint cho production.
+  Cần low latency (< 50ms), high throughput, và khả năng deploy model mới không downtime.
+  Hiện tại model chạy offline batch, detection lag 24h.
+
+intake_script:
+  # Section 1: Context
+  problem_statement: "Fraud detection chạy batch mỗi 24h, transaction fraud bị phát hiện quá muộn. Cần realtime prediction khi mỗi transaction xảy ra."
+  who_feels_pain: "Team risk (phát hiện chậm), team product (user complain về blocked transaction), finance (loss do fraud)"
+  current_workaround: "Batch scikit-learn predict mỗi 24h, dùng rule-based heuristic tạm cho realtime (miss nhiều fraud)"
+  cost_of_doing_nothing: "~$50k/tháng fraud loss, rate 0.3% hiện tại, target xuống dưới 0.1%"
+
+  # Section 2: Scope
+  scope_in:
+    - "REST API endpoint nhận transaction features → trả về fraud score (0-1)"
+    - "Model versioning: deploy model mới không downtime (blue/green hoặc canary)"
+    - "A/B testing giữa 2 model version với traffic split"
+    - "Model monitoring: input distribution drift detection"
+    - "Feature validation trước khi inference"
+    - "Request logging cho audit và retraining dataset"
+    - "Health check + readiness probe cho K8s"
+  scope_out:
+    - "Model training pipeline (đã có, out of scope)"
+    - "Feature engineering (features được tính sẵn bởi upstream)"
+    - "Explainability UI (SHAP values in response, nhưng không có dashboard)"
+    - "Batch inference endpoint"
+    - "Multi-model ensemble (chỉ 1 model tại 1 thời điểm)"
+  success_metric: "p99 latency < 50ms, throughput >= 1000 req/s, model swap < 30s downtime"
+  done_definition: "API serve trong prod 30 ngày, fraud rate xuống < 0.15%, 0 unplanned downtime"
+  deadline: "2026-08-15 (hard, Q3 target)"
+
+  # Section 3: User persona
+  primary_user: "ML engineer + backend engineer (internal API consumer)"
+  user_count_now: 3  # internal service, người dùng là payment pipeline
+  user_count_year1: 5  # thêm team
+  user_languages: ["en"]
+  accessibility: "không yêu cầu (internal API)"
+
+  # Section 4: Hard constraints
+  must_use_stack: ["Python 3.10+", "scikit-learn", "FastAPI hoặc Flask", "Kubernetes"]
+  must_not_use: ["TensorFlow Serving (model không phải TF)", "SageMaker (tự quản lý infra)"]
+  compliance: "PCI-DSS (transaction data trong log phải masked)"
+  data_residency: "EU (payment data)"
+  budget_infra: "$800/month (inference service only)"
+  team_skills: ["Python", "scikit-learn", "FastAPI", "Docker", "Kubernetes", "Prometheus"]
+
+  # Section 5: Integration
+  greenfield_or_brownfield: "brownfield (tích hợp vào payment pipeline đang chạy)"
+  existing_auth: "internal mTLS (service-to-service, không có user auth)"
+  data_sources: ["model artifacts từ S3/GCS", "feature payload từ payment service"]
+  must_integrate_with: ["Kubernetes (deployment)", "Prometheus + Grafana (metrics)", "S3/GCS (model registry)", "payment pipeline (consumer)"]
+  deployment_target: "Kubernetes cluster on-prem (EU datacenter, PCI compliant)"
+
+  # Section 6: NFR priorities
+  nfr_priority:
+    - "Latency"
+    - "Reliability"
+    - "Observability"
+    - "Maintainability"
+  expected_rps: 1000
+  expected_data_volume: "500MB/day request logs"
+  availability_target: "99.95% (payment critical path)"
+  latency_target: "p99 < 50ms, p50 < 10ms"
+
+  # Section 7: Risk & unknown
+  known_unknowns:
+    - "model serving framework: raw FastAPI vs BentoML vs Seldon Core vs custom"
+    - "model registry: MLflow vs DVC vs simple S3 versioning"
+    - "canary vs blue/green deploy strategy"
+    - "feature store cần không hay payload đủ"
+    - "input drift detection: reference dataset hay statistical test nào"
+  failed_attempts:
+    - "Đã thử deploy Flask app thủ công, không scale được, deploy gây downtime 5-10 phút"
+  inspiration_refs:
+    - "Uber Michelangelo (ML platform reference)"
+    - "Seldon Core (K8s-native model serving)"
+    - "BentoML (Python-native, simpler)"
+  political_constraints: "Không dùng cloud ML platform (AWS SageMaker, Vertex AI) — CTO muốn on-prem"
+
+expected_behavior_notes: |
+  ML inference service — test cho MLOps domain knowledge.
+  Required: serving framework choice, model versioning/registry, deploy strategy (canary/blue-green),
+  drift detection, feature store decision, PCI log masking.
+  Forbidden: questions về model training, explainability UI, batch inference.
+  Test "MLOps-aware question gen" — phải hỏi về operational concerns, không chỉ model accuracy.

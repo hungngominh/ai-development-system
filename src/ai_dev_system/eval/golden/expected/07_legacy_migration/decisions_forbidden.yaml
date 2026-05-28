@@ -1,0 +1,18 @@
+forbidden_decisions:
+  - id: "new_feature_development"
+    why: "scope_out: no new features during migration, only migrate existing behavior"
+    reject_question_patterns:
+      - "(?i)(new.?feature|tính năng mới|thêm.?feature).*(trong|during|migration|migrate)"
+      - "(?i)(enhance|improve.?ux|redesign).*(during.?migration|trong khi migrate)"
+
+  - id: "frontend_rewrite"
+    why: "scope_out: frontend stays React, not in scope for this migration"
+    reject_question_patterns:
+      - "(?i)(frontend|react|ui).*(rewrite|rebuild|migrate|chuyển đổi)"
+      - "(?i)(next.?js|vue|angular).*(replace|thay.?react|rewrite)"
+
+  - id: "payment_gateway_switch"
+    why: "scope_out: keeping existing 2 payment gateways, not switching"
+    reject_question_patterns:
+      - "(?i)(switch|thay|replace).*(vnpay|momo|payment.?gateway).*(different|khác|new)"
+      - "(?i)(payment.?gateway|cổng.?thanh.?toán).*(switch|thay đổi|replace)"

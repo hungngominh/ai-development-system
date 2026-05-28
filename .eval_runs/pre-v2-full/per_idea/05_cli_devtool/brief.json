@@ -1,0 +1,228 @@
+{
+  "brief_version": 2,
+  "template_id": "generic_v1",
+  "schema_hash": "a14a30d9e70ef433",
+  "run_id": "eval-05_cli_devtool",
+  "project_id": "05_cli_devtool",
+  "source_hash": "eval-05_cli_devtool",
+  "created_at": "2026-05-28T10:03:40+00:00",
+  "completed_at": null,
+  "fields": {
+    "problem_statement": {
+      "value": "Dev team phải viết SQL migration tay, dễ sai và khó review. Migration giữa các môi trường không nhất quán.",
+      "source": "user",
+      "rationale": null
+    },
+    "who_feels_pain": {
+      "value": "~30 backend dev trong công ty, đặc biệt DB owners",
+      "source": "user",
+      "rationale": null
+    },
+    "current_workaround": {
+      "value": "SQL script trong git, chạy tay với psql/mysql client",
+      "source": "user",
+      "rationale": null
+    },
+    "cost_of_doing_nothing": {
+      "value": "~1-2 sự cố migration sai/tháng, mỗi sự cố ~2-4h rollback",
+      "source": "user",
+      "rationale": null
+    },
+    "scope_in": {
+      "value": [
+        "parse schema YAML (table, column, index, constraint)",
+        "diff schema YAML với DB hiện tại → tạo migration SQL",
+        "apply migration với transaction + rollback on error",
+        "dry-run mode (chỉ in SQL, không chạy)",
+        "command: init, diff, apply, status, rollback"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "scope_out": {
+      "value": [
+        "GUI / web UI",
+        "ORM-like query builder",
+        "data migration (chỉ schema, không touch data)",
+        "multi-DB transaction"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "success_metric": {
+      "value": "100% adoption trong team backend trong 2 tháng, 0 migration failure trong môi trường dev",
+      "source": "user",
+      "rationale": null
+    },
+    "done_definition": {
+      "value": "Publish lên PyPI + 5 dev khác trong công ty dùng được không cần hỏi tác giả",
+      "source": "user",
+      "rationale": null
+    },
+    "deadline": {
+      "value": "2026-07-15 (soft, nội bộ)",
+      "source": "user",
+      "rationale": null
+    },
+    "primary_user": {
+      "value": "Senior backend developer, comfortable với CLI",
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_now": {
+      "value": 30,
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_year1": {
+      "value": 50,
+      "source": "user",
+      "rationale": null
+    },
+    "user_languages": {
+      "value": [
+        "en"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "accessibility": {
+      "value": "không yêu cầu (CLI internal tool)",
+      "source": "user",
+      "rationale": null
+    },
+    "must_use_stack": {
+      "value": [
+        "Python 3.10+",
+        "Click hoặc Typer (CLI framework)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_not_use": {
+      "value": [
+        "external SaaS"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "compliance": {
+      "value": "none",
+      "source": "user",
+      "rationale": null
+    },
+    "data_residency": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "budget_infra": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "team_skills": {
+      "value": [
+        "Python",
+        "SQL",
+        "PostgreSQL",
+        "MySQL"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "greenfield_or_brownfield": {
+      "value": "greenfield",
+      "source": "user",
+      "rationale": null
+    },
+    "existing_auth": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "data_sources": {
+      "value": [
+        "PostgreSQL",
+        "MySQL"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_integrate_with": {
+      "value": [
+        "pip (PyPI distribution)",
+        "PostgreSQL 13+",
+        "MySQL 8+"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "deployment_target": {
+      "value": "PyPI + GitHub Releases",
+      "source": "user",
+      "rationale": null
+    },
+    "nfr_priority": {
+      "value": [
+        "Maintainability",
+        "Reliability",
+        "Performance"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "expected_rps": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "expected_data_volume": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "availability_target": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    },
+    "latency_target": {
+      "value": "diff command < 5s for typical schema (100 tables)",
+      "source": "user",
+      "rationale": null
+    },
+    "known_unknowns": {
+      "value": [
+        "naming convention cho generated migration files (timestamp vs sequence)",
+        "có cần plugin system không (vd custom diff rule)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "failed_attempts": {
+      "value": [
+        "Đã thử Alembic, quá phức tạp cho use case đơn giản",
+        "Đã thử yoyo-migrations, không support MySQL tốt"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "inspiration_refs": {
+      "value": [
+        "Flyway (idea naming convention)",
+        "Atlas (golang, schema-as-config)",
+        "Skeema (MySQL only, declarative)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "political_constraints": {
+      "value": null,
+      "source": "skipped",
+      "rationale": null
+    }
+  },
+  "assumptions": [],
+  "audit": []
+}

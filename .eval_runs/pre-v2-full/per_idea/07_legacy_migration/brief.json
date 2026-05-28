@@ -1,0 +1,241 @@
+{
+  "brief_version": 2,
+  "template_id": "generic_v1",
+  "schema_hash": "a14a30d9e70ef433",
+  "run_id": "eval-07_legacy_migration",
+  "project_id": "07_legacy_migration",
+  "source_hash": "eval-07_legacy_migration",
+  "created_at": "2026-05-28T10:03:40+00:00",
+  "completed_at": null,
+  "fields": {
+    "problem_statement": {
+      "value": "PHP monolith 10 năm quá khó maintain. Chỉ 1 dev biết codebase toàn bộ (bus factor 1). Deploy mỗi tuần gây downtime 30 phút. Không thể scale riêng từng phần.",
+      "source": "user",
+      "rationale": null
+    },
+    "who_feels_pain": {
+      "value": "Dev team (release pain), CTO (bus factor risk), business (downtime = revenue loss)",
+      "source": "user",
+      "rationale": null
+    },
+    "current_workaround": {
+      "value": "Feature freeze khi cần deploy hotfix. Scale toàn bộ monolith dù chỉ 1 module cần.",
+      "source": "user",
+      "rationale": null
+    },
+    "cost_of_doing_nothing": {
+      "value": "Deploy downtime mỗi tuần, bus factor 1 = existential risk nếu dev đó nghỉ, không scale được",
+      "source": "user",
+      "rationale": null
+    },
+    "scope_in": {
+      "value": [
+        "Migrate catalog service (product, category, inventory) — migrate first",
+        "Migrate order service (cart, checkout, order management)",
+        "Migrate user service (auth, profile, address)",
+        "Migrate payment service (tích hợp với 2 payment gateway hiện tại)",
+        "API gateway routing cũ → mới trong quá trình chuyển đổi",
+        "Zero-downtime deployment cho mỗi service",
+        "Data sync strategy trong thời gian coexistence",
+        "Smoke test + rollback plan cho mỗi service"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "scope_out": {
+      "value": [
+        "Migrate search service (Elasticsearch, làm sau)",
+        "Migrate notification service (làm song song, team khác)",
+        "Frontend rewrite (giữ nguyên React frontend)",
+        "Re-design business logic (chỉ migrate, không thêm feature mới)",
+        "Switch payment gateway (giữ nguyên 2 provider cũ)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "success_metric": {
+      "value": "0 unplanned downtime trong quá trình migration, deploy time từ 30 phút → 5 phút, team coverage từ 1 → 3 người per service",
+      "source": "user",
+      "rationale": null
+    },
+    "done_definition": {
+      "value": "4 services chính migrate xong, monolith chỉ còn search + notification, CI/CD pipeline hoạt động độc lập mỗi service",
+      "source": "user",
+      "rationale": null
+    },
+    "deadline": {
+      "value": "2026-12-01 (6 tháng, soft)",
+      "source": "user",
+      "rationale": null
+    },
+    "primary_user": {
+      "value": "Senior developer (service owner) + DevOps engineer",
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_now": {
+      "value": 6,
+      "source": "user",
+      "rationale": null
+    },
+    "user_count_year1": {
+      "value": 8,
+      "source": "user",
+      "rationale": null
+    },
+    "user_languages": {
+      "value": [
+        "vi"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "accessibility": {
+      "value": "không yêu cầu (developer tooling)",
+      "source": "user",
+      "rationale": null
+    },
+    "must_use_stack": {
+      "value": [
+        "Python 3.11+",
+        "FastAPI",
+        "PostgreSQL (giữ nguyên DB)",
+        "Docker",
+        "Kubernetes"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_not_use": {
+      "value": [
+        "Node.js (team không có)",
+        "MongoDB (data đã trong PG)",
+        "rewrite từ đầu schema DB"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "compliance": {
+      "value": "PCI-DSS (payment service), PDPD VN (user data)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_residency": {
+      "value": "VN",
+      "source": "user",
+      "rationale": null
+    },
+    "budget_infra": {
+      "value": "$1500/month trong thời gian coexistence (chạy cả hai)",
+      "source": "user",
+      "rationale": null
+    },
+    "team_skills": {
+      "value": [
+        "Python",
+        "FastAPI",
+        "PostgreSQL",
+        "Docker",
+        "Kubernetes",
+        "PHP (đọc code cũ)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "greenfield_or_brownfield": {
+      "value": "brownfield (migration, giữ nguyên DB + integrations)",
+      "source": "user",
+      "rationale": null
+    },
+    "existing_auth": {
+      "value": "JWT tự xây trong PHP monolith (migrate sang user service)",
+      "source": "user",
+      "rationale": null
+    },
+    "data_sources": {
+      "value": [
+        "PostgreSQL monolith DB (nguồn sự thật)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "must_integrate_with": {
+      "value": [
+        "VNPay (payment gateway 1)",
+        "Momo (payment gateway 2)",
+        "Kubernetes (orchestration)",
+        "GitLab CI (CI/CD)"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "deployment_target": {
+      "value": "on-prem Kubernetes cluster (đã có)",
+      "source": "user",
+      "rationale": null
+    },
+    "nfr_priority": {
+      "value": [
+        "Reliability",
+        "Maintainability",
+        "Performance"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "expected_rps": {
+      "value": 300,
+      "source": "user",
+      "rationale": null
+    },
+    "expected_data_volume": {
+      "value": "DB hiện tại 50GB, tăng 10GB/năm",
+      "source": "user",
+      "rationale": null
+    },
+    "availability_target": {
+      "value": "99.9% (SLA hiện tại với merchant)",
+      "source": "user",
+      "rationale": null
+    },
+    "latency_target": {
+      "value": "không được chậm hơn monolith (hiện tại p95 800ms, target p95 < 500ms)",
+      "source": "user",
+      "rationale": null
+    },
+    "known_unknowns": {
+      "value": [
+        "migration strategy: strangler fig pattern vs feature flag routing vs parallel run",
+        "thứ tự migrate service: catalog → order → user → payment hay khác",
+        "data sync trong giai đoạn coexistence: dual-write vs event sourcing vs periodic sync",
+        "database: shared DB trong coexistence rồi split sau, hay mỗi service DB riêng ngay?",
+        "API contract: versioning strategy khi monolith và microservice cùng expose endpoint"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "failed_attempts": {
+      "value": [
+        "Đã thử rewrite toàn bộ (big bang) 2 năm trước, bỏ giữa chừng vì scope quá lớn"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "inspiration_refs": {
+      "value": [
+        "Strangler Fig Pattern (Martin Fowler)",
+        "Shopify migration blog",
+        "Booking.com microservices journey"
+      ],
+      "source": "user",
+      "rationale": null
+    },
+    "political_constraints": {
+      "value": "CTO yêu cầu: không được làm hỏng prod, mỗi service phải có rollback plan được test trước",
+      "source": "user",
+      "rationale": null
+    }
+  },
+  "assumptions": [],
+  "audit": []
+}

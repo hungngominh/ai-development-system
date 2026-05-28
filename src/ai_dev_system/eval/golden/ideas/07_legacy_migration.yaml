@@ -1,0 +1,96 @@
+# Golden Idea: 07_legacy_migration
+#
+# Profile: high complexity, migration-type, multi-domain (backend, devops, database, security).
+# Tests: migration strategy decisions, risk management, rollback, coexistence period.
+
+id: "07_legacy_migration"
+profile:
+  scope_type: migration
+  complexity: high
+  primary_domains: [backend, devops, database]
+
+raw_idea: |
+  Migrate hệ thống PHP monolith 10 năm tuổi (e-commerce) sang Python microservices.
+  PostgreSQL database với 20 bảng chính. Team 6 dev. Production đang phục vụ 50k
+  active users. Không thể downtime quá 2 giờ liên tục. Budget: 6 tháng development.
+
+intake_script:
+  # Section 1: Context
+  problem_statement: "PHP monolith 10 năm quá khó maintain. Chỉ 1 dev biết codebase toàn bộ (bus factor 1). Deploy mỗi tuần gây downtime 30 phút. Không thể scale riêng từng phần."
+  who_feels_pain: "Dev team (release pain), CTO (bus factor risk), business (downtime = revenue loss)"
+  current_workaround: "Feature freeze khi cần deploy hotfix. Scale toàn bộ monolith dù chỉ 1 module cần."
+  cost_of_doing_nothing: "Deploy downtime mỗi tuần, bus factor 1 = existential risk nếu dev đó nghỉ, không scale được"
+
+  # Section 2: Scope
+  scope_in:
+    - "Migrate catalog service (product, category, inventory) — migrate first"
+    - "Migrate order service (cart, checkout, order management)"
+    - "Migrate user service (auth, profile, address)"
+    - "Migrate payment service (tích hợp với 2 payment gateway hiện tại)"
+    - "API gateway routing cũ → mới trong quá trình chuyển đổi"
+    - "Zero-downtime deployment cho mỗi service"
+    - "Data sync strategy trong thời gian coexistence"
+    - "Smoke test + rollback plan cho mỗi service"
+  scope_out:
+    - "Migrate search service (Elasticsearch, làm sau)"
+    - "Migrate notification service (làm song song, team khác)"
+    - "Frontend rewrite (giữ nguyên React frontend)"
+    - "Re-design business logic (chỉ migrate, không thêm feature mới)"
+    - "Switch payment gateway (giữ nguyên 2 provider cũ)"
+  success_metric: "0 unplanned downtime trong quá trình migration, deploy time từ 30 phút → 5 phút, team coverage từ 1 → 3 người per service"
+  done_definition: "4 services chính migrate xong, monolith chỉ còn search + notification, CI/CD pipeline hoạt động độc lập mỗi service"
+  deadline: "2026-12-01 (6 tháng, soft)"
+
+  # Section 3: User persona
+  primary_user: "Senior developer (service owner) + DevOps engineer"
+  user_count_now: 6
+  user_count_year1: 8
+  user_languages: ["vi"]
+  accessibility: "không yêu cầu (developer tooling)"
+
+  # Section 4: Hard constraints
+  must_use_stack: ["Python 3.11+", "FastAPI", "PostgreSQL (giữ nguyên DB)", "Docker", "Kubernetes"]
+  must_not_use: ["Node.js (team không có)", "MongoDB (data đã trong PG)", "rewrite từ đầu schema DB"]
+  compliance: "PCI-DSS (payment service), PDPD VN (user data)"
+  data_residency: "VN"
+  budget_infra: "$1500/month trong thời gian coexistence (chạy cả hai)"
+  team_skills: ["Python", "FastAPI", "PostgreSQL", "Docker", "Kubernetes", "PHP (đọc code cũ)"]
+
+  # Section 5: Integration
+  greenfield_or_brownfield: "brownfield (migration, giữ nguyên DB + integrations)"
+  existing_auth: "JWT tự xây trong PHP monolith (migrate sang user service)"
+  data_sources: ["PostgreSQL monolith DB (nguồn sự thật)"]
+  must_integrate_with: ["VNPay (payment gateway 1)", "Momo (payment gateway 2)", "Kubernetes (orchestration)", "GitLab CI (CI/CD)"]
+  deployment_target: "on-prem Kubernetes cluster (đã có)"
+
+  # Section 6: NFR priorities
+  nfr_priority:
+    - "Reliability"
+    - "Maintainability"
+    - "Performance"
+  expected_rps: 300  # 50k users, peak shopping hours
+  expected_data_volume: "DB hiện tại 50GB, tăng 10GB/năm"
+  availability_target: "99.9% (SLA hiện tại với merchant)"
+  latency_target: "không được chậm hơn monolith (hiện tại p95 800ms, target p95 < 500ms)"
+
+  # Section 7: Risk & unknown
+  known_unknowns:
+    - "migration strategy: strangler fig pattern vs feature flag routing vs parallel run"
+    - "thứ tự migrate service: catalog → order → user → payment hay khác"
+    - "data sync trong giai đoạn coexistence: dual-write vs event sourcing vs periodic sync"
+    - "database: shared DB trong coexistence rồi split sau, hay mỗi service DB riêng ngay?"
+    - "API contract: versioning strategy khi monolith và microservice cùng expose endpoint"
+  failed_attempts:
+    - "Đã thử rewrite toàn bộ (big bang) 2 năm trước, bỏ giữa chừng vì scope quá lớn"
+  inspiration_refs:
+    - "Strangler Fig Pattern (Martin Fowler)"
+    - "Shopify migration blog"
+    - "Booking.com microservices journey"
+  political_constraints: "CTO yêu cầu: không được làm hỏng prod, mỗi service phải có rollback plan được test trước"
+
+expected_behavior_notes: |
+  Legacy migration — test cho migration strategy và risk management decisions.
+  Required: migration pattern (strangler/big bang/parallel), service order, data sync, DB sharing strategy,
+  API versioning, rollback mechanism, test coverage requirement.
+  Forbidden: questions về frontend, new feature development, payment gateway switch.
+  Test: câu hỏi phải reflect constraint "no downtime > 2h" và "bus factor 1 risk".
