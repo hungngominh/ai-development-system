@@ -1,17 +1,23 @@
 # src/ai_dev_system/engine/materializer.py
+"""Task graph materialization (SQLite).
+
+PG → SQLite changes:
+- `SELECT ... FOR UPDATE` removed (SQLite single-writer)
+- `.scalar()` → `.fetchone()[col]` (sqlite3 has no scalar())
+- `gen_random_uuid()` → app-side `new_uuid()`
+- `resolved_dependencies` stored as JSON TEXT (json.dumps)
+"""
 import copy
 import json
 import logging
 import os
-from datetime import datetime, timezone
+import sqlite3
 from typing import Optional
-
-import psycopg
-import psycopg.types.json
 
 from ai_dev_system.config import Config
 from ai_dev_system.db.repos.artifacts import ArtifactRepo
 from ai_dev_system.db.repos.events import EventRepo
+from ai_dev_system.db.helpers import dump_json, load_array, new_uuid
 
 logger = logging.getLogger(__name__)
 
@@ -21,20 +27,19 @@ class ArtifactResolutionError(Exception):
 
 
 def materialize_task_runs(
-    conn: psycopg.Connection,
+    conn: sqlite3.Connection,
     run_id: str,
     graph_artifact_id: str,
     config: Config,
 ) -> None:
     """Load approved task graph → create PENDING task_runs. Safe to call multiple times.
 
-    Idempotency: SELECT FOR UPDATE on run row, then INSERT ON CONFLICT DO NOTHING.
-    Both guards together prevent duplicates even under concurrent callers.
+    Idempotency: existence check + INSERT ON CONFLICT DO NOTHING (UNIQUE on
+    (run_id, task_id, attempt_number)).
     """
     artifact_repo = ArtifactRepo(conn)
     event_repo = EventRepo(conn)
 
-    # Read graph from promoted artifact path (I/O before locking — safe, file is immutable)
     artifact = artifact_repo.get(graph_artifact_id)
     if artifact is None:
         raise ValueError(f"Artifact {graph_artifact_id} not found")
@@ -44,19 +49,17 @@ def materialize_task_runs(
 
     atomic_tasks = [t for t in graph["tasks"] if t.get("execution_type") == "atomic"]
 
-    # Lock run row to serialize concurrent materializer calls
-    conn.execute("SELECT run_id FROM runs WHERE run_id = %s FOR UPDATE", (run_id,))
-    existing = conn.execute("""
-        SELECT COUNT(*) FROM task_runs
-        WHERE run_id = %s AND task_graph_artifact_id = %s
-    """, (run_id, graph_artifact_id)).scalar()
-
-    if existing and existing > 0:
+    existing_row = conn.execute(
+        "SELECT COUNT(*) AS c FROM task_runs WHERE run_id = ? AND task_graph_artifact_id = ?",
+        (run_id, graph_artifact_id),
+    ).fetchone()
+    if existing_row and existing_row["c"] > 0:
         logger.info("materialize_task_runs: already materialized for run %s, skipping", run_id)
         return
 
     for task in atomic_tasks:
-        conn.execute("""
+        conn.execute(
+            """
             INSERT INTO task_runs (
                 task_run_id, run_id, task_id,
                 task_graph_artifact_id,
@@ -69,35 +72,43 @@ def materialize_task_runs(
                 input_artifact_ids,
                 promoted_outputs
             ) VALUES (
-                gen_random_uuid(), %s, %s,
-                %s,
+                ?, ?, ?,
+                ?,
                 1, 'PENDING',
-                %s,
+                ?,
                 0,
-                %s,
-                %s,
-                now(),
-                '{}',
+                ?,
+                ?,
+                CURRENT_TIMESTAMP,
+                '[]',
                 '[]'
             )
             ON CONFLICT (run_id, task_id, attempt_number) DO NOTHING
-        """, (
-            run_id,
-            task["id"],
-            graph_artifact_id,
-            task.get("deps", []),
-            task.get("agent_type"),
-            psycopg.types.json.Jsonb(_build_context(task)),
-        ))
+            """,
+            (
+                new_uuid(),
+                run_id,
+                task["id"],
+                graph_artifact_id,
+                dump_json(task.get("deps", [])),
+                task.get("agent_type"),
+                dump_json(_build_context(task)),
+            ),
+        )
 
-    conn.execute("""
+    conn.execute(
+        """
         UPDATE runs
-        SET status = 'RUNNING_EXECUTION', last_activity_at = now()
-        WHERE run_id = %s AND status IN ('CREATED', 'RUNNING_PHASE_3', 'RUNNING_PHASE_2A')
-    """, (run_id,))
+        SET status = 'RUNNING_EXECUTION', last_activity_at = CURRENT_TIMESTAMP
+        WHERE run_id = ? AND status IN ('CREATED', 'RUNNING_PHASE_3', 'RUNNING_PHASE_2A')
+        """,
+        (run_id,),
+    )
 
-    event_repo.insert(run_id, "PHASE_STARTED", "system",
-                      payload={"phase": "execution", "task_count": len(atomic_tasks)})
+    event_repo.insert(
+        run_id, "PHASE_STARTED", "system",
+        payload={"phase": "execution", "task_count": len(atomic_tasks)},
+    )
 
     logger.info("Materialized %d tasks for run %s", len(atomic_tasks), run_id)
 
@@ -119,23 +130,25 @@ def _build_context(task: dict) -> dict:
 
 
 def _resolve_artifact_paths(
-    conn: psycopg.Connection,
+    conn: sqlite3.Connection,
     run_id: str,
     context_snapshot: dict,
 ) -> dict:
-    """Enrich context_snapshot.required_inputs with real artifact paths.
-
-    Raises ArtifactResolutionError if a required input cannot be resolved.
-    """
+    """Enrich context_snapshot.required_inputs with real artifact paths."""
     required = context_snapshot.get("required_inputs", [])
     if not required:
         ctx = copy.deepcopy(context_snapshot)
         ctx["required_inputs"] = []
         return ctx
 
-    current = conn.execute(
-        "SELECT current_artifacts FROM runs WHERE run_id = %s", (run_id,)
-    ).scalar() or {}
+    row = conn.execute(
+        "SELECT current_artifacts FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    current_raw = row["current_artifacts"] if row else None
+    if isinstance(current_raw, str):
+        current = json.loads(current_raw) if current_raw else {}
+    else:
+        current = current_raw or {}
 
     resolved = []
     for logical_name in required:
@@ -146,8 +159,8 @@ def _resolve_artifact_paths(
                 f"Upstream task may not have completed yet."
             )
         artifact = conn.execute(
-            "SELECT artifact_id, content_ref FROM artifacts WHERE artifact_id = %s",
-            (artifact_id,)
+            "SELECT artifact_id, content_ref FROM artifacts WHERE artifact_id = ?",
+            (artifact_id,),
         ).fetchone()
         if artifact is None:
             raise ArtifactResolutionError(

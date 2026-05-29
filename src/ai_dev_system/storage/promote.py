@@ -4,7 +4,7 @@ import shutil
 from datetime import datetime, timezone
 from typing import Optional
 
-import psycopg
+import sqlite3
 
 from ai_dev_system.agents.base import PromotedOutput
 from ai_dev_system.config import Config
@@ -27,7 +27,7 @@ class PromotionConflictError(Exception):
 
 
 def promote_output(
-    conn: psycopg.Connection,
+    conn: sqlite3.Connection,
     config: Config,
     task_run: dict,
     promoted_output: PromotedOutput,
@@ -102,12 +102,12 @@ def promote_output(
     # Recompute after marker is added
     content_checksum, content_size = checksum_artifact(final_path)
 
-    # 7b: Promotion guard — FOR UPDATE prevents concurrent workers from passing simultaneously
+    # 7b: Promotion guard — SQLite is single-writer, so a plain SELECT inside
+    # the open transaction is sufficient (no FOR UPDATE).
     guarded = conn.execute("""
         SELECT 1 FROM task_runs
-        WHERE task_run_id = %s AND status = 'RUNNING'
+        WHERE task_run_id = ? AND status = 'RUNNING'
           AND output_artifact_id IS NULL AND completed_at IS NULL
-        FOR UPDATE
     """, (task_run_id,)).fetchone()
     if not guarded:
         raise PromotionConflictError(f"task_run {task_run_id} not eligible for promotion")

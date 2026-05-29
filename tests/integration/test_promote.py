@@ -20,7 +20,7 @@ def running_task_run(conn, seed_run):
     conn.execute("""
         INSERT INTO task_runs (task_run_id, run_id, task_id, attempt_number, status,
             agent_type, input_artifact_ids, resolved_dependencies, promoted_outputs)
-        VALUES (%s, %s, 'TASK-1', 1, 'RUNNING', 'StubAgent', '{}', '{}', '[]')
+        VALUES (?, ?, 'TASK-1', 1, 'RUNNING', 'StubAgent', '{}', '{}', '[]')
     """, (tid, seed_run))
     return {"task_run_id": tid, "run_id": seed_run, "task_id": "TASK-1",
             "attempt_number": 1, "input_artifact_ids": []}
@@ -34,7 +34,7 @@ def test_promote_creates_artifact_in_db(conn, seed_run, running_task_run, temp_o
 
     assert artifact_id is not None
     row = conn.execute(
-        "SELECT status, content_ref, version FROM artifacts WHERE artifact_id = %s",
+        "SELECT status, content_ref, version FROM artifacts WHERE artifact_id = ?",
         (artifact_id,)
     ).fetchone()
     assert row["status"] == "ACTIVE"
@@ -46,7 +46,7 @@ def test_promote_writes_complete_marker(conn, seed_run, running_task_run, temp_o
     cfg = config.__class__(storage_root=str(tmp_path), database_url=config.database_url)
 
     artifact_id = promote_output(conn, cfg, running_task_run, promoted, temp_output)
-    row = conn.execute("SELECT content_ref FROM artifacts WHERE artifact_id = %s", (artifact_id,)).fetchone()
+    row = conn.execute("SELECT content_ref FROM artifacts WHERE artifact_id = ?", (artifact_id,)).fetchone()
     assert os.path.exists(os.path.join(row["content_ref"], "_complete.marker"))
 
 def test_promote_increments_version_on_second_call(conn, seed_run, tmp_path, config):
@@ -59,7 +59,7 @@ def test_promote_increments_version_on_second_call(conn, seed_run, tmp_path, con
         conn.execute("""
             INSERT INTO task_runs (task_run_id, run_id, task_id, attempt_number, status,
                 agent_type, input_artifact_ids, resolved_dependencies, promoted_outputs)
-            VALUES (%s, %s, %s, 1, 'RUNNING', 'StubAgent', '{}', '{}', '[]')
+            VALUES (?, ?, ?, 1, 'RUNNING', 'StubAgent', '{}', '{}', '[]')
         """, (tid, seed_run, task_id))
         return {"task_run_id": tid, "run_id": seed_run, "task_id": task_id,
                 "attempt_number": 1, "input_artifact_ids": []}
@@ -76,8 +76,8 @@ def test_promote_increments_version_on_second_call(conn, seed_run, tmp_path, con
     task2 = make_task_run("TASK-2")
     id2 = promote_output(conn, cfg, task2, promoted, make_temp("out2"))
 
-    r1 = conn.execute("SELECT version, status FROM artifacts WHERE artifact_id = %s", (id1,)).fetchone()
-    r2 = conn.execute("SELECT version, status FROM artifacts WHERE artifact_id = %s", (id2,)).fetchone()
+    r1 = conn.execute("SELECT version, status FROM artifacts WHERE artifact_id = ?", (id1,)).fetchone()
+    r2 = conn.execute("SELECT version, status FROM artifacts WHERE artifact_id = ?", (id2,)).fetchone()
     assert r1["version"] == 1
     assert r1["status"] == "SUPERSEDED"
     assert r2["version"] == 2

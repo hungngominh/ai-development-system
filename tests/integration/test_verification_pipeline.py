@@ -14,7 +14,7 @@ def _seed_run_phase_v(conn, project_id: str) -> str:
     run_id = str(uuid.uuid4())
     conn.execute("""
         INSERT INTO runs (run_id, project_id, status, title, current_artifacts, metadata)
-        VALUES (%s, %s, 'RUNNING_PHASE_V', 'Phase V Test', '{}', '{}')
+        VALUES (?, ?, 'RUNNING_PHASE_V', 'Phase V Test', '{}', '{}')
     """, (run_id, project_id))
     return run_id
 
@@ -29,7 +29,7 @@ def _seed_spec_bundle(conn, run_id: str, tmp_path: Path, ac_content: str) -> str
     conn.execute("""
         INSERT INTO artifacts (artifact_id, run_id, artifact_type, version, status, created_by,
                                input_artifact_ids, content_ref, content_checksum, content_size)
-        VALUES (%s, %s, 'SPEC_BUNDLE', 1, 'ACTIVE', 'system', '{}', %s, 'spec-chk', 0)
+        VALUES (?, ?, 'SPEC_BUNDLE', 1, 'ACTIVE', 'system', '{}', ?, 'spec-chk', 0)
     """, (artifact_id, run_id, str(spec_dir)))
     return artifact_id
 
@@ -43,12 +43,12 @@ def test_run_phase_v_pipeline_creates_artifact(conn, config, project_id, tmp_pat
     report = run_phase_v_pipeline(run_id, spec_id, config, conn, stub)
 
     # run.status should be PAUSED_AT_GATE_3
-    row = conn.execute("SELECT status FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+    row = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     assert row["status"] == "PAUSED_AT_GATE_3"
 
     # VERIFICATION_REPORT artifact should exist
     art = conn.execute(
-        "SELECT content_ref FROM artifacts WHERE run_id = %s AND artifact_type = 'VERIFICATION_REPORT' AND status = 'ACTIVE'",
+        "SELECT content_ref FROM artifacts WHERE run_id = ? AND artifact_type = 'VERIFICATION_REPORT' AND status = 'ACTIVE'",
         (run_id,),
     ).fetchone()
     assert art is not None
@@ -72,5 +72,5 @@ def test_run_phase_v_pipeline_has_fail(conn, config, project_id, tmp_path):
     report = run_phase_v_pipeline(run_id, spec_id, config, conn, stub)
 
     assert report.overall == "HAS_FAIL"
-    row = conn.execute("SELECT status FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+    row = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     assert row["status"] == "PAUSED_AT_GATE_3"

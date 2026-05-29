@@ -7,6 +7,7 @@ from typing import Literal
 
 from ai_dev_system.config import Config
 from ai_dev_system.agents.base import PromotedOutput
+from ai_dev_system.db.helpers import load_json
 from ai_dev_system.db.repos.runs import RunRepo
 from ai_dev_system.db.repos.task_runs import TaskRunRepo
 from ai_dev_system.db.repos.events import EventRepo
@@ -41,9 +42,10 @@ def finalize_gate1(
 
     # Read debate_report_id for artifact lineage
     run_row = conn.execute(
-        "SELECT current_artifacts FROM runs WHERE run_id = %s", (run_id,)
+        "SELECT current_artifacts FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
-    debate_report_id = run_row["current_artifacts"].get("debate_report_id")
+    current_artifacts = load_json(run_row["current_artifacts"], default={}) or {}
+    debate_report_id = current_artifacts.get("debate_report_id")
 
     # --- Artifact 1: APPROVED_ANSWERS ---
     task_run_aa = task_run_repo.create_sync(run_id, task_type="gate1_approved_answers")

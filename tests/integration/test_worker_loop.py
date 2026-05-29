@@ -10,7 +10,7 @@ def test_full_pickup_execute_promote(conn, seed_run, seed_task_run, tmp_path, co
     conn.execute("""
         UPDATE task_runs
         SET promoted_outputs = '[{"name": "result.json", "artifact_type": "EXECUTION_LOG", "description": "stub"}]'
-        WHERE task_run_id = %s
+        WHERE task_run_id = ?
     """, (seed_task_run,))
 
     task = pickup_task(conn, cfg, run_id=seed_run, worker_id="w1")
@@ -21,7 +21,7 @@ def test_full_pickup_execute_promote(conn, seed_run, seed_task_run, tmp_path, co
 
     assert status == "SUCCESS"
     artifact = conn.execute("""
-        SELECT status, version FROM artifacts WHERE run_id = %s AND artifact_type = 'EXECUTION_LOG'
+        SELECT status, version FROM artifacts WHERE run_id = ? AND artifact_type = 'EXECUTION_LOG'
     """, (seed_run,)).fetchone()
     assert artifact["status"] == "ACTIVE"
     assert artifact["version"] == 1

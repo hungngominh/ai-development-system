@@ -2,6 +2,7 @@ import os
 
 ARTIFACT_TYPE_TO_KEY = {
     "INITIAL_BRIEF":        "initial_brief_id",
+    "INTAKE_BRIEF":         "intake_brief_id",
     "DEBATE_REPORT":        "debate_report_id",
     "DECISION_LOG":         "decision_log_id",
     "APPROVED_ANSWERS":     "approved_answers_id",

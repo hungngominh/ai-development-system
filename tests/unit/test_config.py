@@ -11,11 +11,14 @@ def test_config_reads_from_env(monkeypatch):
     assert cfg.database_url == "postgresql://localhost/test"
 
 
-def test_config_raises_if_missing(monkeypatch):
+def test_config_falls_back_to_sqlite_defaults(monkeypatch):
+    """M0.5: Config no longer raises when env vars are missing — it falls back to
+    SQLite defaults in ~/.ai-dev-system/."""
     monkeypatch.delenv("STORAGE_ROOT", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    with pytest.raises(ValueError, match="STORAGE_ROOT"):
-        Config.from_env()
+    cfg = Config.from_env()
+    assert cfg.database_url.startswith("sqlite:///")
+    assert "ai-dev-system" in cfg.storage_root
 
 
 def test_config_defaults():

@@ -8,6 +8,6 @@ def test_update_status_changes_run_status(conn, project_id):
     run_id = repo.create(project_id=project_id, pipeline_type="test")
     repo.update_status(run_id, "PAUSED_AT_GATE_1")
     row = conn.execute(
-        "SELECT status FROM runs WHERE run_id = %s", (run_id,)
+        "SELECT status FROM runs WHERE run_id = ?", (run_id,)
     ).fetchone()
     assert row["status"] == "PAUSED_AT_GATE_1"

@@ -86,7 +86,7 @@ def run_spec_pipeline(raw_idea: str, config: Config, conn, project_id: str, io) 
 
     # promote_output moves files to final artifact path; update bundle root_dir
     row = conn.execute(
-        "SELECT content_ref FROM artifacts WHERE artifact_id = %s",
+        "SELECT content_ref FROM artifacts WHERE artifact_id = ?",
         (artifact_id,)
     ).fetchone()
     bundle = SpecBundle(version=bundle.version, root_dir=Path(row["content_ref"]),

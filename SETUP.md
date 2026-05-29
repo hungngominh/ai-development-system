@@ -41,7 +41,7 @@ Wizard hỏi lần lượt:
 ```
 === AI Dev System Setup ===
 
-DATABASE_URL (postgresql://user:pass@host/db): postgresql://...
+DATABASE_URL (sqlite:///path/to/file.db) [sqlite:///~/.ai-dev-system/control.db]:
 STORAGE_ROOT [~/.ai-dev-system/storage]:
 LLM Provider:
   1. anthropic
@@ -52,11 +52,8 @@ LLM_MODEL [gpt-4o]:
 OPENAI_API_KEY: sk-...
 
 Config saved to ~/.ai-dev-system/.env
-Applying database migrations...
-  OK   control-layer-schema.sql
-  OK   v2-execution-runner.sql
-  OK   v3-debate-engine.sql
-  OK   v4-verification.sql
+Applying database schema...
+  OK   schema applied
 Installing Claude Code skills...
   OK   start-project.md
   OK   review-debate.md
@@ -118,6 +115,19 @@ Khi setup, chọn "Dung stub LLM? y" — toàn bộ pipeline chạy với LLM gi
 ## Chạy tests
 
 ```bash
-python -m pytest tests/unit/ -q          # 212 passed (không cần DB)
-python -m pytest tests/integration/ -q   # 60 passed (cần DB)
+python -m pytest tests/ -q   # 406 passed, 9 xfailed — SQLite in-memory, không cần DB ngoài
 ```
+
+---
+
+## Database backend
+
+Hệ thống dùng **SQLite** (stdlib Python — không cần cài driver). DB file mặc định:
+`~/.ai-dev-system/control.db`. Override qua `DATABASE_URL` trong `.env`:
+
+```
+DATABASE_URL=sqlite:///path/to/your/control.db
+DATABASE_URL=sqlite:///:memory:        # in-memory (test only)
+```
+
+PostgreSQL backend đã bị bỏ trong M0.5 để mọi máy đều chạy được không cần Postgres server.

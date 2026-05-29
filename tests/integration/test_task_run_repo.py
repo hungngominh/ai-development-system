@@ -29,7 +29,7 @@ def test_mark_success(conn, seed_run, seed_task_run):
     task = repo.pickup(run_id=seed_run, worker_id="w1")
     repo.mark_success(task["task_run_id"], output_ref="/tmp/out", output_artifact_id=None)
     updated = conn.execute(
-        "SELECT status FROM task_runs WHERE task_run_id = %s",
+        "SELECT status FROM task_runs WHERE task_run_id = ?",
         (task["task_run_id"],)
     ).fetchone()
     assert updated["status"] == "SUCCESS"

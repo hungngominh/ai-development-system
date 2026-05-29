@@ -57,7 +57,7 @@ def test_finalize_gate1_run_status_updated(conn, config, project_id):
     finalize_gate1(result.run_id, decisions, config.storage_root, conn)
 
     row = conn.execute(
-        "SELECT status FROM runs WHERE run_id = %s", (result.run_id,)
+        "SELECT status FROM runs WHERE run_id = ?", (result.run_id,)
     ).fetchone()
     assert row["status"] == "RUNNING_PHASE_1D"
 
@@ -81,11 +81,11 @@ def test_finalize_gate1_artifacts_stored_in_db(conn, config, project_id):
     )
 
     aa_row = conn.execute(
-        "SELECT artifact_type FROM artifacts WHERE artifact_id = %s", (aa_id,)
+        "SELECT artifact_type FROM artifacts WHERE artifact_id = ?", (aa_id,)
     ).fetchone()
     assert aa_row["artifact_type"] == "APPROVED_ANSWERS"
 
     dl_row = conn.execute(
-        "SELECT artifact_type FROM artifacts WHERE artifact_id = %s", (dl_id,)
+        "SELECT artifact_type FROM artifacts WHERE artifact_id = ?", (dl_id,)
     ).fetchone()
     assert dl_row["artifact_type"] == "DECISION_LOG"

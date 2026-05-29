@@ -7,11 +7,14 @@ name = "ai-dev-system"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
-    "psycopg[binary]>=3.1",
+    # SQLite is stdlib — no DB driver dependency
     "anthropic>=0.25",
     "openai>=1.30",
     "crewai>=0.51",
     "python-dotenv>=1.0",
+    "typer>=0.12",
+    "rich>=13",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
@@ -24,7 +27,15 @@ dev = ["pytest>=8.0", "pytest-mock>=3.12"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-ai_dev_system = ["../../skills/*.md", "../../docs/schema/*.sql", "../../docs/schema/migrations/*.sql"]
+ai_dev_system = [
+    "../../skills/*.md",
+    "../../docs/schema/*.sql",
+    "../../docs/schema/migrations/*.sql",
+    "intake/templates/*.yaml",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: integration tests (multi-component, may use subprocess/threads)",
+]

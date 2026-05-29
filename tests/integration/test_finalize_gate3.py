@@ -17,7 +17,7 @@ def _seed_run_at_phase_v(conn, project_id: str) -> str:
     run_id = str(uuid.uuid4())
     conn.execute("""
         INSERT INTO runs (run_id, project_id, status, title, current_artifacts, metadata)
-        VALUES (%s, %s, 'PAUSED_AT_GATE_3', 'Gate3 Test Run', '{}', '{}')
+        VALUES (?, ?, 'PAUSED_AT_GATE_3', 'Gate3 Test Run', '{}', '{}')
     """, (run_id, project_id))
     return run_id
 
@@ -55,8 +55,8 @@ def _seed_verification_report(conn, run_id: str, tmp_path: Path, criteria_verdic
         INSERT INTO artifacts (
             artifact_id, run_id, artifact_type, version, status, created_by,
             input_artifact_ids, content_ref, content_checksum, content_size
-        ) VALUES (%s, %s, 'VERIFICATION_REPORT', 1, 'ACTIVE', 'system',
-                  '{}', %s, 'test-checksum', 0)
+        ) VALUES (?, ?, 'VERIFICATION_REPORT', 1, 'ACTIVE', 'system',
+                  '{}', ?, 'test-checksum', 0)
     """, (artifact_id, run_id, str(artifact_dir)))
     return artifact_id
 
@@ -73,7 +73,7 @@ def test_finalize_gate3_all_pass_completes_run(conn, config, project_id, tmp_pat
     assert result.has_remediation is False
     assert result.aborted is False
 
-    row = conn.execute("SELECT status FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+    row = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     assert row["status"] == "COMPLETED"
 
 
@@ -89,7 +89,7 @@ def test_finalize_gate3_abort_sets_aborted(conn, config, project_id, tmp_path):
     )
 
     assert result.aborted is True
-    row = conn.execute("SELECT status FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+    row = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     assert row["status"] == "ABORTED"
 
 
@@ -106,7 +106,7 @@ def test_finalize_gate3_all_skipped_completes(conn, config, project_id, tmp_path
 
     assert result.has_remediation is False
     assert result.aborted is False
-    row = conn.execute("SELECT status FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+    row = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     assert row["status"] == "COMPLETED"
 
 
@@ -119,7 +119,7 @@ def test_finalize_gate3_fail_triggers_remediation(conn, config, project_id, tmp_
 
     assert result.has_remediation is True
     assert result.remediation_graph is not None
-    row = conn.execute("SELECT status FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+    row = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     assert row["status"] == "RUNNING_PHASE_V"
 
 
@@ -145,13 +145,13 @@ def test_finalize_gate3_attempt3_pauses_at_gate3b(conn, config, project_id, tmp_
             INSERT INTO artifacts (
                 artifact_id, run_id, artifact_type, version, status, created_by,
                 input_artifact_ids, content_ref, content_checksum, content_size
-            ) VALUES (%s, %s, 'VERIFICATION_REPORT', %s, %s, 'system',
-                      '{}', %s, 'chk', 0)
+            ) VALUES (?, ?, 'VERIFICATION_REPORT', ?, ?, 'system',
+                      '{}', ?, 'chk', 0)
         """, (artifact_id, run_id, i, status, str(artifact_dir)))
 
     # attempt count = 3 → should escalate to PAUSED_AT_GATE_3B
     result = finalize_gate3(run_id, decisions=[], storage_root=config.storage_root, conn=conn)
 
-    row = conn.execute("SELECT status FROM runs WHERE run_id = %s", (run_id,)).fetchone()
+    row = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
     assert row["status"] == "PAUSED_AT_GATE_3B"
     assert result.has_remediation is False

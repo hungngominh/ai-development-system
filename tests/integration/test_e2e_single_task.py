@@ -21,7 +21,7 @@ def test_single_task_flow(conn, tmp_path, config):
     # Seed run (must include project_id — NOT NULL constraint)
     conn.execute("""
         INSERT INTO runs (run_id, project_id, status, title, current_artifacts, metadata)
-        VALUES (%s, %s, 'RUNNING_PHASE_3', 'E2E Test', '{}', '{}')
+        VALUES (?, ?, 'RUNNING_PHASE_3', 'E2E Test', '{}', '{}')
     """, (run_id, project_id))
 
     # Seed PENDING task with no deps
@@ -29,7 +29,7 @@ def test_single_task_flow(conn, tmp_path, config):
     conn.execute("""
         INSERT INTO task_runs (task_run_id, run_id, task_id, attempt_number, status,
             agent_type, input_artifact_ids, resolved_dependencies, promoted_outputs)
-        VALUES (%s, %s, 'TASK-1', 1, 'PENDING', 'StubAgent', '{}', '{}',
+        VALUES (?, ?, 'TASK-1', 1, 'PENDING', 'StubAgent', '{}', '{}',
                 '[{"name": "output.json", "artifact_type": "EXECUTION_LOG", "description": "e2e"}]')
     """, (task_run_id, run_id))
 
@@ -38,7 +38,7 @@ def test_single_task_flow(conn, tmp_path, config):
     assert promoted_count == 1
 
     status = conn.execute(
-        "SELECT status FROM task_runs WHERE task_run_id = %s", (task_run_id,)
+        "SELECT status FROM task_runs WHERE task_run_id = ?", (task_run_id,)
     ).fetchone()["status"]
     assert status == "READY"
 
@@ -52,7 +52,7 @@ def test_single_task_flow(conn, tmp_path, config):
     # Phase 3: Verify artifact
     artifact = conn.execute("""
         SELECT status, version, content_ref FROM artifacts
-        WHERE run_id = %s AND artifact_type = 'EXECUTION_LOG'
+        WHERE run_id = ? AND artifact_type = 'EXECUTION_LOG'
     """, (run_id,)).fetchone()
     assert artifact["status"] == "ACTIVE"
     assert artifact["version"] == 1
@@ -63,7 +63,7 @@ def test_single_task_flow(conn, tmp_path, config):
 
     # Phase 4: Verify task_run final state
     task_row = conn.execute(
-        "SELECT status, output_artifact_id FROM task_runs WHERE task_run_id = %s", (task_run_id,)
+        "SELECT status, output_artifact_id FROM task_runs WHERE task_run_id = ?", (task_run_id,)
     ).fetchone()
     assert task_row["status"] == "SUCCESS"
     assert task_row["output_artifact_id"] is not None

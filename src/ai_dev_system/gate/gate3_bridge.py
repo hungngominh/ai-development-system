@@ -48,7 +48,7 @@ def finalize_gate3(
     artifact_row = conn.execute(
         """
         SELECT content_ref FROM artifacts
-        WHERE run_id = %s AND artifact_type = 'VERIFICATION_REPORT' AND status = 'ACTIVE'
+        WHERE run_id = ? AND artifact_type = 'VERIFICATION_REPORT' AND status = 'ACTIVE'
         ORDER BY version DESC LIMIT 1
         """,
         (run_id,),
@@ -64,7 +64,7 @@ def finalize_gate3(
     count_row = conn.execute(
         """
         SELECT COUNT(*) AS count FROM artifacts
-        WHERE run_id = %s AND artifact_type = 'VERIFICATION_REPORT'
+        WHERE run_id = ? AND artifact_type = 'VERIFICATION_REPORT'
           AND status IN ('ACTIVE', 'SUPERSEDED')
         """,
         (run_id,),

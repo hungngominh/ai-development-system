@@ -18,7 +18,7 @@ def collect_evidence(
         """
         SELECT task_id, output_artifact_id
         FROM task_runs
-        WHERE run_id = %s AND status = 'SUCCESS'
+        WHERE run_id = ? AND status = 'SUCCESS'
         """,
         (run_id,),
     ).fetchall()
@@ -33,7 +33,7 @@ def collect_evidence(
         output_text: list[str] = []
         if output_artifact_id:
             artifact_row = conn.execute(
-                "SELECT content_ref FROM artifacts WHERE artifact_id = %s",
+                "SELECT content_ref FROM artifacts WHERE artifact_id = ?",
                 (output_artifact_id,),
             ).fetchone()
             if artifact_row:

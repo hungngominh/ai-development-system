@@ -43,10 +43,11 @@ def _collect_config() -> dict[str, str]:
 
     config = {}
 
-    # Database
+    # Database — SQLite by default (zero-install)
+    default_db_url = existing.get("DATABASE_URL", f"sqlite:///{CONFIG_DIR / 'control.db'}")
     config["DATABASE_URL"] = _prompt(
-        "DATABASE_URL (postgresql://user:pass@host/db)",
-        existing.get("DATABASE_URL", ""),
+        "DATABASE_URL (sqlite:///path/to/file.db)",
+        default_db_url,
     )
 
     # Storage
@@ -117,33 +118,21 @@ def _write_env(config: dict[str, str]) -> None:
 
 
 def _run_migrations(database_url: str) -> bool:
-    """Apply DB migrations. Returns True on success."""
-    print("\nApplying database migrations...")
-
-    # Find SQL files relative to this package
-    repo_root = Path(__file__).resolve().parent.parent.parent.parent
-    sql_files = [
-        repo_root / "docs" / "schema" / "control-layer-schema.sql",
-        repo_root / "docs" / "schema" / "migrations" / "v2-execution-runner.sql",
-        repo_root / "docs" / "schema" / "migrations" / "v3-debate-engine.sql",
-        repo_root / "docs" / "schema" / "migrations" / "v4-verification.sql",
-    ]
+    """Apply DB schema. SQLite-only. Returns True on success."""
+    print("\nApplying database schema...")
 
     try:
-        import psycopg
-        conn = psycopg.connect(database_url, autocommit=True)
-        for sql_file in sql_files:
-            if not sql_file.exists():
-                print(f"  SKIP {sql_file.name} (not found)")
-                continue
-            conn.execute(sql_file.read_text())
-            print(f"  OK   {sql_file.name}")
+        from ai_dev_system.db.connection import get_connection
+        from ai_dev_system.db.migrator import apply_schema
+
+        conn = get_connection(database_url)
+        apply_schema(conn)
         conn.close()
-        print("Database migrations complete.")
+        print("  OK   schema applied")
         return True
     except Exception as e:
         print(f"  ERROR: {e}")
-        print("Database migration failed. You can re-run 'ai-dev setup' to retry.")
+        print("Database setup failed. You can re-run 'ai-dev setup' to retry.")
         return False
 
 

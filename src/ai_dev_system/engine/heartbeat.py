@@ -3,7 +3,7 @@ import logging
 import threading
 from typing import Callable
 
-import psycopg
+import sqlite3
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ class HeartbeatThread(threading.Thread):
 
     def __init__(
         self,
-        conn_factory: Callable[[], psycopg.Connection],
+        conn_factory: Callable[[], sqlite3.Connection],
         task_run_id: str,
         interval_s: float = 30.0,
     ):
@@ -33,8 +33,8 @@ class HeartbeatThread(threading.Thread):
             try:
                 conn = self.conn_factory()
                 conn.execute("""
-                    UPDATE task_runs SET heartbeat_at = now()
-                    WHERE task_run_id = %s AND status = 'RUNNING'
+                    UPDATE task_runs SET heartbeat_at = CURRENT_TIMESTAMP
+                    WHERE task_run_id = ? AND status = 'RUNNING'
                 """, (self.task_run_id,))
             except Exception:
                 logger.warning(

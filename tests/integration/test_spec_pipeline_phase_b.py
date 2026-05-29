@@ -81,7 +81,7 @@ def test_phase_b_artifact_type_is_task_graph_approved(mock_subproc, conn, config
     )
 
     row = conn.execute(
-        "SELECT artifact_type FROM artifacts WHERE artifact_id = %s",
+        "SELECT artifact_type FROM artifacts WHERE artifact_id = ?",
         (result.graph_artifact_id,),
     ).fetchone()
     assert row["artifact_type"] == "TASK_GRAPH_APPROVED"

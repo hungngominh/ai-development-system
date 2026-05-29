@@ -12,7 +12,7 @@ def _make_artifact(conn, run_id: str) -> str:
         INSERT INTO artifacts (
             artifact_id, run_id, artifact_type, version, status, created_by,
             input_artifact_ids, content_ref, content_checksum, content_size
-        ) VALUES (%s, %s, 'TASK_GRAPH_APPROVED', 1, 'ACTIVE', 'system',
+        ) VALUES (?, ?, 'TASK_GRAPH_APPROVED', 1, 'ACTIVE', 'system',
                   '{}', '/tmp/stub', 'abc123', 0)
     """, (artifact_id, run_id))
     return artifact_id
@@ -38,7 +38,7 @@ def test_create_from_graph(conn, project_id):
 
     assert len(created) == 4
     rows = conn.execute(
-        "SELECT * FROM task_runs WHERE run_id = %s AND task_graph_artifact_id = %s",
+        "SELECT * FROM task_runs WHERE run_id = ? AND task_graph_artifact_id = ?",
         (run_id, artifact_id)
     ).fetchall()
     assert len(rows) == 4

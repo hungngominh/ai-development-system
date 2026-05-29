@@ -7,7 +7,7 @@ from ai_dev_system.engine.materializer import materialize_task_runs, _build_cont
 def test_materializer_creates_pending_task_runs(conn, seed_run, seed_graph_artifact, config):
     materialize_task_runs(conn, seed_run, seed_graph_artifact, config)
     rows = conn.execute(
-        "SELECT task_id, status, retry_count FROM task_runs WHERE run_id = %s ORDER BY task_id",
+        "SELECT task_id, status, retry_count FROM task_runs WHERE run_id = ? ORDER BY task_id",
         (seed_run,)
     ).fetchall()
     assert len(rows) == 2
@@ -17,11 +17,11 @@ def test_materializer_creates_pending_task_runs(conn, seed_run, seed_graph_artif
 
 
 def test_materializer_sets_run_status_running_execution(conn, seed_run, seed_graph_artifact, config):
-    conn.execute("UPDATE runs SET status = 'RUNNING_PHASE_3' WHERE run_id = %s", (seed_run,))
+    conn.execute("UPDATE runs SET status = 'RUNNING_PHASE_3' WHERE run_id = ?", (seed_run,))
     materialize_task_runs(conn, seed_run, seed_graph_artifact, config)
     status = conn.execute(
-        "SELECT status FROM runs WHERE run_id = %s", (seed_run,)
-    ).scalar()
+        "SELECT status FROM runs WHERE run_id = ?", (seed_run,)
+    ).fetchone()[0]
     assert status == "RUNNING_EXECUTION"
 
 
@@ -29,15 +29,15 @@ def test_materializer_is_idempotent(conn, seed_run, seed_graph_artifact, config)
     materialize_task_runs(conn, seed_run, seed_graph_artifact, config)
     materialize_task_runs(conn, seed_run, seed_graph_artifact, config)
     count = conn.execute(
-        "SELECT COUNT(*) FROM task_runs WHERE run_id = %s", (seed_run,)
-    ).scalar()
+        "SELECT COUNT(*) FROM task_runs WHERE run_id = ?", (seed_run,)
+    ).fetchone()[0]
     assert count == 2
 
 
 def test_materializer_resolves_dependencies(conn, seed_run, seed_graph_artifact, config):
     materialize_task_runs(conn, seed_run, seed_graph_artifact, config)
     design = conn.execute(
-        "SELECT resolved_dependencies FROM task_runs WHERE run_id = %s AND task_id = 'TASK-DESIGN'",
+        "SELECT resolved_dependencies FROM task_runs WHERE run_id = ? AND task_id = 'TASK-DESIGN'",
         (seed_run,)
     ).fetchone()
     assert "TASK-PARSE" in (design["resolved_dependencies"] or [])

@@ -1,99 +1,172 @@
 ---
 name: start-project
 description: >
-  Phase 1a entry point. Thu thập ý tưởng từ user, chạy debate pipeline
-  (normalize → question gen → AI debate), và hướng dẫn user sang /review-debate.
+  Phase 1a entry point. Khởi động intake wizard (thu thập ~30 trường brief
+  qua interactive Python CLI), hỗ trợ resume run đang COLLECTING_INTAKE,
+  và hướng dẫn user sang bước debate sau khi brief promoted.
 ---
 
 # Start Project Skill
 
-Invoke this skill with `/start-project` (optionally followed by the idea inline).
+Invoke: `/start-project`, `/start-project <project-name>`, hoặc
+`/start-project --run-id <uuid>` (resume).
+
+The intake wizard tự nó là **interactive Python CLI** — hỏi từng câu một,
+nhận stdin từ user trong terminal. Skill này KHÔNG chạy wizard trực tiếp;
+nó là **launcher/dispatcher** in lệnh chính xác cho user, sau đó xác minh
+trạng thái run trong DB.
 
 ## State Machine
 
 ```
-COLLECT_IDEA → COLLECT_CONSTRAINTS → COLLECT_PROJECT_NAME → RUNNING → DONE / ERROR
+PARSE_ARGS → (DETECT_EXISTING | COLLECT_PROJECT_NAME) → LAUNCH → VERIFY → NEXT_STEPS
+                                                                        ↘ PAUSED_HINT
 ```
 
-## Instructions
+## PARSE_ARGS
 
-### COLLECT_IDEA
+Đọc các argument sau dấu `/start-project`:
 
-Check if the user provided an idea after the slash command (e.g., `/start-project "xây forum..."`).
+- `--run-id <uuid>` → mode = `resume`, set `run_id` = uuid.
+- Một chuỗi đơn (không bắt đầu bằng `--`) → mode = `start`, set
+  `project_name` = chuỗi đó.
+- Không có gì → mode = `start`, `project_name` chưa biết.
 
-- **Idea provided inline:** skip to COLLECT_CONSTRAINTS.
-- **No idea:** Ask: *"Bạn muốn xây dựng gì?"* Wait for response.
+## DETECT_EXISTING (mode=resume)
 
-### COLLECT_CONSTRAINTS
-
-Always ask this, even if idea was inline:
-
-> *"Có constraint nào cần biết trước không? (vd: tech stack bắt buộc, deadline, budget) — Enter để bỏ qua."*
-
-Accept empty reply, "không", "skip", "bỏ qua" → treat as empty string, continue.
-
-### COLLECT_PROJECT_NAME
-
-Ask:
-
-> *"Tên project? (dùng để nhóm các run liên quan, vd: 'forum-kien-thuc')"*
-
-Wait for name. Do not generate the slug yourself — the CLI script handles it.
-
-### RUNNING
-
-Before running the command, escape all user-supplied values: replace any single-quote `'`
-in the value with `'\''` (the standard POSIX shell single-quote escape).
-
-Print:
-
-> *"Đang chạy Phase A (normalize → debate)... Quá trình này mất 2-5 phút."*
-
-Then run the following bash command (blocking — wait for it to finish):
+Verify run tồn tại và resumable:
 
 ```bash
-ai-dev start \
-  --project-name '<project_name_escaped>' \
-  --idea '<idea_escaped>' \
-  --constraints '<constraints_escaped>'
+ai-dev intake show --run-id <run_id> --json
 ```
 
-> **Fallback:** If `ai-dev` is not in PATH, use `python -m ai_dev_system.cli.start_project` with the same arguments.
+Parse JSON. Nếu `status` = `intake_in_progress` → tiếp tục sang LAUNCH (resume).
+Nếu `intake_complete` → báo user "run này đã promoted brief rồi" + hiển thị
+brief_id từ `--json`, kết thúc skill.
+Lỗi/không tìm thấy → báo lỗi + đề xuất chạy `/start-project` không có `--run-id`.
 
-Stderr from the script will appear in the terminal in real-time. Do not suppress it.
+## COLLECT_PROJECT_NAME (mode=start, project_name unknown)
 
-### DONE (exit code = 0)
+Hỏi:
 
-Parse the single JSON line from stdout. Display:
+> *"Tên project? (slug ngắn, dùng để nhóm các run liên quan, vd: 'forum-kien-thuc')"*
 
+Accept một dòng, strip whitespace. Nếu rỗng → hỏi lại. KHÔNG tự sinh slug —
+CLI sẽ chuẩn hoá.
+
+## LAUNCH
+
+In ra lệnh chính xác user phải chạy **trong terminal riêng** (KHÔNG chạy
+qua Bash tool — wizard cần stdin tương tác):
+
+**Mode = start:**
+
+````
+Mở terminal khác và chạy:
+
+    ai-dev intake start --project-name "<project_name>"
+
+Wizard sẽ hỏi ~30 câu (15–30 phút). Một số command hữu ích trong wizard:
+  skip   bỏ qua câu hiện tại (critical fields sẽ thành assumption)
+  back   quay câu trước
+  save   tạm dừng, resume sau bằng `/start-project --run-id <run_id>`
+  show   xem brief hiện tại
+  ?      yêu cầu AI đề xuất (cho field non-sensitive)
+
+Khi xong (hoặc tạm dừng), quay lại đây và gõ `done` để tôi kiểm tra trạng thái.
+````
+
+**Mode = resume:**
+
+````
+Mở terminal khác và chạy:
+
+    ai-dev intake resume --run-id <run_id>
+
+Wizard sẽ tiếp tục từ field bạn đã pause. Khi xong, quay lại đây và gõ
+`done`.
+````
+
+Đợi user trả lời. Accept: `done`, `xong`, `ok`, hoặc bất cứ tín hiệu hoàn
+thành nào. Cũng accept `huỷ` / `abort` → in lệnh `ai-dev intake abort --run-id
+<run_id>` (nếu biết run_id) hoặc kết thúc skill.
+
+## VERIFY
+
+Sau khi user báo done, cần xác định run_id. Trong mode=resume đã có sẵn.
+Trong mode=start, user chưa cho run_id — query DB qua một `python -c` block
+(không có dedicated `ai-dev intake list` command trong slice này):
+
+```bash
+python -c "
+import json
+from ai_dev_system.config import Config
+from ai_dev_system.db.connection import get_connection
+conn = get_connection(Config.from_env().database_url)
+rows = conn.execute(
+    '''SELECT run_id, status, intake_brief_id, last_activity_at
+       FROM runs
+       WHERE project_id = ? AND status IN ('COLLECTING_INTAKE','READY_FOR_DEBATE','ABORTED')
+       ORDER BY last_activity_at DESC LIMIT 1''',
+    ('<project_name>',)
+).fetchall()
+print(json.dumps([dict(r) for r in rows]))
+"
 ```
-✅ Phase A hoàn tất.
+
+> Note: `project_id` trên CLI hiện slug-hoá từ `--project-name` (xem
+> `intake.py:_slugify`). Nếu user nhập tên có dấu/khoảng trắng, slug-hoá
+> lại trước khi query (`lower()`, non-alphanumeric → `-`, strip `-`).
+
+Parse JSON row. Theo `status`:
+
+- `READY_FOR_DEBATE` + `intake_brief_id` non-null → wizard hoàn tất, sang
+  NEXT_STEPS.
+- `COLLECTING_INTAKE` → wizard bị pause (user gõ `save`). Sang PAUSED_HINT.
+- `ABORTED` → user đã abort. Báo "đã hủy", kết thúc.
+- Không có row → user chưa chạy wizard / chưa save. Lặp lại LAUNCH instructions.
+
+## NEXT_STEPS (status = READY_FOR_DEBATE)
+
+In:
+
+````
+✅ Intake hoàn tất.
    Run ID    : <run_id>
-   Questions : <questions_count> tổng
-               (<escalated_count> ESCALATE_TO_HUMAN/NEED_MORE_EVIDENCE,
-                <resolved_count> RESOLVED,
-                <optional_count> OPTIONAL tự giải)
+   Brief ID  : <intake_brief_id>
 
-→ Chạy /review-debate --run-id <run_id> để bắt đầu Gate 1.
-```
+Bước tiếp theo: chạy debate trên brief này.
 
-Substitute actual values from the JSON. Show the exact `/review-debate --run-id <run_id>` command with the real run_id so the user can copy-paste it.
+    # (Phase 1b debate v2 chưa wire xong — tạm thời dùng nhánh legacy
+    #  nếu cần debate ngay. Plan S7 sẽ kết nối finalize_spec với brief v2.)
 
-### ERROR (exit code ≠ 0)
+Khi debate xong, dùng `/review-debate --run-id <run_id>` để Gate 1.
+````
 
-Display:
+> Nếu sau S7 đã có `ai-dev phase-b debate --run-id`, in lệnh đó thay vì
+> chú thích "chưa wire". Cập nhật skill này khi S7 land.
 
-```
-❌ Phase A thất bại: <last line of stderr>
+## PAUSED_HINT (status = COLLECTING_INTAKE)
 
-Không có DB record nào được tạo. Bạn có thể chạy lại /start-project với cùng tên project.
-```
+In:
 
-## Shell Safety
+````
+💾 Wizard đã pause sau khi bạn gõ `save`. Resume bằng:
 
-Single-quote escape rule: if value contains `'`, replace each `'` with `'\''` before embedding in the command.
+    /start-project --run-id <run_id>
 
-Example — idea containing a single quote `"it's a forum"`:
-```bash
---idea 'it'\''s a forum'
-```
+hoặc trực tiếp:
+
+    ai-dev intake resume --run-id <run_id>
+````
+
+Kết thúc skill.
+
+## Error Handling
+
+- DB không kết nối được → in `python -c` traceback và hướng dẫn user kiểm
+  tra `AI_DEV_DATABASE_URL`.
+- `ai-dev` không có trong PATH → đề xuất `python -m ai_dev_system.cli.main`
+  thay thế.
+- User quay lại không gõ done (gõ câu hỏi khác) → trả lời câu hỏi bình
+  thường, vẫn nhớ rằng skill đang chờ user chạy wizard.

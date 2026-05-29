@@ -1,7 +1,11 @@
 # src/ai_dev_system/engine/failure.py
-import logging
+"""Failure propagation (SQLite).
 
-import psycopg
+PG `? = ANY(resolved_dependencies)` → Python JSON parse + membership check.
+"""
+import json
+import logging
+import sqlite3
 
 from ai_dev_system.config import Config
 from ai_dev_system.db.repos.escalations import EscalationRepo
@@ -11,13 +15,24 @@ from ai_dev_system.db.repos.task_runs import TaskRunRepo
 logger = logging.getLogger(__name__)
 
 
+def _parse_deps(raw) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        return json.loads(raw) if raw.strip() else []
+    return list(raw)
+
+
 def propagate_failure(
-    conn: psycopg.Connection,
+    conn: sqlite3.Connection,
     run_id: str,
     failed_task_id: str,
     failed_task_run_id: str,
 ) -> None:
     """BFS: mark all downstream tasks BLOCKED_BY_FAILURE.
+
     Skips terminal states (SUCCESS, SKIPPED, FAILED_*, ABORTED).
     Raises an escalation (deduplicated by UNIQUE constraint).
     Must be called inside an open transaction.
@@ -31,33 +46,41 @@ def propagate_failure(
     while queue:
         current_id = queue.pop(0)
 
-        dependents = conn.execute("""
-            SELECT task_run_id, task_id, status
+        # All non-terminal task_runs in this run; filter by dep membership in Python
+        candidates = conn.execute(
+            """
+            SELECT task_run_id, task_id, status, resolved_dependencies
             FROM task_runs
-            WHERE run_id = %s
-              AND %s = ANY(resolved_dependencies)
+            WHERE run_id = ?
               AND status NOT IN (
                   'SUCCESS', 'SKIPPED', 'FAILED_FINAL',
                   'FAILED_RETRYABLE', 'ABORTED'
               )
-        """, (run_id, current_id)).fetchall()
+            """,
+            (run_id,),
+        ).fetchall()
 
-        for dep in dependents:
+        for dep in candidates:
+            deps_list = _parse_deps(dep["resolved_dependencies"])
+            if current_id not in deps_list:
+                continue
             if dep["task_id"] in visited:
                 continue
             visited.add(dep["task_id"])
 
-            conn.execute("""
+            conn.execute(
+                """
                 UPDATE task_runs
                 SET status = 'BLOCKED_BY_FAILURE',
-                    error_detail = %s
-                WHERE task_run_id = %s
+                    error_detail = ?
+                WHERE task_run_id = ?
                   AND status IN ('PENDING', 'READY')
-            """, (f"dependency_failed:{failed_task_id}", dep["task_run_id"]))
+                """,
+                (f"dependency_failed:{failed_task_id}", dep["task_run_id"]),
+            )
 
             queue.append(dep["task_id"])
 
-    # Raise escalation — UNIQUE constraint deduplicates concurrent calls
     esc_repo.upsert_open(
         run_id=run_id,
         task_run_id=failed_task_run_id,
@@ -70,7 +93,7 @@ def propagate_failure(
 
 
 def _handle_failure(
-    conn: psycopg.Connection,
+    conn: sqlite3.Connection,
     config: Config,
     task: dict,
     error: str,
@@ -78,9 +101,7 @@ def _handle_failure(
     run_id: str,
     error_type: str,
 ) -> None:
-    """Mark task FAILED_RETRYABLE (with retry) or FAILED_FINAL (propagate).
-    Called inside its own transaction (worker.py opens/commits).
-    """
+    """Mark task FAILED_RETRYABLE (with retry) or FAILED_FINAL (propagate)."""
     repo = TaskRunRepo(conn)
     event_repo = EventRepo(conn)
 

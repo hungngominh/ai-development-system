@@ -41,7 +41,7 @@ def run_phase_v_pipeline(
     report = run_verification(run_id, spec_artifact_id, config, conn, llm)
 
     conn.execute(
-        "UPDATE runs SET status = %s, last_activity_at = now() WHERE run_id = %s",
+        "UPDATE runs SET status = ?, last_activity_at = CURRENT_TIMESTAMP WHERE run_id = ?",
         ("PAUSED_AT_GATE_3", run_id),
     )
     EventRepo(conn).insert(run_id, "VERIFICATION_COMPLETED", "system")
@@ -69,7 +69,7 @@ def run_verification(
     count_row = conn.execute(
         """
         SELECT COUNT(*) AS count FROM artifacts
-        WHERE run_id = %s AND artifact_type = 'VERIFICATION_REPORT'
+        WHERE run_id = ? AND artifact_type = 'VERIFICATION_REPORT'
           AND status IN ('ACTIVE', 'SUPERSEDED')
         """,
         (run_id,),
@@ -81,7 +81,7 @@ def run_verification(
 
     # --- Load acceptance criteria from SPEC_BUNDLE artifact ---
     spec_row = conn.execute(
-        "SELECT content_ref FROM artifacts WHERE artifact_id = %s",
+        "SELECT content_ref FROM artifacts WHERE artifact_id = ?",
         (spec_artifact_id,),
     ).fetchone()
     if spec_row is None:
@@ -148,7 +148,7 @@ def _parse_acceptance_criteria(spec_bundle_path: str) -> list[tuple[str, str]]:
     criteria_file = os.path.join(spec_bundle_path, "acceptance-criteria.md")
     if not os.path.exists(criteria_file):
         logger.warning(
-            "acceptance-criteria.md not found in spec bundle: %s — "
+            "acceptance-criteria.md not found in spec bundle: ? — "
             "verification will produce vacuous ALL_PASS with zero criteria",
             spec_bundle_path,
         )
