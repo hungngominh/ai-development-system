@@ -117,6 +117,137 @@ def gate_review_debate(
         raise typer.Exit(2)
 
 
+@command(
+    noun="gate",
+    verb="review-spec",
+    help="Spec review: show spec sections and trace map link",
+)
+def gate_review_spec(
+    run_id: str = typer.Option(..., "--run-id", help="Run UUID with SPEC_BUNDLE artifact"),
+    cmd: str = typer.Option(
+        "render", "--cmd",
+        help="Sub-command: render | trace-map",
+    ),
+    json_output: bool = typer.Option(False, "--json"),
+) -> None:
+    """Show spec bundle contents and trace map link for human review.
+
+    Sub-commands:
+      render     — list all spec section paths + trace map path
+      trace-map  — show trace map summary (coverage stats) + path
+    """
+    import json as _json
+    from pathlib import Path
+
+    from ai_dev_system.config import Config
+    from ai_dev_system.db.connection import get_connection
+    from ai_dev_system.db.helpers import load_json
+    from ai_dev_system.db.migrator import apply_schema
+    from ai_dev_system.spec.generators.base import SECTION_FILES
+
+    out = OutputRenderer(mode="json" if json_output else "human")
+
+    try:
+        config = Config.from_env()
+        conn = get_connection(config.database_url)
+        apply_schema(conn)
+
+        run_row = conn.execute(
+            "SELECT title, current_artifacts FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if not run_row:
+            out.write_error(code=1, message=f"Run not found: {run_id!r}")
+            raise typer.Exit(1)
+
+        current_artifacts = load_json(run_row["current_artifacts"], default={}) or {}
+        spec_bundle_id = current_artifacts.get("spec_bundle_id")
+        if not spec_bundle_id:
+            out.write_error(code=1, message="No SPEC_BUNDLE artifact for this run yet")
+            raise typer.Exit(1)
+
+        art_row = conn.execute(
+            "SELECT content_ref FROM artifacts WHERE artifact_id = ?",
+            (spec_bundle_id,),
+        ).fetchone()
+        if not art_row:
+            out.write_error(code=1, message=f"SPEC_BUNDLE artifact {spec_bundle_id!r} not found in DB")
+            raise typer.Exit(1)
+
+        spec_dir = Path(art_row["content_ref"])
+        trace_map_path = spec_dir / "trace_map.json"
+
+        if cmd == "render":
+            sections = {
+                name: str(spec_dir / filename)
+                for name, filename in SECTION_FILES.items()
+                if (spec_dir / filename).exists()
+            }
+            payload = {
+                "status": "ok",
+                "run_id": run_id,
+                "project_name": run_row["title"] or run_id,
+                "spec_dir": str(spec_dir),
+                "sections": sections,
+                "trace_map_path": str(trace_map_path) if trace_map_path.exists() else None,
+            }
+            if not json_output:
+                print(f"\n=== Spec Review: {run_row['title'] or run_id} ===\n")
+                print(f"Spec directory: {spec_dir}\n")
+                print("Sections:")
+                for name, path in sections.items():
+                    print(f"  {name:24s}  {path}")
+                if trace_map_path.exists():
+                    print(f"\nTrace map:      {trace_map_path}")
+                else:
+                    print("\nTrace map:      (not generated — run with require_trace_map=True)")
+                print()
+            out.write(payload)
+
+        elif cmd == "trace-map":
+            if not trace_map_path.exists():
+                out.write({
+                    "status": "ok",
+                    "trace_map_path": None,
+                    "message": "No trace map. Re-run spec generation with require_trace_map=True.",
+                })
+                raise typer.Exit(0)
+
+            trace_data = _json.loads(trace_map_path.read_text(encoding="utf-8"))
+            summary = trace_data.get("summary", {})
+            if not json_output:
+                print(f"\n=== Trace Map: {run_row['title'] or run_id} ===\n")
+                print(f"File: {trace_map_path}\n")
+                print(f"Total markers:  {summary.get('total_markers', 0)}")
+                ref_fields = summary.get("referenced_brief_fields", [])
+                unref_fields = summary.get("unreferenced_brief_fields", [])
+                total_fields = len(ref_fields) + len(unref_fields)
+                coverage = len(ref_fields) / total_fields if total_fields else 0
+                print(f"Field coverage: {len(ref_fields)}/{total_fields} ({coverage:.0%})")
+                if unref_fields:
+                    print(f"Unreferenced fields: {', '.join(unref_fields)}")
+                ref_decisions = summary.get("referenced_decisions", [])
+                if ref_decisions:
+                    print(f"Decisions cited: {', '.join(ref_decisions)}")
+                print()
+            out.write({
+                "status": "ok",
+                "trace_map_path": str(trace_map_path),
+                "summary": summary,
+            })
+
+        else:
+            out.write_error(code=1, message=f"Unknown sub-command: {cmd!r}")
+            raise typer.Exit(1)
+
+        conn.close()
+        raise typer.Exit(0)
+    except typer.Exit:
+        raise
+    except Exception as exc:
+        out.write_error(code=2, message=f"gate review-spec failed: {exc}")
+        raise typer.Exit(2)
+
+
 @command(noun="gate", verb="review-graph", help="Gate 2: review generated task graph")
 def gate_review_graph(
     run_id: str = typer.Option(..., "--run-id", help="Run UUID at GRAPH_GENERATED status"),

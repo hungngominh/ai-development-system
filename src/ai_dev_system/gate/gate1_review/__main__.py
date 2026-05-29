@@ -142,6 +142,42 @@ def cmd_finalize(args) -> None:
     scope_affected = session.scope_affected
 
     aa_id, dl_id = finalize_gate1(args.run_id, decisions, config.storage_root, conn)
+
+    # G8: re-trigger question materializer for edited scope fields
+    g8_result = None
+    if scope_affected and session.brief_edits:
+        from ai_dev_system.gate.gate1_review.g8_retrigger import run_g8_retrigger
+        brief_edits_raw = [
+            {"field_name": e.field_name, "operation": e.operation, "value": e.value}
+            for e in session.brief_edits
+        ]
+        run_row = conn.execute(
+            "SELECT current_artifacts FROM runs WHERE run_id = ?", (args.run_id,)
+        ).fetchone()
+        from ai_dev_system.db.helpers import load_json
+        current_artifacts = load_json(run_row["current_artifacts"], default={}) or {}
+        brief_id = current_artifacts.get("intake_brief_id")
+        brief: dict = {}
+        if brief_id:
+            from ai_dev_system.gate.gate1_review.loader import _load_artifact_json
+            try:
+                brief = _load_artifact_json(conn, brief_id, "brief.json")
+            except Exception:
+                pass
+        try:
+            import os as _os
+            from ai_dev_system.debate.llm import StubDebateLLMClient
+            if _os.environ.get("AI_DEV_STUB_LLM") == "1":
+                llm_client = StubDebateLLMClient()
+            else:
+                from ai_dev_system.llm_factory import make_real_llm_client
+                llm_client = make_real_llm_client()
+            g8_result = run_g8_retrigger(args.run_id, brief_edits_raw, brief, conn, llm_client)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("G8 retrigger failed: %s", exc)
+            g8_result = {"noop": True, "error": str(exc)}
+
     # Clear session state after successful finalize
     clear_state(args.run_id, conn)
     print(json.dumps({
@@ -149,6 +185,7 @@ def cmd_finalize(args) -> None:
         "aa_id": aa_id,
         "dl_id": dl_id,
         "scope_affected": scope_affected,  # G8: skill shows warning if True
+        "g8": g8_result,
     }))
 
 
