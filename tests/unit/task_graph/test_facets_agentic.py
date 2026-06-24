@@ -91,3 +91,11 @@ def test_build_command_includes_model_when_given(tmp_path):
     cmd = _build_command("claude", "PROMPT", model="opus")
     assert "--model" in cmd and "opus" in cmd
     assert cmd[0] == "claude" and "-p" in cmd
+
+
+def test_extract_text_messages_fallback(tmp_path):
+    inner = _ok_inner()
+    wrapper = json.dumps({"messages": [{"role": "assistant", "content": inner}]})
+    run = _FakeRun(_cp(stdout=wrapper))
+    facets = generate_task_facets_agentic(_task(), str(tmp_path), run=run)
+    assert all(facets[k]["status"] == "filled" for k in FACET_KEYS)

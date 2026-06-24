@@ -352,6 +352,8 @@ def _task_spec_page(spec_id: str) -> bytes:
 
 
 def _spawn_task_spec_worker(idea: str, repo: str) -> str:
+    idea = (idea or "")[:8000]
+    repo = (repo or "")[:1000]
     spec_id = uuid.uuid4().hex[:12]
     out_dir = Path(_config().storage_root) / "task_specs"
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -116,3 +116,26 @@ def test_task_spec_page_unknown_id(tmp_path, monkeypatch):
     page = webui._task_spec_page("nope")
     assert isinstance(page, (bytes, bytearray))  # no crash on missing file
     assert "Không tìm thấy" in page.decode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: _spawn_task_spec_worker caps idea/repo before Popen
+# ---------------------------------------------------------------------------
+
+def test_spawn_caps_idea_length(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "_config", lambda: types.SimpleNamespace(storage_root=str(tmp_path)))
+    recorded = {}
+
+    def _fake_popen(cmd, **kw):
+        recorded["cmd"] = cmd
+
+        class _P:
+            pass
+
+        return _P()
+
+    monkeypatch.setattr(webui.subprocess, "Popen", _fake_popen)
+    spec_id = webui._spawn_task_spec_worker("x" * 50000, "C:/repo")
+    assert spec_id and (tmp_path / "task_specs" / f"{spec_id}.json").exists()
+    idea_arg = recorded["cmd"][recorded["cmd"].index("--idea") + 1]
+    assert len(idea_arg) <= 8000
