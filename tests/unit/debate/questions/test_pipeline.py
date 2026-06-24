@@ -133,6 +133,7 @@ def test_happy_path_runs_all_stages_in_order(monkeypatch, stub_llm):
 
     # ordering + arg propagation
     assert inv.calls[0]["args"] == ({"brief": "v2"}, stub_llm)
+    assert inv.calls[0]["kwargs"] == {"profile": None}
     assert mat.calls[0]["args"] == (decisions, "digest", stub_llm)
     assert mat.calls[0]["kwargs"] == {"mode": "fresh", "profile": None}
     assert crit.calls[0]["args"] == (draft, "digest", stub_llm)

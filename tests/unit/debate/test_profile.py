@@ -79,3 +79,8 @@ def test_vertical_relevance_zero_when_profile_empty():
 
 def test_profile_prompt_block_empty_is_blank():
     assert profile_prompt_block(ProjectProfile.empty()) == ""
+
+
+def test_profile_prompt_block_none_is_blank():
+    from ai_dev_system.debate.profile import profile_prompt_block
+    assert profile_prompt_block(None) == ""
