@@ -12,9 +12,9 @@ Rules (M4.1):
 3. For each decision record `brief_field_refs` — every brief field id
    you consulted to surface this decision. Required for Gate 1
    re-trigger support (locked decision #36).
-4. `domain_hints` must be from the canonical 12-domain registry:
+4. `domain_hints` must be from the canonical domain registry:
    backend, frontend, mobile, data, ml, security, infra, devops, qa,
-   product, design, legal.
+   product, design, legal, psychology, growth, research.
 5. `blocks_what` must reference items in `brief.scope_in` — what
    feature/component cannot ship without this decision.
 

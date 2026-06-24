@@ -1,7 +1,8 @@
-"""Canonical 12-domain registry for Phase 1 v2.
+"""Canonical 15-domain registry for Phase 1 v2.
 
-Locked by Decision #23 (cap = 12) and Appendix A of
+Originally locked by Decision #23 (cap = 12) and Appendix A of
 docs/superpowers/specs/2026-05-23-phase1-v2-locked-decisions.md.
+Extended from 12 by the vertical-personalization work (psychology/growth/research).
 
 Both M4 Question Gen (Decision.domain_hints) and M5 Debate (agent loader,
 diversity guardrail) import from this module. Do not duplicate the list
@@ -23,6 +24,9 @@ DOMAINS: Final[tuple[str, ...]] = (
     "product",
     "design",
     "legal",
+    "psychology",
+    "growth",
+    "research",
 )
 
 DOMAIN_ALIASES: Final[dict[str, str]] = {
@@ -82,6 +86,21 @@ DOMAIN_ALIASES: Final[dict[str, str]] = {
     "pdpa": "legal",
     "license": "legal",
     "compliance-legal": "legal",
+    "behavior": "psychology",
+    "behavioral": "psychology",
+    "emotion": "psychology",
+    "emotional": "psychology",
+    "habit": "psychology",
+    "retention": "growth",
+    "churn": "growth",
+    "monetization": "growth",
+    "engagement": "growth",
+    "acquisition": "growth",
+    "user-research": "research",
+    "user_research": "research",
+    "market": "research",
+    "market-research": "research",
+    "discovery": "research",
 }
 
 DEFAULT_DOMAIN: Final[str] = "backend"

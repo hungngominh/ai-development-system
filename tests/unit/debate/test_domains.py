@@ -37,8 +37,20 @@ def test_resolve_strips_whitespace():
     assert recognized is True
 
 
-def test_domains_count_is_twelve():
-    assert len(DOMAINS) == 12
+def test_domain_count_is_fifteen():
+    assert len(DOMAINS) == 15
+
+
+def test_product_behavioral_domains_present():
+    for d in ("psychology", "growth", "research"):
+        assert d in DOMAINS
+
+
+def test_new_aliases_resolve():
+    from ai_dev_system.debate.domains import resolve_domain
+    assert resolve_domain("behavior") == ("psychology", True)
+    assert resolve_domain("retention") == ("growth", True)
+    assert resolve_domain("user-research") == ("research", True)
 
 
 def test_aliases_resolve_to_canonical_ids_only():
