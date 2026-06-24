@@ -17,6 +17,7 @@ import shlex
 import sys
 from typing import Callable, Literal
 
+from ai_dev_system.task_graph.facets import FACET_KEYS
 from ai_dev_system.task_graph.validator import validate_graph
 
 _EDITABLE_FIELDS = {
@@ -32,6 +33,9 @@ _HELP = (
     "  remove <ID>               delete a task (and scrub it from other deps)\n"
     "  dep add <ID> <DEP>        add a dependency\n"
     "  dep remove <ID> <DEP>     remove a dependency\n"
+    "  facet show <ID>           show a task's 8 facets\n"
+    "  facet set <ID> <key> <v>  fill/replace a facet (status→filled)\n"
+    "  facet na <ID> <key> <why> mark a facet not-applicable\n"
     "  approve                   validate + accept the graph\n"
     "  reject                    abort Phase B\n"
     "  help"
@@ -93,6 +97,12 @@ class TerminalGate2IO:
                 for e in errors:
                     self._emit(f"  - {e}")
                 return None
+            pending = self._needs_human_facets(tasks)
+            if pending:
+                self._emit(f"[gate2] WARNING: {len(pending)} facet(s) still needs_human:")
+                for tid, key in pending:
+                    self._emit(f"  - {tid}.{key}")
+                self._emit("Approving anyway (facets are advisory).")
             return ("approve", edited)
         if verb in ("reject", "abort", "quit", "q"):
             return ("reject", edited)
@@ -113,6 +123,11 @@ class TerminalGate2IO:
             return None
         if verb == "dep" and len(parts) >= 4:
             self._dep(tasks, parts[1].lower(), parts[2], parts[3])
+            return None
+        if verb == "facet" and len(parts) >= 3:
+            self._facet(tasks, parts[1].lower(), parts[2],
+                        parts[3] if len(parts) >= 4 else "",
+                        " ".join(parts[4:]) if len(parts) >= 5 else "")
             return None
 
         self._emit(f"Unknown/invalid command: {cmd!r}. Type 'help'.")
@@ -165,6 +180,38 @@ class TerminalGate2IO:
         else:
             self._emit("Usage: dep add|remove <ID> <DEP>")
 
+    def _needs_human_facets(self, tasks):
+        out = []
+        for t in tasks:
+            for key, f in (t.get("facets") or {}).items():
+                if isinstance(f, dict) and f.get("status") == "needs_human":
+                    out.append((t["id"], key))
+        return out
+
+    def _facet(self, tasks, op, tid, key, value):
+        task = self._find(tasks, tid)
+        if task is None:
+            self._emit(f"No such task: {tid}")
+            return
+        facets = task.setdefault("facets", {})
+        if op == "show":
+            self._emit(f"--- {tid} facets ---")
+            for k in FACET_KEYS:
+                f = facets.get(k) or {"status": "needs_human", "content": "", "reason": ""}
+                self._emit(f"  {k}: [{f.get('status')}] {f.get('content') or f.get('reason')}")
+            return
+        if key not in FACET_KEYS:
+            self._emit(f"Unknown facet {key!r}. Valid: {', '.join(FACET_KEYS)}")
+            return
+        if op == "set":
+            facets[key] = {"status": "filled", "content": value, "reason": ""}
+            self._emit(f"{tid}.{key} = filled: {value!r}")
+        elif op == "na":
+            facets[key] = {"status": "na", "content": "", "reason": value}
+            self._emit(f"{tid}.{key} = na ({value!r})")
+        else:
+            self._emit("Usage: facet show|set|na <ID> [<key> <value>]")
+
     # --- rendering ---
 
     def _render(self, tasks: list[dict]) -> None:
@@ -179,6 +226,12 @@ class TerminalGate2IO:
             objective = t.get("objective") or t.get("title") or ""
             if objective:
                 self._emit(f"      {objective}")
+            facets = t.get("facets")
+            if facets:
+                filled = sum(1 for f in facets.values() if isinstance(f, dict) and f.get("status") == "filled")
+                nh = sum(1 for f in facets.values() if isinstance(f, dict) and f.get("status") == "needs_human")
+                na = sum(1 for f in facets.values() if isinstance(f, dict) and f.get("status") == "na")
+                self._emit(f"      facets: {filled} filled / {nh} needs-human / {na} N/A")
         self._emit("Type 'help' for commands; 'approve' or 'reject' to finish.")
 
     def _show(self, tasks, tid):
