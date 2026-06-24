@@ -56,7 +56,7 @@ def _lens_block(profile) -> str:
         "retention/emotion as relevant). Tag such questions with domain one of "
         "psychology, growth, research, product, design. For them, set agent_a/agent_b "
         "from these personas where fitting: BehavioralPsychologist, "
-        "RetentionGrowthStrategist, UXResearcher, MarketAnalyst, ProductManager, UXDesigner."
+        "RetentionGrowthStrategist, UXResearcher, MarketAnalyst, ProductManager."
     )
 
 
