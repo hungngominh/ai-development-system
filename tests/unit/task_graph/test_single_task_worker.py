@@ -20,3 +20,15 @@ def test_run_worker_writes_error_on_failure(tmp_path, monkeypatch):
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["status"] == "error"
     assert "kaboom" in data["error"]
+
+
+def test_run_worker_writes_error_when_make_client_fails(tmp_path, monkeypatch):
+    def _boom():
+        raise RuntimeError("no LLM config")
+    monkeypatch.setattr(w, "make_real_llm_client", _boom)
+    # no repo → worker calls make_real_llm_client(), which raises
+    path = w.run_worker("idX", "some idea", None, storage_root=str(tmp_path))
+    import json
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["status"] == "error"
+    assert "no LLM config" in data["error"]
