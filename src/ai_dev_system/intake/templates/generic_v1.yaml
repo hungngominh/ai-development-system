@@ -1,0 +1,243 @@
+version: 1
+id: generic_v1
+title: "Generic project intake (v1)"
+
+# 8 critical fields per locked decision (intake spec, §"Goals"):
+#   problem_statement, scope_in, scope_out, success_metric,
+#   primary_user, deployment_target, compliance, current_workaround
+#
+# Field types:
+#   text_short   — single line
+#   text_long    — multi-line free text
+#   list_str     — comma-separated or multi-line list
+#   enum         — choice from `options`
+#   number       — integer
+#   text_optional — same as text_short but blank-by-default
+
+sections:
+  - id: 1_context
+    name: "Vấn đề & bối cảnh"
+    fields:
+      - id: problem_statement
+        prompt: "Vấn đề cụ thể bạn đang giải quyết là gì? (pain point, không phải feature)"
+        type: text_long
+        critical: true
+        ai_can_suggest: false
+        examples_hint: "vd: 'Nhân viên không tìm được tài liệu cũ, mỗi lần hỏi lại Slack'"
+
+      - id: who_feels_pain
+        prompt: "Ai đang chịu pain này? Role gì, bao nhiêu người?"
+        type: text_short
+        critical: false
+        ai_can_suggest: false
+
+      - id: current_workaround
+        prompt: "Hiện họ đang xử lý vấn đề này như thế nào (workaround)?"
+        type: text_long
+        critical: true
+        ai_can_suggest: false
+
+      - id: cost_of_doing_nothing
+        prompt: "Nếu không làm gì thì sao? (mất gì, chi phí ngầm)"
+        type: text_long
+        critical: false
+        ai_can_suggest: false
+
+  - id: 2_scope
+    name: "Phạm vi"
+    fields:
+      - id: scope_in
+        prompt: "Trong scope: liệt kê 3-7 việc dự án PHẢI làm"
+        type: list_str
+        critical: true
+        ai_can_suggest: false
+
+      - id: scope_out
+        prompt: "Out of scope: liệt kê việc rõ ràng KHÔNG làm (chống scope creep)"
+        type: list_str
+        critical: true
+        ai_can_suggest: false
+
+      - id: success_metric
+        prompt: "Tiêu chí thành công đo được? (vd: '80% nhân viên dùng tuần ≥1 lần sau 1 tháng')"
+        type: text_long
+        critical: true
+        ai_can_suggest: false
+
+      - id: done_definition
+        prompt: "Định nghĩa 'xong'? (deliverable cụ thể)"
+        type: text_long
+        critical: false
+        ai_can_suggest: true
+
+      - id: deadline
+        prompt: "Deadline mong muốn? (vd: '6 tuần', '2026-08-01')"
+        type: text_short
+        critical: false
+        ai_can_suggest: false
+
+  - id: 3_users
+    name: "User & tải"
+    fields:
+      - id: primary_user
+        prompt: "Ai là user chính? (role + scenario điển hình 1 câu)"
+        type: text_long
+        critical: true
+        ai_can_suggest: false
+
+      - id: user_count_now
+        prompt: "Số user hiện tại?"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+      - id: user_count_year1
+        prompt: "Số user dự kiến năm 1?"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+      - id: user_languages
+        prompt: "Ngôn ngữ UI cần hỗ trợ?"
+        type: list_str
+        critical: false
+        ai_can_suggest: true
+
+      - id: accessibility
+        prompt: "Yêu cầu accessibility (WCAG)?"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+  - id: 4_tech_constraints
+    name: "Ràng buộc kỹ thuật"
+    fields:
+      - id: must_use_stack
+        prompt: "Stack BẮT BUỘC phải dùng? (ngôn ngữ, framework, vendor)"
+        type: list_str
+        critical: false
+        ai_can_suggest: false
+
+      - id: must_not_use
+        prompt: "Stack/vendor CẤM dùng?"
+        type: list_str
+        critical: false
+        ai_can_suggest: false
+
+      - id: compliance
+        prompt: "Compliance yêu cầu? (GDPR, HIPAA, SOC2, none, ...)"
+        type: list_str
+        critical: true
+        ai_can_suggest: false
+
+      - id: data_residency
+        prompt: "Data residency? (vd: VN-only, EU-only, anywhere)"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+      - id: budget_infra
+        prompt: "Budget infra/tháng (USD)?"
+        type: text_short
+        critical: false
+        ai_can_suggest: false
+
+      - id: team_skills
+        prompt: "Skill stack hiện tại của team?"
+        type: list_str
+        critical: false
+        ai_can_suggest: false
+
+  - id: 5_environment
+    name: "Môi trường & tích hợp"
+    fields:
+      - id: greenfield_or_brownfield
+        prompt: "Dự án mới (greenfield) hay sửa đổi hệ thống cũ (brownfield)?"
+        type: enum
+        options: ["greenfield", "brownfield", "hybrid"]
+        critical: false
+        ai_can_suggest: true
+
+      - id: existing_auth
+        prompt: "Hệ thống auth hiện có? (vd: SSO Azure AD, none, ...)"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+      - id: data_sources
+        prompt: "Nguồn data hiện có? (DB, API, file, ...)"
+        type: list_str
+        critical: false
+        ai_can_suggest: true
+
+      - id: must_integrate_with
+        prompt: "Phải tích hợp với hệ thống nào?"
+        type: list_str
+        critical: false
+        ai_can_suggest: true
+
+      - id: deployment_target
+        prompt: "Deploy ở đâu? (AWS, GCP, on-prem, ...)"
+        type: text_short
+        critical: true
+        ai_can_suggest: true
+
+  - id: 6_nfr
+    name: "Non-functional"
+    fields:
+      - id: nfr_priority
+        prompt: "Ưu tiên NFR theo thứ tự? (vd: 'security > availability > latency > cost')"
+        type: list_str
+        critical: false
+        ai_can_suggest: true
+
+      - id: expected_rps
+        prompt: "RPS dự kiến lúc peak?"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+      - id: expected_data_volume
+        prompt: "Data volume dự kiến năm 1?"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+      - id: availability_target
+        prompt: "Availability target? (vd: 99.9%, 99.99%)"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+      - id: latency_target
+        prompt: "Latency target user-perceived? (vd: 'p95 < 200ms')"
+        type: text_short
+        critical: false
+        ai_can_suggest: true
+
+  - id: 7_context_meta
+    name: "Bối cảnh thêm"
+    fields:
+      - id: known_unknowns
+        prompt: "Bạn đang không chắc về điểm gì nhất?"
+        type: text_long
+        critical: false
+        ai_can_suggest: false
+
+      - id: failed_attempts
+        prompt: "Đã thử cách nào trước mà không work?"
+        type: text_long
+        critical: false
+        ai_can_suggest: false
+
+      - id: inspiration_refs
+        prompt: "Tham khảo sản phẩm/repo nào?"
+        type: list_str
+        critical: false
+        ai_can_suggest: false
+
+      - id: political_constraints
+        prompt: "Ràng buộc chính trị/tổ chức cần lưu ý? (stakeholder phải hài lòng, vendor lock-in, ...)"
+        type: text_long
+        critical: false
+        ai_can_suggest: false

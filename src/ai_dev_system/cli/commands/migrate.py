@@ -21,7 +21,7 @@ from ai_dev_system.cli.core.registry import command
     noun="migrate",
     verb="classify-runs",
     help="Classify all runs (v1_continue / v2_new / v2_resume / abort), write migration_audit",
-    noun_help="Migration utilities (Phase 1 v1 → v2)",
+    noun_help="Migration utilities (Phase 1 v1 -> v2)",
 )
 def migrate_classify_runs(
     json_output: bool = typer.Option(False, "--json", help="Emit summary as JSON to stdout"),
@@ -90,10 +90,14 @@ def migrate_status(
     try:
         apply_schema(conn)
 
-        version_row = conn.execute(
-            "SELECT MAX(version) AS v FROM schema_migrations"
-        ).fetchone()
-        schema_version = version_row["v"] if version_row else 0
+        applied = conn.execute(
+            "SELECT name FROM schema_migrations ORDER BY name"
+        ).fetchall()
+        # Extract max vN number from migration filenames (e.g. "v5-phase1-v2.sql" → 5)
+        import re as _re
+        versions = [int(m.group(1)) for row in applied
+                    if (m := _re.match(r"v(\d+)", row["name"]))]
+        schema_version = max(versions) if versions else 0
 
         counts = {}
         for row in conn.execute(

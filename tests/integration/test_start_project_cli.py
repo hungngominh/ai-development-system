@@ -107,6 +107,11 @@ def test_llm_error_exits_1_stdout_empty(file_config):
     """Khi LLM_STUB=0 và không có real API key → exit 1, stdout trống."""
     env = os.environ.copy()
     env["AI_DEV_STUB_LLM"] = "0"   # disable stub; dotenv won't override (override=False)
+    # Pin a key-requiring provider so the error is deterministic regardless of
+    # what LLM_PROVIDER the ambient .env sets. (A configured claude_code
+    # provider needs no key, so clearing the keys alone would NOT fail — it
+    # would make real `claude -p` calls and hang.)
+    env["LLM_PROVIDER"] = "anthropic"
     env["ANTHROPIC_API_KEY"] = ""   # no valid key → LLM init fails
     env["OPENAI_API_KEY"] = ""
     env["DATABASE_URL"] = file_config.database_url

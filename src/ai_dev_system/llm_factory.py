@@ -9,6 +9,9 @@ Satisfies both protocols:
 import json
 import os
 import re
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Literal
 
@@ -41,9 +44,9 @@ Respond ONLY with a JSON object in this exact format:
 
 @dataclass
 class LLMConfig:
-    provider: str  # "anthropic", "openai", or "azure"
-    model: str     # e.g. "claude-opus-4-5" / "gpt-4o" / "my-deployment-name"
-    api_key: str
+    provider: str  # "anthropic", "openai", "azure", or "claude_code"
+    model: str     # e.g. "claude-opus-4-5" / "gpt-4o" / "sonnet"
+    api_key: str = ""
     azure_endpoint: str | None = None   # required when provider="azure"
     api_version: str | None = None      # required when provider="azure"
 
@@ -52,12 +55,17 @@ class LLMConfig:
         # --- provider ---
         provider_raw = os.environ.get("LLM_PROVIDER")
         if provider_raw is None:
-            raise ValueError("LLM_PROVIDER is required (set to 'anthropic', 'openai', or 'azure')")
+            raise ValueError("LLM_PROVIDER is required (set to 'anthropic', 'openai', 'azure', or 'claude_code')")
         provider = provider_raw.strip()
-        if provider not in ("anthropic", "openai", "azure"):
+        if provider not in ("anthropic", "openai", "azure", "claude_code"):
             raise ValueError(
-                f"LLM_PROVIDER must be 'anthropic', 'openai', or 'azure', got: {provider}"
+                f"LLM_PROVIDER must be 'anthropic', 'openai', 'azure', or 'claude_code', got: {provider}"
             )
+
+        # claude_code: routes through the `claude` CLI — no API key needed
+        if provider == "claude_code":
+            model = os.environ.get("LLM_MODEL", "sonnet")
+            return cls(provider=provider, model=model)
 
         # --- model ---
         model = os.environ.get("LLM_MODEL")
@@ -105,6 +113,153 @@ class LLMConfig:
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
+
+class ClaudeCodeLLMClient:
+    """LLM client that routes calls through the `claude` CLI subprocess.
+
+    Uses the authenticated Claude Code session (claude.ai Max subscription)
+    instead of a direct API key. No ANTHROPIC_API_KEY required.
+    """
+
+    def __init__(self, model: str = "sonnet", timeout: int = 120) -> None:
+        self._model = model
+        self._timeout = timeout
+
+    @staticmethod
+    def _resolve_claude_cmd() -> str:
+        """Resolve the claude CLI executable.
+
+        On Windows, prefer the native ``claude.exe`` over the ``claude.cmd``
+        batch shim. The shim re-expands every argument through cmd.exe
+        (``"...claude.exe" %*``), which interprets shell metacharacters
+        (``<``, ``>``, ``|``, ``&`` …) embedded in a prompt — exactly what
+        debate/spec/judge system prompts contain (e.g. ``"<AgentKey>"`` and
+        ``"REQUIRED"|"STRATEGIC"``). cmd.exe then tries to redirect/pipe and
+        dies with "The system cannot find the file specified", before claude
+        even starts. Invoking the ``.exe`` directly (shell=False) passes the
+        argv verbatim and avoids the re-parse entirely.
+        """
+        if sys.platform == "win32":
+            # 1. Native exe already on PATH (cheapest).
+            exe = shutil.which("claude.exe")
+            if exe:
+                return exe
+            # 2. Derive the bundled exe from the npm shim location.
+            shim = shutil.which("claude.cmd") or shutil.which("claude")
+            candidates = []
+            if shim:
+                shim_dir = os.path.dirname(shim)
+                candidates.append(
+                    os.path.join(
+                        shim_dir, "node_modules", "@anthropic-ai",
+                        "claude-code", "bin", "claude.exe",
+                    )
+                )
+            candidates.append(
+                os.path.expandvars(
+                    r"%APPDATA%\npm\node_modules\@anthropic-ai"
+                    r"\claude-code\bin\claude.exe"
+                )
+            )
+            for cand in candidates:
+                if os.path.exists(cand):
+                    return cand
+            # 3. Last resort: the batch shim. Works for simple prompts, but
+            #    metacharacter-bearing prompts may fail (see docstring).
+            if shim:
+                return shim
+            npm_cmd = os.path.expandvars(r"%APPDATA%\npm\claude.cmd")
+            if os.path.exists(npm_cmd):
+                return npm_cmd
+            raise RuntimeError(
+                "claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+            )
+        found = shutil.which("claude")
+        if not found:
+            raise RuntimeError(
+                "claude CLI not found. Install with: npm install -g @anthropic-ai/claude-code"
+            )
+        return found
+
+    @staticmethod
+    def _strip_outer_code_fence(text: str) -> str:
+        """Strip a Markdown code fence wrapping the WHOLE response.
+
+        `claude -p` (Claude Code print mode) wraps a "return ONLY JSON"
+        answer in ```json … ``` fences, unlike the raw Messages API.
+        Downstream parsers (generate_questions, task-graph generator) call
+        json.loads on the raw string, so normalize here. Only an outer
+        fence spanning the entire (stripped) response is removed — inline
+        or partial code blocks embedded in prose are left untouched.
+        """
+        s = text.strip()
+        if not s.startswith("```"):
+            return s
+        nl = s.find("\n")
+        if nl == -1:
+            return s
+        body = s[nl + 1:].rstrip()
+        if body.endswith("```"):
+            return body[: body.rfind("```")].strip()
+        return s
+
+    def _call(self, system: str, user: str) -> str:
+        claude = self._resolve_claude_cmd()
+        cmd = [claude, "-p", "--model", self._model, "--system-prompt", system, user]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            # Force UTF-8: claude -p emits UTF-8 (em-dashes, smart quotes,
+            # non-Latin text, emoji), but text=True otherwise decodes with
+            # the locale codec (cp1252 on Windows), which dies on bytes it
+            # can't map (e.g. 0x81) and leaves stdout=None. errors="replace"
+            # keeps a stray undecodable byte from sinking the whole call.
+            encoding="utf-8",
+            errors="replace",
+            timeout=self._timeout,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"claude CLI exited {result.returncode}: {result.stderr.strip()}"
+            )
+        return self._strip_outer_code_fence(result.stdout)
+
+    def complete(self, system: str, user: str) -> str:
+        return self._call(system, user)
+
+    def judge_criterion(
+        self,
+        criterion_id: str,
+        criterion_text: str,
+        evidence: list[str],
+    ) -> tuple[Literal["PASS", "FAIL"], float, str]:
+        evidence_text = "\n".join(f"{i+1}. {e}" for i, e in enumerate(evidence))
+        user_prompt = (
+            f"Criterion ID: {criterion_id}\n"
+            f"Criterion: {criterion_text}\n\n"
+            f"Evidence ({len(evidence)} items):\n{evidence_text}\n\n"
+            f"Judge this criterion."
+        )
+        raw = self._call(_JUDGE_SYSTEM_PROMPT, user_prompt)
+        cleaned = re.sub(r"```(?:json)?\s*(.*?)\s*```", r"\1", raw, flags=re.DOTALL)
+        try:
+            parsed = json.loads(cleaned)
+        except json.JSONDecodeError:
+            raise ValueError(
+                f"LLM returned non-JSON for criterion {criterion_id}: {raw[:200]}"
+            )
+        verdict = parsed.get("verdict")
+        if verdict not in ("PASS", "FAIL"):
+            raise ValueError(f"Invalid verdict '{verdict}' for criterion {criterion_id}")
+        if "confidence" not in parsed or "reasoning" not in parsed:
+            raise ValueError(
+                f"LLM response missing required fields for {criterion_id}. "
+                f"Got keys: {list(parsed.keys())}"
+            )
+        confidence = max(0.0, min(1.0, float(parsed["confidence"])))
+        return (verdict, confidence, str(parsed["reasoning"]))
+
 
 class RealLLMClient:
     def __init__(self, config: LLMConfig) -> None:
@@ -195,9 +350,12 @@ class RealLLMClient:
 # Factory
 # ---------------------------------------------------------------------------
 
-def make_real_llm_client() -> RealLLMClient:
+def make_real_llm_client() -> "RealLLMClient | ClaudeCodeLLMClient":
     try:
         config = LLMConfig.from_env()
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
+    if config.provider == "claude_code":
+        timeout = int(os.environ.get("CLAUDE_CODE_LLM_TIMEOUT", "120"))
+        return ClaudeCodeLLMClient(model=config.model, timeout=timeout)
     return RealLLMClient(config)

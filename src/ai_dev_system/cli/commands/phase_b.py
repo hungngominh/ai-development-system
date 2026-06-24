@@ -21,6 +21,10 @@ from ai_dev_system.cli.core.registry import command
 )
 def phase_b_run(
     run_id: str = typer.Option(..., "--run-id", help="Run UUID with an approved task graph"),
+    auto_approve: bool = typer.Option(
+        False, "--auto-approve",
+        help="Skip interactive Gate 2 review and approve the task graph as generated.",
+    ),
     json_output: bool = typer.Option(False, "--json"),
     quiet: bool = typer.Option(False, "--quiet"),
 ) -> None:
@@ -30,7 +34,10 @@ def phase_b_run(
 
     out = OutputRenderer(mode="json" if json_output else "human", quiet=quiet)
     out.progress(f"Starting Phase B execution for run {run_id}...")
-    sys.exit(run_main(["--run-id", run_id]))
+    argv = ["--run-id", run_id]
+    if auto_approve:
+        argv.append("--auto-approve")
+    sys.exit(run_main(argv))
 
 
 @command(noun="phase-b", verb="resume", help="Resume a paused Phase B execution")

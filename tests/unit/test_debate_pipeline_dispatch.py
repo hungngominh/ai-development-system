@@ -165,8 +165,9 @@ def test_debate_path_v1_when_flag_off(monkeypatch):
     )
 
     assert isinstance(report, DebateReport)
-    # v1: no enrichment kwargs supplied
-    assert captured["kwargs"] == {}
+    # v1: no enrichment kwargs supplied; only the (default-None) progress hook
+    # is forwarded.
+    assert captured["kwargs"] == {"progress": None}
 
 
 def test_debate_path_v2_when_flag_on_wires_full_enrichment(monkeypatch):

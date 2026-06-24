@@ -10,7 +10,41 @@ import os
 
 from ai_dev_system.config import Config
 from ai_dev_system.db.connection import get_connection
+from ai_dev_system.debate.progress import DebateProgress
 from ai_dev_system.debate_pipeline import run_debate_pipeline
+
+
+class _StderrProgress(DebateProgress):
+    """Render debate progress to stderr (one line per round).
+
+    Keeps stdout reserved for the final JSON; flushes each line so it
+    shows up live even when the run is backgrounded into a log file.
+    """
+
+    def on_questions(self, total, required, strategic, optional):
+        print(
+            f"[debate] questions: {total}  "
+            f"({required} required / {strategic} strategic / {optional} optional)",
+            file=sys.stderr, flush=True,
+        )
+
+    def on_question_start(self, index, total, question):
+        print(
+            f"[debate] [{index:>2}/{total}] {question.id}  "
+            f"{question.agent_a} vs {question.agent_b}",
+            file=sys.stderr, flush=True,
+        )
+
+    def on_round(self, index, total, round_num, max_rounds, result, *, is_final):
+        a = "ok" if result.agent_a_position else "--"
+        b = "ok" if result.agent_b_position else "--"
+        mod = "ok" if result.moderator_summary else "--"
+        tail = f"  {result.resolution_status}" if is_final else ""
+        print(
+            f"           round {round_num}/{max_rounds}:  "
+            f"A {a}  B {b}  mod {mod}   -> conf {result.confidence:.2f}{tail}",
+            file=sys.stderr, flush=True,
+        )
 
 
 
@@ -106,7 +140,7 @@ def main(argv=None) -> int:
         return 1
 
     # Progress
-    print("[Phase 1a/1b] Running debate pipeline (normalize → questions → debate)...", file=sys.stderr)
+    print("[Phase 1a/1b] Running debate pipeline (normalize -> questions -> debate)...", file=sys.stderr)
     print("             This may take 2-5 minutes.", file=sys.stderr)
 
     try:
@@ -116,7 +150,14 @@ def main(argv=None) -> int:
             conn=conn,
             project_id=project_id,
             llm_client=llm_client,
+            progress=_StderrProgress(),
         )
+        # get_connection() opens with autocommit OFF, and the pipeline never
+        # commits — without this the run + artifact rows are rolled back on
+        # conn.close(), leaving the run invisible to `ai-dev info` and Gate 1
+        # review (only the on-disk artifacts survive). Commit at the command
+        # boundary, matching intake/phase-b/migrate.
+        conn.commit()
         total, escalated, resolved, optional = _count_questions(result.debate_report.results)
         print("[Done]     DEBATE_REPORT promoted. Status: PAUSED_AT_GATE_1", file=sys.stderr)
     except Exception as exc:

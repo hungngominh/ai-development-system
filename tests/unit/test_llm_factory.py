@@ -4,10 +4,17 @@ Unit tests for llm_factory.py.
 No real API calls — all SDK clients are mocked.
 """
 
+import os
+
 import pytest
 from unittest.mock import patch
 
-from ai_dev_system.llm_factory import LLMConfig, RealLLMClient, make_real_llm_client
+from ai_dev_system.llm_factory import (
+    ClaudeCodeLLMClient,
+    LLMConfig,
+    RealLLMClient,
+    make_real_llm_client,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +89,7 @@ class TestLLMConfigFromEnv:
         monkeypatch.setenv("LLM_MODEL", "any-model")
         monkeypatch.setenv("ANTHROPIC_API_KEY", "key")
 
-        with pytest.raises(ValueError, match="'anthropic', 'openai', or 'azure'"):
+        with pytest.raises(ValueError, match="claude_code"):
             LLMConfig.from_env()
 
     def test_from_env_azure(self, monkeypatch):
@@ -359,3 +366,124 @@ class TestMakeRealLLMClient:
 
         with pytest.raises(RuntimeError, match="LLM_PROVIDER"):
             make_real_llm_client()
+
+    def test_make_claude_code_client(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        monkeypatch.setenv("LLM_PROVIDER", "claude_code")
+        monkeypatch.setenv("LLM_MODEL", "sonnet")
+
+        client = make_real_llm_client()
+
+        assert isinstance(client, ClaudeCodeLLMClient)
+
+
+# ---------------------------------------------------------------------------
+# ClaudeCodeLLMClient._resolve_claude_cmd() — Windows exe-vs-cmd preference
+# ---------------------------------------------------------------------------
+
+class TestResolveClaudeCmdWindows:
+    """The native claude.exe must be preferred over the claude.cmd shim.
+
+    The .cmd shim re-expands argv through cmd.exe, which mangles prompts
+    containing shell metacharacters (``<AgentKey>``, ``A|B``). The .exe is
+    invoked directly and passes prompts through verbatim.
+    """
+
+    def test_prefers_native_exe_over_cmd_shim(self, mocker):
+        mocker.patch("ai_dev_system.llm_factory.sys.platform", "win32")
+        shim = os.path.join("C:\\", "Users", "me", "AppData", "Roaming", "npm", "claude.cmd")
+        shim_dir = os.path.dirname(shim)
+        derived_exe = os.path.join(
+            shim_dir, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe"
+        )
+
+        def fake_which(name):
+            return {"claude.exe": None, "claude.cmd": shim}.get(name)
+
+        mocker.patch("ai_dev_system.llm_factory.shutil.which", side_effect=fake_which)
+        # Only the derived bundled exe exists on disk.
+        mocker.patch(
+            "ai_dev_system.llm_factory.os.path.exists",
+            side_effect=lambda p: p == derived_exe,
+        )
+
+        assert ClaudeCodeLLMClient._resolve_claude_cmd() == derived_exe
+
+    def test_falls_back_to_cmd_shim_when_no_exe(self, mocker):
+        mocker.patch("ai_dev_system.llm_factory.sys.platform", "win32")
+        shim = os.path.join("C:\\", "Users", "me", "AppData", "Roaming", "npm", "claude.cmd")
+
+        mocker.patch(
+            "ai_dev_system.llm_factory.shutil.which",
+            side_effect=lambda n: shim if n == "claude.cmd" else None,
+        )
+        # No exe anywhere on disk.
+        mocker.patch("ai_dev_system.llm_factory.os.path.exists", return_value=False)
+
+        assert ClaudeCodeLLMClient._resolve_claude_cmd() == shim
+
+    def test_exe_on_path_wins_immediately(self, mocker):
+        mocker.patch("ai_dev_system.llm_factory.sys.platform", "win32")
+        path_exe = os.path.join("C:\\", "tools", "claude.exe")
+
+        mocker.patch(
+            "ai_dev_system.llm_factory.shutil.which",
+            side_effect=lambda n: path_exe if n == "claude.exe" else None,
+        )
+        # exists() should not even be consulted, but be safe.
+        mocker.patch("ai_dev_system.llm_factory.os.path.exists", return_value=False)
+
+        assert ClaudeCodeLLMClient._resolve_claude_cmd() == path_exe
+
+
+class TestStripOuterCodeFence:
+    """claude -p wraps JSON answers in ```json fences; strip the outer one."""
+
+    def test_strips_json_fence(self):
+        raw = '```json\n[{"id": "Q1"}]\n```'
+        assert ClaudeCodeLLMClient._strip_outer_code_fence(raw) == '[{"id": "Q1"}]'
+
+    def test_strips_bare_fence(self):
+        raw = '```\nhello world\n```'
+        assert ClaudeCodeLLMClient._strip_outer_code_fence(raw) == "hello world"
+
+    def test_leaves_plain_text_untouched(self):
+        raw = "just some prose, no fences"
+        assert ClaudeCodeLLMClient._strip_outer_code_fence(raw) == raw
+
+    def test_preserves_inline_code_block_in_prose(self):
+        # A fenced block embedded in prose (not wrapping the whole response)
+        # must survive — only an outer wrapper is stripped.
+        raw = "Here is code:\n```py\nx = 1\n```\nThanks!"
+        assert ClaudeCodeLLMClient._strip_outer_code_fence(raw) == raw
+
+    def test_strips_and_trims_surrounding_whitespace(self):
+        raw = '\n\n```json\n{"k": 1}\n```\n\n'
+        assert ClaudeCodeLLMClient._strip_outer_code_fence(raw) == '{"k": 1}'
+
+
+class TestClaudeCodeCallEncoding:
+    """`claude -p` output is UTF-8; the subprocess must decode as UTF-8.
+
+    text=True alone uses the locale codec (cp1252 on Windows), which raises
+    UnicodeDecodeError on bytes like 0x81 and leaves stdout=None — sinking
+    every call whose LLM output contains an em-dash, smart quote, non-Latin
+    text, or emoji.
+    """
+
+    def test_call_requests_utf8_decoding(self, mocker):
+        mocker.patch.object(
+            ClaudeCodeLLMClient, "_resolve_claude_cmd", return_value="claude.exe"
+        )
+        fake = mocker.MagicMock()
+        fake.returncode = 0
+        fake.stdout = 'résumé — "smart" café 🚀'
+        run = mocker.patch("ai_dev_system.llm_factory.subprocess.run", return_value=fake)
+
+        client = ClaudeCodeLLMClient(model="sonnet")
+        out = client.complete("sys", "user")
+
+        assert out == 'résumé — "smart" café 🚀'
+        _, kwargs = run.call_args
+        assert kwargs.get("encoding") == "utf-8"
+        assert kwargs.get("errors") == "replace"

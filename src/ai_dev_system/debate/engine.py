@@ -41,6 +41,7 @@ from ai_dev_system.debate.diversity import (
     cosine_similarity,
     ensure_diverse_pair,
 )
+from ai_dev_system.debate.progress import DebateProgress
 from ai_dev_system.debate.questions.models import Decision
 from ai_dev_system.debate.report import (
     DebateReport,
@@ -124,8 +125,12 @@ def _debate_one(
     embedding_cache: EmbeddingCache | None,
     moderator_prompt: str,
     registry: AgentRegistry | None = None,
+    progress: DebateProgress | None = None,
+    q_index: int = 0,
+    q_total: int = 0,
 ) -> QuestionDebateResult:
     """Run the round loop for a single non-OPTIONAL question."""
+    reporter = progress or DebateProgress()
     prev_summary: str | None = None
     rounds: list[RoundResult] = []
     inject_skeptic_next = False
@@ -179,10 +184,19 @@ def _debate_one(
         rounds.append(result)
 
         # M5.E (D7 Mitigation 1): REQUIRED must hit min rounds
-        if (
+        must_continue = (
             question.classification == "REQUIRED"
             and round_num < config.required_min_rounds
-        ):
+        )
+        will_resolve = (
+            not must_continue and result.confidence >= config.confidence_threshold
+        )
+        is_final = will_resolve or round_num == config.max_rounds
+        reporter.on_round(
+            q_index, q_total, round_num, config.max_rounds, result, is_final=is_final
+        )
+
+        if must_continue:
             prev_summary = result.moderator_summary
             continue
 
@@ -204,13 +218,18 @@ def run_debate(
     embedding_client: EmbeddingClient | None = None,
     brief_digest: str | None = None,
     decisions: list[Decision] | None = None,
+    progress: DebateProgress | None = None,
 ) -> DebateReport:
     """Run debate for all questions. OPTIONAL questions are auto-resolved.
 
     All M5.E enrichment knobs are optional and default to v1 behaviour
     when omitted. See module docstring for the exact effect of each.
+
+    `progress` (default no-op) receives structured events so a caller can
+    render live progress without the engine knowing about stderr/format.
     """
     cfg = config or DebateConfig()
+    reporter = progress or DebateProgress()
     moderator_prompt = (
         MODERATOR_PROMPT_CALIBRATED if cfg.use_calibrated_moderator else MODERATOR_PROMPT
     )
@@ -221,7 +240,17 @@ def run_debate(
     # questions sharing an agent position reuse the embedding.
     embedding_cache = EmbeddingCache() if embedding_client is not None else None
 
+    # `index`/`total` in progress events count only debated questions.
+    debated_total = sum(1 for q in questions if q.classification != "OPTIONAL")
+    reporter.on_questions(
+        len(questions),
+        sum(1 for q in questions if q.classification == "REQUIRED"),
+        sum(1 for q in questions if q.classification == "STRATEGIC"),
+        sum(1 for q in questions if q.classification == "OPTIONAL"),
+    )
+
     results: list[QuestionDebateResult] = []
+    q_index = 0
     for q in questions:
         if q.classification == "OPTIONAL":
             # Spec D9: pass the matched Decision (if any) so the
@@ -237,6 +266,8 @@ def run_debate(
 
         decision = _resolve_decision(q, decision_map)
 
+        q_index += 1
+        reporter.on_question_start(q_index, debated_total, q)
         results.append(
             _debate_one(
                 q,
@@ -248,6 +279,9 @@ def run_debate(
                 embedding_cache=embedding_cache,
                 moderator_prompt=moderator_prompt,
                 registry=registry,
+                progress=reporter,
+                q_index=q_index,
+                q_total=debated_total,
             )
         )
 

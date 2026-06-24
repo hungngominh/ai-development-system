@@ -112,12 +112,15 @@ def _debate_path(
     brief: dict,
     decisions,
     digest: str | None,
+    progress=None,
 ) -> DebateReport:
     """Spec phase1-migration §Dispatcher: debate routes by flag.
 
     Flag-on (`use_debate_v2`) wires DebateConfig + AgentRegistry +
     brief_digest + decisions into the engine. Flag-off keeps the v1
     no-kwargs call shape so existing fixtures stay deterministic.
+
+    `progress` (default no-op) is forwarded to the engine for live UX.
     """
     if flags.use_debate_v2:
         registry = AgentRegistry.from_directory()
@@ -127,9 +130,12 @@ def _debate_path(
             registry=registry,
             brief_digest=digest,
             decisions=decisions,
+            progress=progress,
         )
 
-    return run_debate(questions, llm_client, run_id=run_id, brief=brief)
+    return run_debate(
+        questions, llm_client, run_id=run_id, brief=brief, progress=progress
+    )
 
 
 def run_debate_pipeline(
@@ -141,6 +147,7 @@ def run_debate_pipeline(
     *,
     brief_v2: dict | None = None,
     flags: FeatureFlags | None = None,
+    progress=None,
 ) -> DebatePipelineResult:
     """Phase A: normalize → question gen → debate → DEBATE_REPORT artifact → PAUSED_AT_GATE_1.
 
@@ -190,6 +197,7 @@ def run_debate_pipeline(
     debate_report = _debate_path(
         active_flags, questions, llm_client,
         run_id=run_id, brief=brief, decisions=decisions, digest=digest,
+        progress=progress,
     )
 
     # Step 4: Promote DEBATE_REPORT artifact
@@ -320,7 +328,11 @@ def run_phase_b_pipeline(
         task_run_repo.mark_failed(task_run_g2["task_run_id"], "EXECUTION_ERROR", "user_rejected")
         raise PipelineAborted("User rejected task graph at Gate 2")
 
-    temp_approved = _write_json_to_temp_debate(config, task_run_g2, gate2_result.graph)
+    # Name the file task_graph.json — materialize_task_runs reads exactly that
+    # from the TASK_GRAPH_APPROVED artifact dir.
+    temp_approved = _write_json_to_temp_debate(
+        config, task_run_g2, gate2_result.graph, filename="task_graph.json"
+    )
     graph_artifact_id = promote_output(
         conn, config, task_run_g2,
         PromotedOutput("task_graph_approved", "TASK_GRAPH_APPROVED", "Human-approved task graph"),
@@ -330,10 +342,29 @@ def run_phase_b_pipeline(
     # Step 4: Beads sync
     beads_sync(run_id, gate2_result.graph, conn)
 
+    # Commit before execution: run_execution spawns worker/background threads
+    # that open their OWN connections (conn_factory) and must see the committed
+    # TASK_GRAPH_APPROVED artifact + spec rows. Without this the materializer
+    # raises "Artifact <id> not found". (get_connection opens autocommit-off.)
+    conn.commit()
+
     # Step 5: Execution (only if agent provided)
     execution_result = None
     if agent is not None:
-        execution_result = run_execution(run_id, graph_artifact_id, config, agent)
+        # Advance out of RUNNING_PHASE_1D so materialize_task_runs flips the run
+        # to RUNNING_EXECUTION (it only transitions from CREATED / RUNNING_PHASE_2A
+        # / RUNNING_PHASE_3). Without this the run stays at 1D, never reaches a
+        # terminal state, and run_execution blocks forever.
+        conn.execute(
+            "UPDATE runs SET status='RUNNING_PHASE_3', last_activity_at=CURRENT_TIMESTAMP "
+            "WHERE run_id=? AND status='RUNNING_PHASE_1D'",
+            (run_id,),
+        )
+        conn.commit()
+        execution_result = run_execution(
+            run_id, graph_artifact_id, config, agent,
+            poll_interval_s=config.poll_interval_s,
+        )
 
         # Step 6: Phase V — Verification (only if execution succeeded)
         # Terminal states per runner.py: {"COMPLETED","FAILED","ABORTED","PAUSED_FOR_DECISION"}.
@@ -348,6 +379,11 @@ def run_phase_b_pipeline(
                 from ai_dev_system.verification.pipeline import run_phase_v_pipeline
                 run_phase_v_pipeline(run_id, spec_artifact_id, config, conn, llm_client)
 
+    # Persist Phase B's own writes (spec/graph promotion, Phase V status) so they
+    # survive when the caller's connection is closed — worker-thread writes were
+    # already committed on their own connections.
+    conn.commit()
+
     return PhaseBResult(
         run_id=run_id,
         graph_artifact_id=graph_artifact_id,
@@ -355,15 +391,23 @@ def run_phase_b_pipeline(
     )
 
 
-def _write_json_to_temp_debate(config: Config, task_run: dict, data: dict) -> str:
-    """Write dict as JSON to temp path. Returns temp_path directory."""
+def _write_json_to_temp_debate(
+    config: Config, task_run: dict, data: dict, filename: str | None = None
+) -> str:
+    """Write dict as JSON to temp path. Returns temp_path directory.
+
+    `filename` defaults to ``<task_id>.json``; pass an explicit name when a
+    downstream consumer expects a fixed file (e.g. the materializer reads the
+    approved graph from ``task_graph.json``).
+    """
     temp_path = build_temp_path(
         config.storage_root, run_id=task_run["run_id"],
         task_id=task_run["task_id"],
         attempt_number=task_run["attempt_number"],
     )
     os.makedirs(temp_path, exist_ok=True)
-    with open(os.path.join(temp_path, f"{task_run['task_id']}.json"), "w", encoding="utf-8") as f:
+    name = filename or f"{task_run['task_id']}.json"
+    with open(os.path.join(temp_path, name), "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     return temp_path
 
