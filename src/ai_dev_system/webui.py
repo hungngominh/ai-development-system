@@ -13,15 +13,18 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 import urllib.parse
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from ai_dev_system.config import Config
 from ai_dev_system.db.connection import get_connection
+from ai_dev_system.task_graph.facets import FACET_KEYS
 
 PORT = int(os.environ.get("AIDEV_UI_PORT", "8765"))
 # A run that's RUNNING but whose progress log hasn't advanced in this many
@@ -277,6 +280,37 @@ def _abort_run(run_id: str) -> None:
             conn.commit()
     finally:
         conn.close()
+
+
+def _render_task_spec(task: dict, facets: dict) -> str:
+    rows = []
+    for key in FACET_KEYS:
+        f = facets.get(key) or {"status": "needs_human", "content": "", "reason": ""}
+        status = f.get("status")
+        if status == "filled" and f.get("content"):
+            val = html.escape(str(f["content"]))
+        elif status == "na":
+            val = f"<span class='muted'>N/A — {html.escape(str(f.get('reason') or ''))}</span>"
+        else:  # needs_human (or empty filled)
+            val = "<span class='caveat'>(cần làm rõ)</span>"
+        rows.append(f"<tr><td class='muted'>{html.escape(key)}</td><td>{val}</td></tr>")
+    title = html.escape(str(task.get("title") or "Task"))
+    return (
+        f"<div class='card'><h2>Task spec · {title}</h2>"
+        "<table>" + "".join(rows) + "</table></div>"
+    )
+
+
+def _save_task_spec(task: dict, facets: dict, *, storage_root: str) -> Path:
+    out_dir = Path(storage_root) / "task_specs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    slug = re.sub(r"[^a-z0-9]+", "-", str(task.get("title") or "task").lower()).strip("-")[:40] or "task"
+    path = out_dir / f"{slug}-{uuid.uuid4().hex[:8]}.json"
+    path.write_text(
+        json.dumps({"task": task, "facets": facets}, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _render_report(run_id: str) -> str:
