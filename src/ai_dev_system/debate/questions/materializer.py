@@ -29,6 +29,7 @@ from typing import Literal
 
 from ai_dev_system.debate.agents import VALID_AGENT_KEYS
 from ai_dev_system.debate.domains import resolve_domain
+from ai_dev_system.debate.profile import profile_prompt_block
 from ai_dev_system.debate.questions._prompt_utils import split_prompt as _split_prompt
 from ai_dev_system.debate.questions.models import Decision
 from ai_dev_system.debate.report import Question
@@ -69,12 +70,15 @@ def _decision_to_payload(decision: Decision) -> dict:
 
 
 def _render_user(
-    user_template: str, decisions: list[Decision], brief_digest: str
+    user_template: str, decisions: list[Decision], brief_digest: str, profile=None
 ) -> str:
     payload = [_decision_to_payload(d) for d in decisions]
     decisions_json = json.dumps(payload, ensure_ascii=False, indent=2)
-    return user_template.replace("{decisions_json}", decisions_json).replace(
-        "{brief_digest}", brief_digest
+    return (
+        user_template
+        .replace("{project_profile}", profile_prompt_block(profile))
+        .replace("{decisions_json}", decisions_json)
+        .replace("{brief_digest}", brief_digest)
     )
 
 
@@ -123,8 +127,9 @@ def _materialize_batch(
     llm_client,
     system: str,
     user_template: str,
+    profile=None,
 ) -> list[Question]:
-    user = _render_user(user_template, decisions, brief_digest)
+    user = _render_user(user_template, decisions, brief_digest, profile)
     response = llm_client.complete(system=system, user=user)
 
     try:
@@ -169,12 +174,13 @@ def _materialize_per_decision(
     llm_client,
     system: str,
     user_template: str,
+    profile=None,
 ) -> list[Question]:
     questions: list[Question] = []
     last_error: Exception | None = None
 
     for idx, decision in enumerate(decisions):
-        user = _render_user(user_template, [decision], brief_digest)
+        user = _render_user(user_template, [decision], brief_digest, profile)
         try:
             response = llm_client.complete(system=system, user=user)
             raw = json.loads(response)
@@ -213,6 +219,7 @@ def run(
     llm_client,
     *,
     mode: Mode = "fresh",
+    profile=None,
 ) -> list[Question]:
     """Execute Stage 2.
 
@@ -222,6 +229,7 @@ def run(
         llm_client: object with `.complete(system, user) -> str`.
         mode: "fresh" or "retrigger" (informational; caller handles
             ID suffixing for retrigger per G8 mini-spec).
+        profile: Optional `ProjectProfile` for vertical lens injection.
 
     Returns:
         `list[Question]`. Empty input → empty output.
@@ -237,7 +245,7 @@ def run(
 
     try:
         return _materialize_batch(
-            decisions, brief_digest, llm_client, system, user_template
+            decisions, brief_digest, llm_client, system, user_template, profile
         )
     except MaterializerError as batch_err:
         warnings.warn(
@@ -245,5 +253,5 @@ def run(
             stacklevel=2,
         )
         return _materialize_per_decision(
-            decisions, brief_digest, llm_client, system, user_template
+            decisions, brief_digest, llm_client, system, user_template, profile
         )

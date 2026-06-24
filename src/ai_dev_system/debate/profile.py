@@ -71,6 +71,22 @@ def infer_project_profile(brief: dict, llm_client) -> ProjectProfile:
     )
 
 
+def profile_prompt_block(profile: "ProjectProfile") -> str:
+    """Render an injectable PROJECT PROFILE block, or '' when empty."""
+    if profile is None or profile.is_empty():
+        return ""
+    dims = "; ".join(profile.key_dimensions)
+    personas = ", ".join(profile.primary_personas) or "the stated users"
+    return (
+        "PROJECT PROFILE (personalization lens):\n"
+        f"- vertical: {profile.vertical}\n"
+        f"- primary users: {personas}\n"
+        f"- key product/behavioral dimensions: {dims}\n"
+        "ALSO surface product/behavioral items across these dimensions; tag them "
+        "with domain one of psychology, growth, research, product, design.\n"
+    )
+
+
 def vertical_relevance(questions, profile: ProjectProfile) -> float:
     """Fraction of questions whose domain is product/behavioral. 0.0 when
     there are no questions or the profile is empty."""

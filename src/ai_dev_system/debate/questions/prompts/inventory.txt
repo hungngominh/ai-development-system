@@ -17,6 +17,10 @@ Rules (M4.1):
    product, design, legal, psychology, growth, research.
 5. `blocks_what` must reference items in `brief.scope_in` — what
    feature/component cannot ship without this decision.
+6. If a PROJECT PROFILE block is present, ALSO enumerate product/behavioral
+   decisions across its key_dimensions (user psychology, daily-usage behavior,
+   retention, emotion as relevant), tagged with domain psychology/growth/
+   research/product/design. These count toward the 8–25 total.
 
 Output: JSON array, schema:
 
@@ -37,4 +41,5 @@ STRATEGIC = important; has a defensible default but worth user input.
 OPTIONAL = nice to have; safe to defer.
 
 USER
+{project_profile}
 {brief_v2_json}

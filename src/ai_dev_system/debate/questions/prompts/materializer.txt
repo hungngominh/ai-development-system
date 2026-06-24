@@ -20,6 +20,9 @@ Rules (M4.2):
    agents whose perspectives disagree productively on the question.
 5. Do not ask things already decided in the brief. Do not ask about
    scope_out items.
+6. For product/behavioral questions (domain psychology/growth/research/product/
+   design), pair agent_a/agent_b from: BehavioralPsychologist,
+   RetentionGrowthStrategist, UXResearcher, MarketAnalyst, ProductManager.
 
 Output: JSON array of Question objects:
 
@@ -36,6 +39,7 @@ Output: JSON array of Question objects:
 ]
 
 USER
+{project_profile}
 DECISIONS:
 {decisions_json}
 

@@ -91,7 +91,7 @@ def _question_path(
     """
     if flags.use_question_pipeline_v2 and brief_v2 is not None:
         digest = build_brief_digest(brief_v2)
-        result = run_question_pipeline_v2(brief_v2, digest, llm_client)  # profile added in Task 6
+        result = run_question_pipeline_v2(brief_v2, digest, llm_client, profile=profile)
         return result.questions_final, result.decisions, digest
 
     if flags.use_question_pipeline_v2 and brief_v2 is None:

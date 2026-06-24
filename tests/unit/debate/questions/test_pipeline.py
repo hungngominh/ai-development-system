@@ -134,7 +134,7 @@ def test_happy_path_runs_all_stages_in_order(monkeypatch, stub_llm):
     # ordering + arg propagation
     assert inv.calls[0]["args"] == ({"brief": "v2"}, stub_llm)
     assert mat.calls[0]["args"] == (decisions, "digest", stub_llm)
-    assert mat.calls[0]["kwargs"] == {"mode": "fresh"}
+    assert mat.calls[0]["kwargs"] == {"mode": "fresh", "profile": None}
     assert crit.calls[0]["args"] == (draft, "digest", stub_llm)
     assert cov.calls[0]["args"] == (refined, decisions, {"brief": "v2"})
     # exactly one call per stage when C1 passes
@@ -170,7 +170,7 @@ def test_c1_fail_triggers_retrigger_and_recovers(monkeypatch, stub_llm):
     assert len(result.questions_final) == 8
     # second materializer call with mode=retrigger, only the missing decisions
     assert len(mat.calls) == 2
-    assert mat.calls[1]["kwargs"] == {"mode": "retrigger"}
+    assert mat.calls[1]["kwargs"] == {"mode": "retrigger", "profile": None}
     retrigger_decisions = mat.calls[1]["args"][0]
     assert [d.id for d in retrigger_decisions] == ["d6", "d7"]
     # two coverage calls
@@ -323,7 +323,7 @@ def test_retrigger_materializer_error_propagates(monkeypatch, stub_llm):
     decisions = [_decision(f"d{i}") for i in range(8)]
     refined = [_question(f"Q{i}", source=f"d{i}") for i in range(6)]
 
-    def materialize(decs, digest, llm, *, mode):
+    def materialize(decs, digest, llm, *, mode, profile=None):
         if mode == "fresh":
             return refined
         raise MaterializerError("retrigger boom")

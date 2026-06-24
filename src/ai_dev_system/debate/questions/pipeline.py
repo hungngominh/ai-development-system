@@ -75,6 +75,7 @@ def run_pipeline(
     brief_v2: dict,
     brief_digest: str,
     llm_client,
+    profile=None,
 ) -> PipelineResult:
     """Run all 4 stages and return the consolidated result.
 
@@ -84,6 +85,9 @@ def run_pipeline(
             content per locked decision #39).
         llm_client: object with `.complete(system, user) -> str`.
             Critic uses the same client by default (locked decision #9).
+        profile: Optional `ProjectProfile` for vertical lens injection.
+            Forwarded to inventory + materializer only (coverage gets it
+            in Task 7).
 
     Returns:
         `PipelineResult` with decisions, final questions, coverage
@@ -97,10 +101,10 @@ def run_pipeline(
             allowed retrigger — the pipeline cannot deliver enough
             questions to seed debate.
     """
-    decisions = inventory.run(brief_v2, llm_client)
+    decisions = inventory.run(brief_v2, llm_client, profile=profile)
 
     draft = materializer.run(
-        decisions, brief_digest, llm_client, mode="fresh"
+        decisions, brief_digest, llm_client, mode="fresh", profile=profile
     )
     refined, iterations = critic.run(draft, brief_digest, llm_client)
     report = coverage.run(refined, decisions, brief_v2)
@@ -115,6 +119,7 @@ def run_pipeline(
                 brief_digest,
                 llm_client,
                 mode="retrigger",
+                profile=profile,
             )
             refined = _merge_retrigger_questions(refined, extra)
             report = coverage.run(refined, decisions, brief_v2)

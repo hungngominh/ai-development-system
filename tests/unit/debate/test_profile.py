@@ -3,6 +3,7 @@ import json
 from ai_dev_system.debate.profile import (
     ProjectProfile,
     infer_project_profile,
+    profile_prompt_block,
     vertical_relevance,
     PRODUCT_BEHAVIORAL_DOMAINS,
 )
@@ -74,3 +75,7 @@ def test_vertical_relevance_fraction():
 def test_vertical_relevance_zero_when_profile_empty():
     qs = [_q("psychology")]
     assert vertical_relevance(qs, ProjectProfile.empty()) == 0.0
+
+
+def test_profile_prompt_block_empty_is_blank():
+    assert profile_prompt_block(ProjectProfile.empty()) == ""

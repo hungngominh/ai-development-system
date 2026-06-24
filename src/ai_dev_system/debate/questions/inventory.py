@@ -24,6 +24,7 @@ import warnings
 from pathlib import Path
 
 from ai_dev_system.debate.domains import resolve_domain
+from ai_dev_system.debate.profile import profile_prompt_block
 from ai_dev_system.debate.questions._prompt_utils import split_prompt as _split_prompt
 from ai_dev_system.debate.questions.models import Decision
 
@@ -126,12 +127,13 @@ def _validate(raw_items: list[dict], brief_v2: dict) -> list[Decision]:
     return decisions
 
 
-def run(brief_v2: dict, llm_client) -> list[Decision]:
+def run(brief_v2: dict, llm_client, profile=None) -> list[Decision]:
     """Execute Stage 1.
 
     Args:
         brief_v2: Promoted intake brief (brief_version == 2).
         llm_client: object with `.complete(system, user) -> str`.
+        profile: Optional `ProjectProfile` for vertical lens injection.
 
     Returns:
         Validated `list[Decision]`.
@@ -143,7 +145,11 @@ def run(brief_v2: dict, llm_client) -> list[Decision]:
     """
     system, user_template = _split_prompt(load_prompt())
     brief_json = json.dumps(brief_v2, ensure_ascii=False, indent=2)
-    user = user_template.replace("{brief_v2_json}", brief_json)
+    user = (
+        user_template
+        .replace("{project_profile}", profile_prompt_block(profile))
+        .replace("{brief_v2_json}", brief_json)
+    )
 
     last_error: InventoryError | None = None
     for attempt in range(2):
