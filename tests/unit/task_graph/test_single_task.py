@@ -22,10 +22,13 @@ def test_build_single_task_is_minimal_coding_task():
 
 
 def test_build_single_task_title_derives_from_idea_when_absent():
-    t = build_single_task("build a CSV importer")
-    assert t["title"]  # non-empty
-    t2 = build_single_task("x", title="My Task")
-    assert t2["title"] == "My Task"
+    # Short idea (≤60 chars): title equals idea verbatim, no ellipsis
+    assert build_single_task("build a CSV importer")["title"] == "build a CSV importer"
+    # Long idea (>60 chars): first 60 chars (rstripped) + Unicode ellipsis U+2026
+    long = "x" * 65
+    assert build_single_task(long)["title"] == "x" * 60 + "…"
+    # Explicit title overrides derivation
+    assert build_single_task("x", title="My Task")["title"] == "My Task"
 
 
 def test_spec_single_task_returns_task_and_eight_facets():
