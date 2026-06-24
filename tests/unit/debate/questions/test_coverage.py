@@ -347,12 +347,6 @@ def test_run_total_questions_matches_input():
 # ---- C5 personalization ----
 
 
-def _q(domain):
-    return Question(id="Q", text="t", classification="REQUIRED", domain=domain,
-                    agent_a="ProductManager", agent_b="BackendArchitect",
-                    source_decision_id="d1")
-
-
 def _c5(report):
     return next(c for c in report.checks if c.name == "C5_personalization")
 

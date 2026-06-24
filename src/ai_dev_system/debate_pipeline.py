@@ -178,14 +178,15 @@ def run_debate_pipeline(
     # input to v1 question gen + as the `brief` field of the
     # DebateReport for backwards-compat downstream consumers).
     brief = normalize_idea(raw_idea)
-    # Stamp the flag snapshot onto the brief so it travels with the
-    # DebateReport artifact (eval/audit can read which path ran).
-    brief = {**brief, "_flags": active_flags.snapshot()}
 
-    # Infer the vertical lens once; stamp it onto the brief so it travels with
-    # the DebateReport artifact (inspectable at Gate 1 + reusable by Spec 2).
+    # Infer the vertical lens once; use the pre-flags brief on the legacy path
+    # so internal _-prefixed keys are never serialized into the profile prompt.
+    # brief_v2 (intake wizard path) takes precedence as before.
     profile = infer_project_profile(brief_v2 or brief, llm_client)
-    brief = {**brief, "_project_profile": profile.to_dict()}
+
+    # Stamp the flag snapshot and profile onto the brief so they travel with
+    # the DebateReport artifact (eval/audit can read which path ran).
+    brief = {**brief, "_flags": active_flags.snapshot(), "_project_profile": profile.to_dict()}
 
     # Step 2: Generate questions (flag-dispatched)
     task_run = task_run_repo.create_sync(run_id, task_type="generate_questions")
