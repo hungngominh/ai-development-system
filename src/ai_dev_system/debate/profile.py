@@ -13,8 +13,6 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ai_dev_system.debate.questions._prompt_utils import split_prompt
-
 PROMPT_PATH = Path(__file__).parent / "questions" / "prompts" / "profile.txt"
 
 # Domains that count as "product / behavioral" for personalization checks.
@@ -53,6 +51,7 @@ def infer_project_profile(brief: dict, llm_client) -> ProjectProfile:
     if os.environ.get(_KILL_SWITCH_ENV) == "1":
         return ProjectProfile.empty()
     try:
+        from ai_dev_system.debate.questions._prompt_utils import split_prompt  # deferred to break circular import
         system, user_template = split_prompt(PROMPT_PATH.read_text(encoding="utf-8"))
         user = user_template.replace(
             "{brief_json}", json.dumps(brief, ensure_ascii=False, default=str)

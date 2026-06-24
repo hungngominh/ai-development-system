@@ -24,6 +24,7 @@ listed as blocking.
 import math
 from collections import Counter
 
+from ai_dev_system.debate.profile import PRODUCT_BEHAVIORAL_DOMAINS
 from ai_dev_system.debate.questions.models import (
     CoverageCheck,
     CoverageReport,
@@ -117,6 +118,20 @@ def check_c4_question_count(
     )
 
 
+def check_c5_personalization(questions: list[Question], profile) -> CoverageCheck:
+    """WARN when a vertical profile is present but no question lands in a
+    product/behavioral domain — personalization was likely dropped."""
+    if profile is None or profile.is_empty():
+        return CoverageCheck(name="C5_personalization", status="pass",
+                             detail={"reason": "no profile"})
+    product = [q for q in questions if q.domain in PRODUCT_BEHAVIORAL_DOMAINS]
+    return CoverageCheck(
+        name="C5_personalization",
+        status="pass" if product else "warn",
+        detail={"product_question_count": len(product), "total": len(questions)},
+    )
+
+
 def _domain_distribution(questions: list[Question]) -> dict[str, int]:
     return dict(Counter(q.domain for q in questions))
 
@@ -129,6 +144,7 @@ def run(
     questions: list[Question],
     decisions: list[Decision],
     brief_v2: dict,
+    profile=None,
 ) -> CoverageReport:
     """Execute Stage 4. No LLM calls; pure rule-based.
 
@@ -136,6 +152,8 @@ def run(
     set is derived from decisions, not brief). The parameter is kept
     so future checks (e.g. scope_out vs question.domain) can land
     without a signature change.
+
+    `profile`: optional `ProjectProfile` for C5 personalization check.
     """
     _ = brief_v2  # reserved for future checks
 
@@ -144,6 +162,7 @@ def run(
         check_c2_domain_balance(questions, decisions),
         check_c3_classification_sanity(questions),
         check_c4_question_count(questions, decisions),
+        check_c5_personalization(questions, profile),
     ]
 
     c1 = checks[0]

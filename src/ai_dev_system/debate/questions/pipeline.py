@@ -107,7 +107,7 @@ def run_pipeline(
         decisions, brief_digest, llm_client, mode="fresh", profile=profile
     )
     refined, iterations = critic.run(draft, brief_digest, llm_client)
-    report = coverage.run(refined, decisions, brief_v2)
+    report = coverage.run(refined, decisions, brief_v2, profile=profile)
 
     c1 = _find_check(report, "C1_decision_coverage")
     if c1 is not None and c1.status == "fail":
@@ -122,7 +122,7 @@ def run_pipeline(
                 profile=profile,
             )
             refined = _merge_retrigger_questions(refined, extra)
-            report = coverage.run(refined, decisions, brief_v2)
+            report = coverage.run(refined, decisions, brief_v2, profile=profile)
 
     c4 = _find_check(report, "C4_question_count")
     if c4 is not None and c4.status == "fail":

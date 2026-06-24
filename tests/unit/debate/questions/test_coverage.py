@@ -2,9 +2,11 @@
 
 Covers: each check (C1-C4) pass/warn/fail cases, edge cases (empty
 questions, optional-only missing, zero decisions, boundary counts),
-distribution accuracy, report.is_pass semantics.
+distribution accuracy, report.is_pass semantics. Plus C5_personalization
+WARN-only check.
 """
 
+from ai_dev_system.debate.profile import ProjectProfile
 from ai_dev_system.debate.questions import coverage
 from ai_dev_system.debate.questions.coverage import (
     CLASSIFICATION_REQUIRED_MIN_RATIO,
@@ -220,7 +222,7 @@ def _make_aligned_set(n_decisions: int = 6, n_required: int = 5):
     return decisions, questions
 
 
-def test_run_returns_report_with_all_four_checks():
+def test_run_returns_report_with_all_five_checks():
     decisions, questions = _make_aligned_set(6, 5)
     report = coverage.run(questions, decisions, brief_v2={})
     assert [c.name for c in report.checks] == [
@@ -228,6 +230,7 @@ def test_run_returns_report_with_all_four_checks():
         "C2_domain_balance",
         "C3_classification_sanity",
         "C4_question_count",
+        "C5_personalization",
     ]
 
 
@@ -339,3 +342,51 @@ def test_run_total_questions_matches_input():
     questions = [_question(f"Q{i}", source=f"d{i}") for i in range(5)]
     report = coverage.run(questions, decisions, brief_v2={})
     assert report.total_questions == 5
+
+
+# ---- C5 personalization ----
+
+
+def _q(domain):
+    return Question(id="Q", text="t", classification="REQUIRED", domain=domain,
+                    agent_a="ProductManager", agent_b="BackendArchitect",
+                    source_decision_id="d1")
+
+
+def _c5(report):
+    return next(c for c in report.checks if c.name == "C5_personalization")
+
+
+def _make_c5_decisions_and_questions(domain: str):
+    """Return (decisions, questions) satisfying C1 and C4 with all questions
+    in the given domain — isolates C5 from C4/C1 noise."""
+    decisions = [Decision(id=f"d{i}", summary="s", classification="REQUIRED")
+                 for i in range(5)]
+    questions = [
+        Question(id=f"Q{i}", text="t", classification="REQUIRED", domain=domain,
+                 agent_a="ProductManager", agent_b="BackendArchitect",
+                 source_decision_id=f"d{i}")
+        for i in range(5)
+    ]
+    return decisions, questions
+
+
+def test_c5_warns_when_profile_set_but_no_product_questions():
+    profile = ProjectProfile("couples app", [], ["couple psychology"], [])
+    decisions, questions = _make_c5_decisions_and_questions("backend")
+    report = coverage.run(questions, decisions, {}, profile=profile)
+    assert _c5(report).status == "warn"
+    assert report.is_pass() is True  # WARN never blocks
+
+
+def test_c5_passes_when_product_question_present():
+    profile = ProjectProfile("couples app", [], ["couple psychology"], [])
+    decisions, questions = _make_c5_decisions_and_questions("psychology")
+    report = coverage.run(questions, decisions, {}, profile=profile)
+    assert _c5(report).status == "pass"
+
+
+def test_c5_passes_when_profile_empty():
+    decisions, questions = _make_c5_decisions_and_questions("backend")
+    report = coverage.run(questions, decisions, {}, profile=ProjectProfile.empty())
+    assert _c5(report).status == "pass"

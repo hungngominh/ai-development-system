@@ -36,6 +36,7 @@ CoverageCheckName = Literal[
     "C2_domain_balance",
     "C3_classification_sanity",
     "C4_question_count",
+    "C5_personalization",
 ]
 CoverageStatus = Literal["pass", "warn", "fail"]
 
