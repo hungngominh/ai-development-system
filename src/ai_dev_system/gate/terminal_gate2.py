@@ -193,13 +193,14 @@ class TerminalGate2IO:
         if task is None:
             self._emit(f"No such task: {tid}")
             return
-        facets = task.setdefault("facets", {})
         if op == "show":
+            facets = task.get("facets") or {}
             self._emit(f"--- {tid} facets ---")
             for k in FACET_KEYS:
                 f = facets.get(k) or {"status": "needs_human", "content": "", "reason": ""}
                 self._emit(f"  {k}: [{f.get('status')}] {f.get('content') or f.get('reason')}")
             return
+        facets = task.setdefault("facets", {})
         if key not in FACET_KEYS:
             self._emit(f"Unknown facet {key!r}. Valid: {', '.join(FACET_KEYS)}")
             return
