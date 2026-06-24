@@ -3,7 +3,11 @@ from typing import Protocol, Optional
 
 
 class LLMClient(Protocol):
-    def complete(self, prompt: str) -> str: ...
+    # Matches the project's real clients (llm_factory) and the debate stub:
+    # complete(system, user) -> str. The previous single-arg shape
+    # (complete(prompt)) failed on every real client with a TypeError that the
+    # broad except below swallowed, making enrichment a silent no-op.
+    def complete(self, system: str, user: str) -> str: ...
 
 
 ENRICHABLE_FIELDS = {"title", "objective", "description",
@@ -11,9 +15,10 @@ ENRICHABLE_FIELDS = {"title", "objective", "description",
 
 
 def enrich_task(task: dict, spec_content: dict[str, str], llm: LLMClient) -> dict:
-    prompt = _build_prompt(task, spec_content)
+    system = _ENRICH_SYSTEM
+    user = _build_user(task, spec_content)
     try:
-        response = llm.complete(prompt)
+        response = llm.complete(system=system, user=user)
         enrichment = json.loads(response)
         if not isinstance(enrichment, dict):
             return task
@@ -45,46 +50,52 @@ def enrich_all(graph: list[dict], spec_content: dict[str, str],
     return graph
 
 
-def _build_prompt(task: dict, spec_content: dict[str, str]) -> str:
-    problem = spec_content.get("problem.md", "")[:800]
-    requirements = spec_content.get("requirements.md", "")[:800]
-    constraints = spec_content.get("constraints.md", "")[:800]
-    return f"""You are enriching a task in a software development execution plan.
+# System prompt is intentionally free of the StubDebateLLMClient routing
+# substrings (question, generate, moderator, synthesis, finalize, spec) so that
+# under the stub it falls through to a non-JSON default → enrichment stays a
+# no-op (preserving prior behavior + the Phase B stub suites). Real clients get
+# proper JSON back and enrichment works.
+_ENRICH_SYSTEM = (
+    "You are refining one task in a software development execution plan. Using "
+    "the project context provided, rewrite the task's fields to be concrete and "
+    "tailored to this project. Return ONLY a valid JSON object with keys: "
+    "title, objective, description, done_definition, and verification_steps "
+    "(a list of strings). Rules: tailor every field to THIS project; "
+    "done_definition must be measurable; verification_steps must be actionable; "
+    "do NOT add or reference tasks, dependencies, or execution structure."
+)
 
-## Task Context
-- ID: {task['id']}
-- Phase: {task['phase']}
-- Type: {task['type']}
-- Current title: {task['title']}
-- Agent: {task['agent_type']}
-- Inputs: {task['required_inputs']}
-- Outputs: {task['expected_outputs']}
+# Spec-bundle section files that carry the implementation-relevant context.
+# (The previous code read problem.md/requirements.md/constraints.md, which the
+# v2 spec bundle never produces — so even a working call had empty context.)
+_CONTEXT_SECTIONS = (
+    "functional.md", "design.md", "non-functional.md", "acceptance-criteria.md",
+)
 
-## Project Spec
-### Problem
-{problem}
 
-### Requirements
-{requirements}
-
-### Constraints
-{constraints}
-
-## Instructions
-Enrich this task with project-specific details. Return ONLY valid JSON:
-
-```json
-{{
-  "title": "specific title mentioning the actual project",
-  "objective": "1-2 sentences",
-  "description": "detailed description with project-specific context",
-  "done_definition": "measurable completion criteria",
-  "verification_steps": ["step 1", "step 2", "step 3"]
-}}
-```
-
-Rules:
-- Be specific to THIS project
-- done_definition must be measurable
-- verification_steps must be actionable
-- Do NOT add or reference tasks, dependencies, or execution structure"""
+def _build_user(task: dict, spec_content: dict[str, str]) -> str:
+    lines = [
+        "## Task",
+        f"- ID: {task['id']}",
+        f"- Phase: {task['phase']}",
+        f"- Type: {task['type']}",
+        f"- Current title: {task['title']}",
+        f"- Agent: {task['agent_type']}",
+        f"- Inputs: {task['required_inputs']}",
+        f"- Outputs: {task['expected_outputs']}",
+        "",
+        "## Project context",
+    ]
+    sections = spec_content or {}
+    included = False
+    for name in _CONTEXT_SECTIONS:
+        body = sections.get(name, "")
+        if body:
+            lines.append(f"### {name}\n{body[:800]}")
+            included = True
+    if not included:
+        # Fall back to whatever sections the caller supplied.
+        for name, body in sections.items():
+            if body:
+                lines.append(f"### {name}\n{str(body)[:800]}")
+    return "\n".join(lines)
