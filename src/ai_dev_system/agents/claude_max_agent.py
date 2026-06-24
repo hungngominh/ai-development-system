@@ -131,6 +131,22 @@ class ClaudeMaxAgent:
             for inp in inputs:
                 lines.append(self._render_input(inp))
 
+        facets = context.get("facets") or {}
+        facet_lines = []
+        for key, facet in facets.items():
+            if not isinstance(facet, dict):
+                continue
+            status = facet.get("status")
+            if status == "filled" and facet.get("content"):
+                facet_lines.append(f"- {key}: {facet['content']}")
+            elif status == "needs_human":
+                facet_lines.append(f"- {key}: (needs clarification — confirm before relying on it)")
+            # status == "na" → skip
+        if facet_lines:
+            lines.append("")
+            lines.append("## Task Specification")
+            lines.extend(facet_lines)
+
         return "\n".join(lines)
 
     def _render_input(self, inp) -> str:
