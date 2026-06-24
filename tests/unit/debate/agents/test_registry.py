@@ -261,8 +261,12 @@ def test_real_registry_has_exactly_one_agent_per_canonical_domain():
     # Only the research domain is intentionally allowed to have >1 agent.
     duplicates = {d: n for d, n in counts.items() if n > 1 and d != "research"}
     assert not duplicates, f"domains with >1 agent: {duplicates}"
-    # Agents may exceed domains (research has 2: UXResearcher + MarketAnalyst).
-    assert len(reg) >= len(DOMAINS)
+    # research has EXACTLY 2 agents (UXResearcher + MarketAnalyst); a 3rd would
+    # silently pass the exemption above, so we bound it explicitly here.
+    assert counts.get("research", 0) == 2, (
+        f"research domain should have exactly 2 agents (UXResearcher + MarketAnalyst), "
+        f"got {counts.get('research', 0)}"
+    )
 
 
 def test_real_registry_typical_paired_with_resolves():
