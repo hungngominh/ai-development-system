@@ -138,6 +138,8 @@ def _home() -> bytes:
     <div class='card'><h2>Đặc tả 1 task</h2>
     <form method='post' action='/spec-task'>
       <label>Mô tả task</label><textarea name='idea' rows='3' placeholder='Mô tả 1 task/feature...' required></textarea>
+      <label>Đường dẫn repo (tuỳ chọn — bật agentic đọc code thật)</label>
+      <input name='repo' placeholder='vd: E:\\Work\\my-app'>
       <label>Chế độ LLM</label>
       <select name='mode'>
         <option value='stub'>Stub — tức thì (facet giả = needs_human)</option>
@@ -326,6 +328,50 @@ def _save_task_spec(task: dict, facets: dict, *, storage_root: str) -> Path:
     return path
 
 
+def _task_spec_page(spec_id: str) -> bytes:
+    path = Path(_config().storage_root) / "task_specs" / f"{spec_id}.json"
+    if not path.exists():
+        return _page("task spec", "<div class='card muted'>Không tìm thấy TaskSpec. "
+                     "<a href='/'>← trang chủ</a></div>")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        return _page("task spec", f"<div class='card muted'>Lỗi đọc TaskSpec: {html.escape(str(exc))}</div>")
+    status = data.get("status")
+    if status == "done":
+        return _page("Task spec", _render_task_spec(data.get("task") or {}, data.get("facets") or {})
+                     + "<p class='muted'><a href='/'>← trang chủ</a></p>")
+    if status == "error":
+        return _page("task spec", "<div class='card muted'>Lỗi sinh TaskSpec: "
+                     f"{html.escape(str(data.get('error') or ''))}</div>")
+    # running (or anything else)
+    return _page("task spec",
+                 "<div class='card'><h2>Đang chạy — sinh TaskSpec (agentic đọc repo)…</h2>"
+                 "<p class='muted'>Trang tự refresh mỗi 5s.</p></div>",
+                 head_extra="<meta http-equiv='refresh' content='5'>")
+
+
+def _spawn_task_spec_worker(idea: str, repo: str) -> str:
+    spec_id = uuid.uuid4().hex[:12]
+    out_dir = Path(_config().storage_root) / "task_specs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{spec_id}.json").write_text(
+        json.dumps({"status": "running", "idea": idea, "repo": repo}, ensure_ascii=False),
+        encoding="utf-8")
+    popen_kwargs: dict = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+    else:
+        popen_kwargs["start_new_session"] = True
+    subprocess.Popen(
+        [sys.executable, "-m", "ai_dev_system.task_graph.single_task_worker",
+         "--id", spec_id, "--idea", idea, "--repo", repo,
+         "--storage-root", str(_config().storage_root)],
+        cwd=str(Path(__file__).resolve().parents[2]), **popen_kwargs,
+    )
+    return spec_id
+
+
 def _render_report(run_id: str) -> str:
     path = _find_report_path(run_id)
     if path is None:
@@ -435,6 +481,9 @@ class Handler(BaseHTTPRequestHandler):
                 qs = urllib.parse.parse_qs(parsed.query)
                 rid = (qs.get("id") or [""])[0]
                 self._send(_run_detail(rid))
+            elif parsed.path == "/task-spec":
+                qs = urllib.parse.parse_qs(parsed.query)
+                self._send(_task_spec_page((qs.get("id") or [""])[0]))
             else:
                 self._send(_page("404", "<div class='card'>Not found. <a href='/'>home</a></div>"), 404)
         except Exception as exc:  # noqa: BLE001
@@ -460,7 +509,15 @@ class Handler(BaseHTTPRequestHandler):
             form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
             idea = (form.get("idea") or [""])[0].strip()
             mode = (form.get("mode") or ["stub"])[0]
-            self._send(_spec_task(idea, mode))
+            repo = (form.get("repo") or [""])[0].strip()
+            if repo:
+                spec_id = _spawn_task_spec_worker(idea, repo)
+                self._send(_page("task spec",
+                    "<div class='card'><h2>Đã khởi động (agentic) ✓</h2>"
+                    f"<p class='muted'>Đọc repo + sinh facet ở chạy nền.</p></div>",
+                    head_extra=f"<meta http-equiv='refresh' content='2;url=/task-spec?id={urllib.parse.quote(spec_id)}'>"))
+            else:
+                self._send(_spec_task(idea, mode))
         elif path == "/start":
             length = int(self.headers.get("Content-Length", "0"))
             form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))

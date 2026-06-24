@@ -1,5 +1,7 @@
 import json
+import json as _json
 import types
+import types as _types
 
 from ai_dev_system import webui
 from ai_dev_system.task_graph.facets import FACET_KEYS
@@ -68,3 +70,41 @@ def test_spec_task_stub_renders_and_saves(tmp_path, monkeypatch):
 def test_spec_task_empty_idea_returns_message():
     page = webui._spec_task("", "stub")
     assert b"task" in page.lower()  # renders a page, not a crash
+
+
+# ---------------------------------------------------------------------------
+# Task 4: _task_spec_page polling-page renderer
+# ---------------------------------------------------------------------------
+
+def test_task_spec_page_running(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "_config", lambda: _types.SimpleNamespace(storage_root=str(tmp_path)))
+    d = tmp_path / "task_specs"; d.mkdir()
+    (d / "id1.json").write_text(_json.dumps({"status": "running", "idea": "x"}), encoding="utf-8")
+    page = webui._task_spec_page("id1").decode("utf-8")
+    assert "đang chạy" in page.lower() or "running" in page.lower()
+    assert "http-equiv" in page  # auto-refresh while running
+
+
+def test_task_spec_page_done_renders_facets(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "_config", lambda: _types.SimpleNamespace(storage_root=str(tmp_path)))
+    from ai_dev_system.task_graph.facets import FACET_KEYS
+    facets = {k: {"status": "filled", "content": f"{k} c", "reason": ""} for k in FACET_KEYS}
+    d = tmp_path / "task_specs"; d.mkdir()
+    (d / "id2.json").write_text(_json.dumps(
+        {"status": "done", "task": {"title": "My Task"}, "facets": facets}), encoding="utf-8")
+    page = webui._task_spec_page("id2").decode("utf-8")
+    assert "Task spec" in page and "input c" in page
+
+
+def test_task_spec_page_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "_config", lambda: _types.SimpleNamespace(storage_root=str(tmp_path)))
+    d = tmp_path / "task_specs"; d.mkdir()
+    (d / "id3.json").write_text(_json.dumps({"status": "error", "error": "kaboom"}), encoding="utf-8")
+    page = webui._task_spec_page("id3").decode("utf-8")
+    assert "kaboom" in page
+
+
+def test_task_spec_page_unknown_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "_config", lambda: _types.SimpleNamespace(storage_root=str(tmp_path)))
+    page = webui._task_spec_page("nope")
+    assert isinstance(page, (bytes, bytearray))  # no crash on missing file
