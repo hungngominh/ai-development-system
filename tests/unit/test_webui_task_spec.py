@@ -28,6 +28,17 @@ def test_render_escapes_html():
     assert "<script>x</script>" not in out
     assert "&lt;script&gt;" in out
 
+    # title is user-derived → must be escaped
+    out_title = webui._render_task_spec({"title": "<b>X</b>"}, _facets())
+    assert "<b>X</b>" not in out_title
+    assert "&lt;b&gt;" in out_title
+
+    # na reason is user-derived → must be escaped
+    facets_na = _facets({"input": {"status": "na", "content": "", "reason": "<img src=x onerror=1>"}})
+    out_reason = webui._render_task_spec({"title": "T"}, facets_na)
+    assert "<img src=x" not in out_reason
+    assert "&lt;img" in out_reason
+
 
 def test_save_writes_json_and_returns_path(tmp_path):
     facets = _facets()
