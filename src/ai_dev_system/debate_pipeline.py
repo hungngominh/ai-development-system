@@ -24,6 +24,7 @@ from ai_dev_system.storage.paths import build_temp_path
 from ai_dev_system.storage.promote import promote_output
 from ai_dev_system.finalize_spec import finalize_spec
 from ai_dev_system.task_graph.generator import generate_task_graph
+from ai_dev_system.task_graph.facets import generate_task_facets_for_graph
 from ai_dev_system.gate.gate2 import run_gate_2
 from ai_dev_system.beads.sync import beads_sync
 from ai_dev_system.engine.runner import run_execution, ExecutionResult
@@ -57,6 +58,30 @@ def _load_intake_brief(conn, run_id: str) -> dict | None:
         return None
     with open(brief_path, encoding="utf-8") as f:
         return json.load(f)
+
+
+def _load_project_profile_dict(conn, current_artifacts: dict) -> dict | None:
+    """Read brief._project_profile from the run's DEBATE_REPORT artifact, or None.
+
+    Lets per-task facet generation carry the vertical flavor (Spec 1). Never raises.
+    """
+    try:
+        report_id = (current_artifacts or {}).get("debate_report_id")
+        if not report_id:
+            return None
+        row = conn.execute(
+            "SELECT content_ref FROM artifacts WHERE artifact_id = ?", (report_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        path = Path(row["content_ref"]) / "debate_report.json"
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        profile = (data.get("brief") or {}).get("_project_profile")
+        return profile if isinstance(profile, dict) else None
+    except Exception:
+        return None
 
 
 @dataclass
@@ -327,6 +352,8 @@ def run_phase_b_pipeline(
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run_tg["task_run_id"])
 
     envelope = generate_task_graph(spec_content, approved_answers, spec_artifact_id, llm_client)
+    profile_dict = _load_project_profile_dict(conn, current_artifacts)
+    generate_task_facets_for_graph(envelope["tasks"], spec_content, profile_dict, llm_client)
     temp_tg = _write_json_to_temp_debate(config, task_run_tg, envelope)
     promote_output(conn, config, task_run_tg,
                    PromotedOutput("task_graph", "TASK_GRAPH_GENERATED", "Generated task graph"),
