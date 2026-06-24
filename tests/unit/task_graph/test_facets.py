@@ -43,6 +43,7 @@ def test_is_implementation_task_only_coding_atomic():
 def test_generate_returns_all_eight_facets_filled():
     facets = generate_task_facets(_impl_task(), {"functional.md": "f"}, None, _FakeLLM(_all_filled_response()))
     assert set(facets.keys()) == set(FACET_KEYS)
+    assert list(facets.keys()) == list(FACET_KEYS)
     assert facets["database"]["status"] == "filled"
     assert facets["database"]["content"] == "database detail"
 
@@ -92,6 +93,15 @@ def test_for_graph_only_attaches_to_impl_tasks():
     generate_task_facets_for_graph(tasks, {}, None, _FakeLLM(_all_filled_response()))
     assert "facets" in tasks[0]
     assert "facets" not in tasks[1]
+
+
+def test_invalid_status_coerces_to_needs_human():
+    resp = json.dumps({
+        **{k: {"status": "filled", "content": "x", "reason": ""} for k in FACET_KEYS},
+        "input": {"status": "bogus", "content": "x", "reason": ""},
+    })
+    facets = generate_task_facets(_impl_task(), {}, None, _FakeLLM(resp))
+    assert facets["input"] == {"status": "needs_human", "content": "", "reason": ""}
 
 
 def test_for_graph_kill_switch(monkeypatch):
