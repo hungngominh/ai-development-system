@@ -43,7 +43,7 @@ def test_command_is_read_only_and_uses_repo_cwd(tmp_path):
     assert kw["cwd"] == str(tmp_path)
     assert "--permission-mode" in cmd and "bypassPermissions" in cmd
     assert "--disallowedTools" in cmd
-    for banned in ("Edit", "Write", "Bash"):
+    for banned in ("Edit", "Write", "Bash", "PowerShell", "WebFetch", "WebSearch"):
         assert banned in cmd
     assert "-p" in cmd
 
@@ -84,7 +84,7 @@ def test_missing_facet_key_becomes_needs_human(tmp_path):
     run = _FakeRun(_cp(stdout=_wrapper(inner)))
     facets = generate_task_facets_agentic(_task(), str(tmp_path), run=run)
     assert facets["input"]["status"] == "filled"
-    assert facets["response"]["status"] == "needs_human"
+    assert all(facets[k]["status"] == "needs_human" for k in FACET_KEYS if k != "input")
 
 
 def test_build_command_includes_model_when_given(tmp_path):
