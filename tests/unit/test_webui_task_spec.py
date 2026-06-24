@@ -1,4 +1,5 @@
 import json
+import types
 
 from ai_dev_system import webui
 from ai_dev_system.task_graph.facets import FACET_KEYS
@@ -49,3 +50,21 @@ def test_save_writes_json_and_returns_path(tmp_path):
     assert data["task"]["title"] == "My Task"
     assert set(data["facets"].keys()) == set(FACET_KEYS)
     assert path.parent.name == "task_specs"
+
+
+def test_spec_task_stub_renders_and_saves(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "_config",
+                        lambda: types.SimpleNamespace(storage_root=str(tmp_path)))
+    page = webui._spec_task("build a CSV importer", "stub")
+    assert isinstance(page, (bytes, bytearray))
+    text = page.decode("utf-8")
+    assert "Task spec" in text
+    assert "cần làm rõ" in text   # stub → all needs_human
+    # a TaskSpec file was written
+    saved = list((tmp_path / "task_specs").glob("*.json"))
+    assert len(saved) == 1
+
+
+def test_spec_task_empty_idea_returns_message():
+    page = webui._spec_task("", "stub")
+    assert b"task" in page.lower()  # renders a page, not a crash

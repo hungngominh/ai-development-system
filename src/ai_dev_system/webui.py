@@ -134,7 +134,20 @@ def _home() -> bytes:
         "<tr><th>Run</th><th>Status</th><th>Title</th><th>Created</th></tr>"
         f"{rows}</table></div>"
     )
-    return _page("AI Dev System", form + table)
+    task_form = """
+    <div class='card'><h2>Đặc tả 1 task</h2>
+    <form method='post' action='/spec-task'>
+      <label>Mô tả task</label><textarea name='idea' rows='3' placeholder='Mô tả 1 task/feature...' required></textarea>
+      <label>Chế độ LLM</label>
+      <select name='mode'>
+        <option value='stub'>Stub — tức thì (facet giả = needs_human)</option>
+        <option value='max'>Claude Max — thật (~vài chục giây)</option>
+      </select>
+      <button type='submit'>Sinh TaskSpec →</button>
+    </form>
+    <p class='muted'>Trả về 8 facet (Input/Auth/Business rule/DB/Response/Error/NFR/Test) cho task.</p></div>
+    """
+    return _page("AI Dev System", form + task_form + table)
 
 
 def _run_detail(run_id: str) -> bytes:
@@ -376,6 +389,32 @@ def _start(name: str, idea: str, mode: str) -> None:
     )
 
 
+def _spec_task(idea: str, mode: str) -> bytes:
+    idea = (idea or "").strip()
+    if not idea:
+        return _page("task spec", "<div class='card muted'>Nhập mô tả task trước đã. "
+                     "<a href='/'>← về trang chủ</a></div>")
+    try:
+        if mode == "stub":
+            from ai_dev_system.debate.llm import StubDebateLLMClient
+            llm = StubDebateLLMClient()
+        else:
+            from ai_dev_system.llm_factory import make_real_llm_client
+            llm = make_real_llm_client()
+    except RuntimeError as exc:
+        return _page("task spec", f"<div class='card muted'>LLM chưa cấu hình: "
+                     f"{html.escape(str(exc))}</div>")
+    from ai_dev_system.task_graph.single_task import spec_single_task
+    result = spec_single_task(idea, llm)
+    path = _save_task_spec(result["task"], result["facets"],
+                           storage_root=_config().storage_root)
+    body = (
+        _render_task_spec(result["task"], result["facets"])
+        + f"<p class='muted'>Đã lưu: {html.escape(str(path))} · <a href='/'>← trang chủ</a></p>"
+    )
+    return _page("Task spec", body)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # silence
         pass
@@ -416,6 +455,12 @@ class Handler(BaseHTTPRequestHandler):
             )
             self._send(_page("aborted", body,
                              head_extra=f"<meta http-equiv='refresh' content='2;url={html.escape(back)}'>"))
+        elif path == "/spec-task":
+            length = int(self.headers.get("Content-Length", "0"))
+            form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+            idea = (form.get("idea") or [""])[0].strip()
+            mode = (form.get("mode") or ["stub"])[0]
+            self._send(_spec_task(idea, mode))
         elif path == "/start":
             length = int(self.headers.get("Content-Length", "0"))
             form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
