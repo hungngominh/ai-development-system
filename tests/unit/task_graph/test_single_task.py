@@ -41,3 +41,23 @@ def test_spec_single_task_returns_task_and_eight_facets():
 def test_spec_single_task_stub_yields_all_needs_human():
     result = spec_single_task("build a CSV importer", StubDebateLLMClient())
     assert all(result["facets"][k]["status"] == "needs_human" for k in FACET_KEYS)
+
+
+def test_spec_single_task_uses_agentic_when_repo_given(monkeypatch):
+    import ai_dev_system.task_graph.single_task as st
+    called = {}
+    def _fake_agentic(task, repo_path, **kw):
+        called["repo"] = repo_path
+        from ai_dev_system.task_graph.facets import FACET_KEYS
+        return {k: {"status": "filled", "content": "x", "reason": ""} for k in FACET_KEYS}
+    monkeypatch.setattr(st, "generate_task_facets_agentic", _fake_agentic)
+    result = st.spec_single_task("add CSV import", None, repo_path="/some/repo")
+    assert called["repo"] == "/some/repo"
+    assert result["task"]["facets"]["input"]["status"] == "filled"
+
+
+def test_spec_single_task_uses_text_path_when_no_repo():
+    from ai_dev_system.debate.llm import StubDebateLLMClient
+    from ai_dev_system.task_graph.facets import FACET_KEYS
+    result = spec_single_task("add CSV import", StubDebateLLMClient())  # no repo_path
+    assert all(result["facets"][k]["status"] == "needs_human" for k in FACET_KEYS)  # stub Mode A

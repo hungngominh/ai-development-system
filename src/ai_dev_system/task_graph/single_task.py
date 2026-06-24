@@ -7,6 +7,7 @@ one ad-hoc task. One LLM call (the facets).
 from __future__ import annotations
 
 from ai_dev_system.task_graph.facets import generate_task_facets
+from ai_dev_system.task_graph.facets_agentic import generate_task_facets_agentic
 
 _ADHOC_ID = "TASK-ADHOC"
 _TITLE_MAX = 60
@@ -27,9 +28,16 @@ def build_single_task(idea: str, *, title: str | None = None) -> dict:
     }
 
 
-def spec_single_task(idea: str, llm, *, title: str | None = None) -> dict:
-    """-> {"task": <task with .facets>, "facets": <8-facet dict>}. One LLM call."""
+def spec_single_task(idea: str, llm, *, title: str | None = None, repo_path: str | None = None) -> dict:
+    """-> {"task": <task with .facets>, "facets": <8-facet dict>}.
+
+    repo_path set → agentic, repo-grounded facets (llm unused).
+    else → text/spec facets via `llm` (slice-2 path).
+    """
     task = build_single_task(idea, title=title)
-    facets = generate_task_facets(task, {}, None, llm)
+    if repo_path:
+        facets = generate_task_facets_agentic(task, repo_path)
+    else:
+        facets = generate_task_facets(task, {}, None, llm)
     task["facets"] = facets
     return {"task": task, "facets": facets}
