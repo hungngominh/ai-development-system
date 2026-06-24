@@ -43,7 +43,24 @@ SYSTEM_PROMPT_BRIEF_V2 = (
 )
 
 
-def generate_questions(brief: dict, llm_client) -> list[Question]:
+def _lens_block(profile) -> str:
+    dims = "; ".join(profile.key_dimensions)
+    personas = ", ".join(profile.primary_personas) or "the stated users"
+    return (
+        "\n\nPROJECT PROFILE (personalization lens):\n"
+        f"- vertical: {profile.vertical}\n"
+        f"- primary users: {personas}\n"
+        f"- key product/behavioral dimensions: {dims}\n"
+        "In ADDITION to technical questions, generate clarifying questions across "
+        "these product/behavioral dimensions (user psychology, daily-usage behavior, "
+        "retention/emotion as relevant). Tag such questions with domain one of "
+        "psychology, growth, research, product, design. For them, set agent_a/agent_b "
+        "from these personas where fitting: BehavioralPsychologist, "
+        "RetentionGrowthStrategist, UXResearcher, MarketAnalyst, ProductManager, UXDesigner."
+    )
+
+
+def generate_questions(brief: dict, llm_client, profile=None) -> list[Question]:
     """Single LLM call: brief → list[Question].
 
     Detects intake brief v2 via `brief.brief_version == 2` and switches to the
@@ -52,6 +69,8 @@ def generate_questions(brief: dict, llm_client) -> list[Question]:
     """
     use_brief_v2 = brief.get("brief_version") == 2
     system = SYSTEM_PROMPT_BRIEF_V2 if use_brief_v2 else SYSTEM_PROMPT
+    if profile is not None and not profile.is_empty():
+        system = system + _lens_block(profile)
 
     response = llm_client.complete(
         system=system,
