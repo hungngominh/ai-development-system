@@ -184,6 +184,11 @@ def run_debate_pipeline(
     task_run = task_run_repo.create_sync(run_id, task_type="generate_questions")
     task_run["input_artifact_ids"] = []
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run["task_run_id"])
+    # Commit the run row + bookkeeping NOW so the run is visible immediately
+    # (e.g. in the dashboard) and — crucially — the SQLite write lock is RELEASED
+    # during the slow, DB-free LLM phases below. Otherwise a single transaction is
+    # held for the whole multi-minute debate, locking the DB for every other writer.
+    conn.commit()
     questions, decisions, digest = _question_path(
         active_flags, brief, brief_v2, llm_client,
     )
@@ -194,6 +199,7 @@ def run_debate_pipeline(
     task_run = task_run_repo.create_sync(run_id, task_type="run_debate")
     task_run["input_artifact_ids"] = []
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run["task_run_id"])
+    conn.commit()  # release the write lock during the (slow, DB-free) debate
     debate_report = _debate_path(
         active_flags, questions, llm_client,
         run_id=run_id, brief=brief, decisions=decisions, digest=digest,

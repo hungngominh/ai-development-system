@@ -12,18 +12,33 @@ import json
 import logging
 import os
 import sqlite3
+import warnings
 from typing import Optional
 
 from ai_dev_system.config import Config
 from ai_dev_system.db.repos.artifacts import ArtifactRepo
 from ai_dev_system.db.repos.events import EventRepo
-from ai_dev_system.db.helpers import dump_json, load_array, new_uuid
+from ai_dev_system.db.repos.runs import RunRepo
+from ai_dev_system.db.helpers import dump_json, load_array, load_json, new_uuid
 
 logger = logging.getLogger(__name__)
 
 
 class ArtifactResolutionError(Exception):
     """Required input artifact could not be resolved to a filesystem path."""
+
+
+def _build_promoted_outputs(task: dict) -> list[dict]:
+    """Derive promoted outputs from a task's declared expected_outputs.
+
+    One PromotedOutput-shaped dict per expected output so the agent knows which
+    files to write; the worker maps each name to the task's single artifact.
+    Empty expected_outputs -> [] (task still runs, just promotes nothing).
+    """
+    return [
+        {"name": out, "artifact_type": "EXECUTION_LOG", "description": ""}
+        for out in task.get("expected_outputs", [])
+    ]
 
 
 def materialize_task_runs(
@@ -81,7 +96,7 @@ def materialize_task_runs(
                 ?,
                 CURRENT_TIMESTAMP,
                 '[]',
-                '[]'
+                ?
             )
             ON CONFLICT (run_id, task_id, attempt_number) DO NOTHING
             """,
@@ -93,6 +108,7 @@ def materialize_task_runs(
                 dump_json(task.get("deps", [])),
                 task.get("agent_type"),
                 dump_json(_build_context(task)),
+                dump_json(_build_promoted_outputs(task)),
             ),
         )
 
@@ -109,6 +125,21 @@ def materialize_task_runs(
         run_id, "PHASE_STARTED", "system",
         payload={"phase": "execution", "task_count": len(atomic_tasks)},
     )
+
+    # Seed the name-addressed output map with pipeline inputs the first task
+    # needs: TASK-PARSE's required_input "raw_spec" IS the SPEC_BUNDLE produced
+    # earlier in Phase B. Both aliases point at spec_bundle_id so resolution
+    # finds it before any task has run.
+    run_row = conn.execute(
+        "SELECT current_artifacts FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    if run_row:
+        current = load_json(run_row["current_artifacts"], default={}) or {}
+        spec_id = current.get("spec_bundle_id")
+        if spec_id:
+            run_repo = RunRepo(conn)
+            run_repo.record_output(run_id, "spec_bundle", spec_id)
+            run_repo.record_output(run_id, "raw_spec", spec_id)
 
     logger.info("Materialized %d tasks for run %s", len(atomic_tasks), run_id)
 
@@ -150,22 +181,31 @@ def _resolve_artifact_paths(
     else:
         current = current_raw or {}
 
+    # Task outputs are name-addressed in current_artifacts.outputs; consult that
+    # first (case-insensitive), then fall back to the fuzzy pipeline-key match.
+    outputs = current.get("outputs") or {}
+    outputs_ci = {str(k).lower(): v for k, v in outputs.items()}
+
     resolved = []
     for logical_name in required:
-        artifact_id = _match_artifact(logical_name, current)
-        if artifact_id is None:
-            raise ArtifactResolutionError(
-                f"Required input '{logical_name}' not in current_artifacts for run {run_id}. "
-                f"Upstream task may not have completed yet."
-            )
-        artifact = conn.execute(
-            "SELECT artifact_id, content_ref FROM artifacts WHERE artifact_id = ?",
-            (artifact_id,),
-        ).fetchone()
+        artifact_id = outputs_ci.get(str(logical_name).lower()) or _match_artifact(logical_name, current)
+        artifact = None
+        if artifact_id is not None:
+            artifact = conn.execute(
+                "SELECT artifact_id, content_ref FROM artifacts WHERE artifact_id = ?",
+                (artifact_id,),
+            ).fetchone()
         if artifact is None:
-            raise ArtifactResolutionError(
-                f"Artifact {artifact_id} referenced by '{logical_name}' not found."
+            # Lenient: don't fail the task on an unresolvable input (e.g. ad-hoc
+            # rule-task names). Pass the name through without a path; the agent
+            # still has the task objective + whatever else resolved.
+            warnings.warn(
+                f"Required input '{logical_name}' not resolvable for run {run_id}; "
+                f"task will run without it.",
+                stacklevel=2,
             )
+            resolved.append({"name": logical_name, "artifact_id": None, "path": None})
+            continue
         resolved.append({
             "name": logical_name,
             "artifact_id": str(artifact["artifact_id"]),
@@ -181,6 +221,8 @@ def _match_artifact(logical_name: str, current_artifacts: dict) -> Optional[str]
     """Map a logical input name to an artifact_id from current_artifacts."""
     name_lower = logical_name.lower().replace("_", "").replace(".", "").replace("-", "")
     for key, artifact_id in current_artifacts.items():
+        if key == "outputs":
+            continue  # nested name->id map, handled separately (value is a dict)
         if artifact_id:
             key_clean = key.replace("_id", "").replace("_", "")
             if key_clean in name_lower or name_lower in key_clean:

@@ -57,13 +57,21 @@ def test_build_context_returns_snapshot():
     assert ctx["verification_steps"] == ["step1"]
 
 
-def test_resolve_artifact_paths_raises_on_missing(conn, seed_run):
+def test_resolve_artifact_paths_lenient_on_missing(conn, seed_run):
+    # Unresolvable inputs are passed through with path=None (warn, don't raise)
+    # so a task still runs instead of failing the whole graph.
+    import warnings as _warnings
+
     context = {
         "task_id": "TASK-IMPL",
         "required_inputs": ["some_nonexistent_artifact.md"],
     }
-    with pytest.raises(ArtifactResolutionError):
-        _resolve_artifact_paths(conn, seed_run, context)
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore")
+        result = _resolve_artifact_paths(conn, seed_run, context)
+    assert result["required_inputs"] == [
+        {"name": "some_nonexistent_artifact.md", "artifact_id": None, "path": None}
+    ]
 
 
 def test_resolve_artifact_paths_returns_empty_for_no_inputs(conn, seed_run):

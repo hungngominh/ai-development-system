@@ -160,8 +160,16 @@ def main(argv=None) -> int:
         conn.commit()
         total, escalated, resolved, optional = _count_questions(result.debate_report.results)
         print("[Done]     DEBATE_REPORT promoted. Status: PAUSED_AT_GATE_1", file=sys.stderr)
+    except KeyboardInterrupt:
+        # Console close / Ctrl+C is a BaseException, so `except Exception` below
+        # misses it — leaving the log truncated mid-debate with no marker. Emit
+        # an explicit line so the dashboard shows "aborted" instead of a frozen
+        # progress tail, then re-raise to exit non-zero.
+        print("[Aborted]  interrupted before completion (KeyboardInterrupt)",
+              file=sys.stderr, flush=True)
+        raise
     except Exception as exc:
-        print(f"Pipeline error: {exc}", file=sys.stderr)
+        print(f"Pipeline error: {exc}", file=sys.stderr, flush=True)
         return 1
     finally:
         conn.close()

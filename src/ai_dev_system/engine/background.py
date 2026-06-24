@@ -167,6 +167,7 @@ def check_completion(conn: sqlite3.Connection, run_id: str) -> None:
             SUM(CASE WHEN status = 'PENDING'            THEN 1 ELSE 0 END) AS pending_count
         FROM task_runs
         WHERE run_id = ?
+          AND task_graph_artifact_id IS NOT NULL
         """,
         (run_id,),
     ).fetchone()

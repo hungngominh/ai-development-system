@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import sqlite3
 
-from ai_dev_system.db.helpers import dump_json, new_uuid
+from ai_dev_system.db.helpers import dump_json, load_json, new_uuid
 
 
 class RunRepo:
@@ -56,4 +56,27 @@ class RunRepo:
             WHERE run_id = ?
             """,
             (status, run_id),
+        )
+
+    def record_output(self, run_id: str, name: str, artifact_id: str) -> None:
+        """Record a task's logical output name -> artifact_id under
+        current_artifacts.outputs, so downstream tasks can resolve their
+        required_inputs by name.
+
+        Python read-modify-write (not json_set) so names with dots/spaces
+        (e.g. "solution_design.md", "backend source code") are handled safely.
+        """
+        row = self.conn.execute(
+            "SELECT current_artifacts FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return
+        current = load_json(row["current_artifacts"], default={}) or {}
+        outputs = current.get("outputs") or {}
+        outputs[name] = artifact_id
+        current["outputs"] = outputs
+        self.conn.execute(
+            "UPDATE runs SET current_artifacts = ?, last_activity_at = CURRENT_TIMESTAMP "
+            "WHERE run_id = ?",
+            (dump_json(current), run_id),
         )

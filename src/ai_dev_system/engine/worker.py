@@ -13,6 +13,7 @@ import sqlite3
 from ai_dev_system.agents.base import AgentResult, PromotedOutput
 from ai_dev_system.config import Config
 from ai_dev_system.db.repos.events import EventRepo
+from ai_dev_system.db.repos.runs import RunRepo
 from ai_dev_system.db.repos.task_runs import TaskRunRepo
 from ai_dev_system.engine.resolver import resolve_dependencies
 from ai_dev_system.rules.registry import RuleRegistry
@@ -309,9 +310,20 @@ def _promote_for_runner(conn, config, task: dict, result, worker_id: str, run_id
     - Tasks WITH promoted_outputs: promote_output() marks success internally.
     - Tasks WITHOUT promoted_outputs: call mark_success() explicitly.
     """
-    if task["promoted_outputs_parsed"]:
-        for po in task["promoted_outputs_parsed"]:
-            promote_output(conn, config, task, po, task["temp_path"])
+    pos = task["promoted_outputs_parsed"]
+    if pos:
+        # promote_output moves the WHOLE temp dir as ONE artifact and marks the
+        # task SUCCESS, so promote exactly once per task (looping would fail the
+        # 2nd call's RUNNING guard). Then map every declared output NAME to that
+        # artifact so downstream tasks resolve their required_inputs by name.
+        artifact_po = PromotedOutput(
+            name=task["task_id"], artifact_type="EXECUTION_LOG",
+            description=f"Outputs of {task['task_id']}",
+        )
+        artifact_id = promote_output(conn, config, task, artifact_po, task["temp_path"])
+        run_repo = RunRepo(conn)
+        for po in pos:
+            run_repo.record_output(run_id, po.name, artifact_id)
     else:
         rows = TaskRunRepo(conn).mark_success(task["task_run_id"], task["temp_path"], None)
         if rows > 0:

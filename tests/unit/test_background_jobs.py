@@ -11,13 +11,23 @@ def _insert_task(conn, run_id, task_id, status, deps=None, retry_at=None, retry_
     tid = str(uuid.uuid4())
     deps_json = json.dumps(deps or [])
     retry_at_str = retry_at.isoformat() if hasattr(retry_at, "isoformat") else retry_at
+    # Execution task_runs carry a task_graph_artifact_id (synchronous pipeline
+    # bookkeeping task_runs leave it NULL); check_completion only counts the
+    # former, so seed a real graph artifact to satisfy the FK.
+    graph_aid = f"graph-{run_id}"
+    conn.execute("""
+        INSERT OR IGNORE INTO artifacts (
+            artifact_id, run_id, artifact_type, version, status, created_by,
+            input_artifact_ids, content_ref, content_checksum, content_size
+        ) VALUES (?, ?, 'TASK_GRAPH_APPROVED', 1, 'ACTIVE', 'system', '[]', '/x', 'x', 0)
+    """, (graph_aid, run_id))
     conn.execute("""
         INSERT INTO task_runs (
             task_run_id, run_id, task_id, attempt_number, status,
             agent_type, input_artifact_ids, resolved_dependencies, promoted_outputs,
-            retry_count, retry_at
-        ) VALUES (?, ?, ?, 1, ?, 'agent', '[]', ?, '[]', ?, ?)
-    """, (tid, run_id, task_id, status, deps_json, retry_count, retry_at_str))
+            retry_count, retry_at, task_graph_artifact_id
+        ) VALUES (?, ?, ?, 1, ?, 'agent', '[]', ?, '[]', ?, ?, ?)
+    """, (tid, run_id, task_id, status, deps_json, retry_count, retry_at_str, graph_aid))
     return tid
 
 
