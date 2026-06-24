@@ -11,6 +11,7 @@ from ai_dev_system.normalize import normalize_idea
 from ai_dev_system.debate.agents import AgentRegistry
 from ai_dev_system.debate.config import DebateConfig
 from ai_dev_system.debate.questions import generate_questions
+from ai_dev_system.debate.profile import infer_project_profile
 from ai_dev_system.debate.questions.pipeline import run_pipeline as run_question_pipeline_v2
 from ai_dev_system.debate.engine import run_debate
 from ai_dev_system.debate.report import DebateReport
@@ -70,6 +71,7 @@ def _question_path(
     brief_v1: dict,
     brief_v2: dict | None,
     llm_client,
+    profile=None,
 ):
     """Spec phase1-migration §Dispatcher: question gen routes by flag.
 
@@ -89,7 +91,7 @@ def _question_path(
     """
     if flags.use_question_pipeline_v2 and brief_v2 is not None:
         digest = build_brief_digest(brief_v2)
-        result = run_question_pipeline_v2(brief_v2, digest, llm_client)
+        result = run_question_pipeline_v2(brief_v2, digest, llm_client)  # profile added in Task 6
         return result.questions_final, result.decisions, digest
 
     if flags.use_question_pipeline_v2 and brief_v2 is None:
@@ -99,7 +101,7 @@ def _question_path(
             stacklevel=2,
         )
 
-    questions = generate_questions(brief_v1, llm_client)
+    questions = generate_questions(brief_v1, llm_client, profile=profile)
     return questions, None, None
 
 
@@ -180,6 +182,11 @@ def run_debate_pipeline(
     # DebateReport artifact (eval/audit can read which path ran).
     brief = {**brief, "_flags": active_flags.snapshot()}
 
+    # Infer the vertical lens once; stamp it onto the brief so it travels with
+    # the DebateReport artifact (inspectable at Gate 1 + reusable by Spec 2).
+    profile = infer_project_profile(brief_v2 or brief, llm_client)
+    brief = {**brief, "_project_profile": profile.to_dict()}
+
     # Step 2: Generate questions (flag-dispatched)
     task_run = task_run_repo.create_sync(run_id, task_type="generate_questions")
     task_run["input_artifact_ids"] = []
@@ -190,7 +197,7 @@ def run_debate_pipeline(
     # held for the whole multi-minute debate, locking the DB for every other writer.
     conn.commit()
     questions, decisions, digest = _question_path(
-        active_flags, brief, brief_v2, llm_client,
+        active_flags, brief, brief_v2, llm_client, profile=profile,
     )
 
     # Step 3: Run debate (flag-dispatched)

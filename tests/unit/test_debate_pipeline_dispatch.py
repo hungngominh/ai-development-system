@@ -57,7 +57,7 @@ def test_question_path_v1_when_flag_off(monkeypatch):
     """Flag off → calls legacy generate_questions, returns no decisions/digest."""
     calls = []
 
-    def fake_legacy(brief, llm_client):
+    def fake_legacy(brief, llm_client, **kwargs):
         calls.append(("legacy", brief))
         return [Question(id="Q1", text="?", classification="REQUIRED",
                          domain="security", agent_a="SecuritySpecialist",
@@ -118,10 +118,10 @@ def test_question_path_falls_back_to_v1_when_brief_v2_missing(monkeypatch):
     """Flag on but no brief_v2 → warn + degrade to v1, no decisions."""
     monkeypatch.setattr(
         "ai_dev_system.debate_pipeline.generate_questions",
-        lambda brief, client: [Question(id="Q1", text="?", classification="REQUIRED",
-                                        domain="security",
-                                        agent_a="SecuritySpecialist",
-                                        agent_b="BackendArchitect")],
+        lambda brief, client, **kwargs: [Question(id="Q1", text="?", classification="REQUIRED",
+                                                  domain="security",
+                                                  agent_a="SecuritySpecialist",
+                                                  agent_b="BackendArchitect")],
     )
     # If the v2 path is reached unexpectedly, this assertion fires:
     def fail_if_called(*_a, **_kw):
@@ -193,8 +193,8 @@ def test_debate_path_v2_when_flag_on_wires_full_enrichment(monkeypatch):
     assert "registry" in kwargs and kwargs["registry"] is not None
     assert kwargs["brief_digest"] == "DIGEST"
     assert kwargs["decisions"] == decisions
-    # registry was loaded from the real .md files → all 12 agents present
-    assert len(kwargs["registry"]) == 12
+    # registry was loaded from the real .md files → all 16 agents present
+    assert len(kwargs["registry"]) == 16
 
 
 # ---- snapshot semantics ----
@@ -212,7 +212,7 @@ def test_flag_snapshot_overrides_env(monkeypatch):
 
     monkeypatch.setattr(
         "ai_dev_system.debate_pipeline.generate_questions",
-        lambda brief, client: [],
+        lambda brief, client, **kwargs: [],
     )
 
     def fail_if_called(*a, **kw):
