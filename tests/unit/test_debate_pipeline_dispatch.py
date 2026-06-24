@@ -85,7 +85,7 @@ def test_question_path_v2_when_flag_on_and_brief_v2_present(monkeypatch):
     sample_d = Decision(id="D1", summary="x", classification="REQUIRED",
                         domain_hints=["security"])
 
-    def fake_v2(brief, digest, llm_client):
+    def fake_v2(brief, digest, llm_client, profile=None):
         pipeline_calls.append((brief, digest))
         return PipelineResult(
             decisions=[sample_d],
