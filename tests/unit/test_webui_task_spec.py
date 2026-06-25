@@ -194,8 +194,8 @@ def test_home_lists_debate_run_linking_to_run_detail(monkeypatch, file_config):
 def test_render_shows_spec_and_exec_sections():
     facets = _facets()
     html_out = webui._render_task_spec({"title": "T"}, facets)
-    assert "Spec facets" in html_out or "spec" in html_out.lower()
-    assert "Implementation" in html_out or "impl" in html_out.lower()
+    assert "Spec facets (13)" in html_out
+    assert "Implementation documents (7)" in html_out
 
 
 def test_render_exec_na_shows_reason():
@@ -204,3 +204,17 @@ def test_render_exec_na_shows_reason():
         facets[k] = {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
     html_out = webui._render_task_spec({"title": "T"}, facets)
     assert "exec-time" in html_out
+
+
+def test_task_spec_page_done_all_spec_needs_human_shows_warning(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "_config", lambda: types.SimpleNamespace(storage_root=str(tmp_path)))
+    # all spec facets needs_human, exec facets na — simulates a full LLM failure
+    facets = {k: {"status": "needs_human", "content": "", "reason": ""} for k in SPEC_FACET_KEYS}
+    facets.update({k: {"status": "na", "content": "", "reason": "exec-time"} for k in EXEC_FACET_KEYS})
+    d = tmp_path / "task_specs"; d.mkdir()
+    (d / "warn1.json").write_text(
+        json.dumps({"status": "done", "task": {"title": "T"}, "facets": facets}),
+        encoding="utf-8",
+    )
+    page = webui._task_spec_page("warn1").decode("utf-8")
+    assert "⚠" in page or "Tất cả" in page  # warning card shown

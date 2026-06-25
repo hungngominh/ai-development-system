@@ -423,9 +423,12 @@ def _task_spec_page(spec_id: str) -> bytes:
     status = data.get("status")
     if status == "done":
         facets = data.get("facets") or {}
-        needs_human = sum(1 for f in facets.values() if f.get("status") == "needs_human")
+        spec_needs_human = sum(
+            1 for k, f in facets.items()
+            if k in SPEC_FACET_KEYS and f.get("status") == "needs_human"
+        )
         warning = ""
-        if needs_human == 8:
+        if spec_needs_human == len(SPEC_FACET_KEYS):
             log_lines = _task_spec_log_lines(spec_id)
             log_pre = html.escape("\n".join(log_lines)) if log_lines else "(không có log)"
             warning = (
