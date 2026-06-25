@@ -72,7 +72,7 @@ def test_streaming_writes_to_live_log(tmp_path):
     fake_proc = _make_fake_popen(ndjson_lines, returncode=0)
 
     # Patch Popen and git diff
-    with patch("subprocess.Popen", return_value=fake_proc), \
+    with patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", return_value=fake_proc), \
          patch("ai_dev_system.agents.repo_branch_agent._git") as mock_git:
         mock_git.return_value = MagicMock(stdout="", returncode=0)
         out_dir = tmp_path / "output"
@@ -95,7 +95,7 @@ def test_no_live_log_path_does_not_crash(tmp_path):
         json.dumps({"type": "result", "subtype": "success", "result": "ok"}) + "\n",
     ]
     fake_proc = _make_fake_popen(ndjson_lines, returncode=0)
-    with patch("subprocess.Popen", return_value=fake_proc), \
+    with patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", return_value=fake_proc), \
          patch("ai_dev_system.agents.repo_branch_agent._git") as mock_git:
         mock_git.return_value = MagicMock(stdout="", returncode=0)
         out_dir = tmp_path / "output"
@@ -118,7 +118,7 @@ def test_nonzero_returncode_returns_error(tmp_path):
         def wait(self, timeout=None):
             self.returncode = 1
 
-    with patch("subprocess.Popen", return_value=FakePopen()), \
+    with patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", return_value=FakePopen()), \
          patch("ai_dev_system.agents.repo_branch_agent._git") as mock_git:
         mock_git.return_value = MagicMock(stdout="", returncode=0)
         out_dir = tmp_path / "output"
