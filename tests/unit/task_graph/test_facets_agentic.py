@@ -1,8 +1,10 @@
 import json
 import subprocess
 
+import pytest
+
 from ai_dev_system.task_graph.facets_agentic import generate_task_facets_agentic, _build_command
-from ai_dev_system.task_graph.facets import FACET_KEYS
+from ai_dev_system.task_graph.facets import FACET_KEYS, SPEC_FACET_KEYS, EXEC_FACET_KEYS
 
 
 def _task():
@@ -17,7 +19,9 @@ def _wrapper(inner: str):
 
 
 def _ok_inner():
-    return json.dumps({k: {"status": "filled", "content": f"{k} c", "reason": ""} for k in FACET_KEYS})
+    # LLM only returns spec facets (realistic)
+    return json.dumps({k: {"status": "filled", "content": f"{k} c", "reason": ""}
+                       for k in SPEC_FACET_KEYS})
 
 
 class _FakeRun:
@@ -48,35 +52,35 @@ def test_command_is_read_only_and_uses_repo_cwd(tmp_path):
     assert "-p" in cmd
 
 
-def test_missing_repo_path_yields_needs_human_without_running():
+def test_missing_repo_path_raises_without_running():
     run = _FakeRun(_cp(stdout=_wrapper(_ok_inner())))
-    facets = generate_task_facets_agentic(_task(), "/no/such/dir", run=run)
-    assert all(facets[k]["status"] == "needs_human" for k in FACET_KEYS)
+    with pytest.raises(ValueError, match="repo_path"):
+        generate_task_facets_agentic(_task(), "/no/such/dir", run=run)
     assert run.calls == []  # never ran the subprocess
 
 
-def test_nonzero_exit_yields_needs_human(tmp_path):
+def test_nonzero_exit_raises(tmp_path):
     run = _FakeRun(_cp(stdout="", returncode=1, stderr="boom"))
-    facets = generate_task_facets_agentic(_task(), str(tmp_path), run=run)
-    assert all(facets[k]["status"] == "needs_human" for k in FACET_KEYS)
+    with pytest.raises(RuntimeError, match="code 1"):
+        generate_task_facets_agentic(_task(), str(tmp_path), run=run)
 
 
-def test_timeout_yields_needs_human(tmp_path):
+def test_timeout_raises(tmp_path):
     def _raise(cmd, **kw): raise subprocess.TimeoutExpired(cmd, 1)
-    facets = generate_task_facets_agentic(_task(), str(tmp_path), run=_raise)
-    assert all(facets[k]["status"] == "needs_human" for k in FACET_KEYS)
+    with pytest.raises(subprocess.TimeoutExpired):
+        generate_task_facets_agentic(_task(), str(tmp_path), run=_raise)
 
 
-def test_non_json_wrapper_yields_needs_human(tmp_path):
+def test_non_json_wrapper_raises(tmp_path):
     run = _FakeRun(_cp(stdout="not json at all"))
-    facets = generate_task_facets_agentic(_task(), str(tmp_path), run=run)
-    assert all(facets[k]["status"] == "needs_human" for k in FACET_KEYS)
+    with pytest.raises(Exception):
+        generate_task_facets_agentic(_task(), str(tmp_path), run=run)
 
 
-def test_inner_non_json_yields_needs_human(tmp_path):
+def test_inner_non_json_raises(tmp_path):
     run = _FakeRun(_cp(stdout=_wrapper("the database uses postgres")))  # inner is prose, not JSON
-    facets = generate_task_facets_agentic(_task(), str(tmp_path), run=run)
-    assert all(facets[k]["status"] == "needs_human" for k in FACET_KEYS)
+    with pytest.raises(Exception):
+        generate_task_facets_agentic(_task(), str(tmp_path), run=run)
 
 
 def test_missing_facet_key_becomes_needs_human(tmp_path):
@@ -84,7 +88,12 @@ def test_missing_facet_key_becomes_needs_human(tmp_path):
     run = _FakeRun(_cp(stdout=_wrapper(inner)))
     facets = generate_task_facets_agentic(_task(), str(tmp_path), run=run)
     assert facets["input"]["status"] == "filled"
-    assert all(facets[k]["status"] == "needs_human" for k in FACET_KEYS if k != "input")
+    # Missing spec keys → needs_human; exec keys → na
+    for k in SPEC_FACET_KEYS:
+        if k != "input":
+            assert facets[k]["status"] == "needs_human"
+    for k in EXEC_FACET_KEYS:
+        assert facets[k]["status"] == "na"
 
 
 def test_build_command_includes_model_when_given(tmp_path):
@@ -98,4 +107,22 @@ def test_extract_text_messages_fallback(tmp_path):
     wrapper = json.dumps({"messages": [{"role": "assistant", "content": inner}]})
     run = _FakeRun(_cp(stdout=wrapper))
     facets = generate_task_facets_agentic(_task(), str(tmp_path), run=run)
-    assert all(facets[k]["status"] == "filled" for k in FACET_KEYS)
+    # Spec facets filled by LLM; exec facets default to na
+    assert all(facets[k]["status"] == "filled" for k in SPEC_FACET_KEYS)
+    assert all(facets[k]["status"] == "na" for k in EXEC_FACET_KEYS)
+
+
+def test_exec_facets_are_na_in_agentic_result(tmp_path):
+    run = _FakeRun(_cp(stdout=_wrapper(_ok_inner())))
+    facets = generate_task_facets_agentic(_task(), str(tmp_path), run=run)
+    assert set(facets.keys()) == set(FACET_KEYS)
+    for k in EXEC_FACET_KEYS:
+        assert facets[k]["status"] == "na"
+        assert "exec-time" in facets[k]["reason"]
+
+
+def test_prompt_mentions_13_spec_facets(tmp_path):
+    run = _FakeRun(_cp(stdout=_wrapper(_ok_inner())))
+    generate_task_facets_agentic(_task(), str(tmp_path), run=run)
+    prompt_arg = run.calls[0][0][run.calls[0][0].index("-p") + 1]
+    assert "13" in prompt_arg
