@@ -183,12 +183,130 @@ def _home() -> bytes:
     return _page("AI Dev System", form + task_form + table)
 
 
+_APPROVABLE_STATUSES: dict[str, str] = {
+    "PAUSED_AT_GATE_2": "RUNNING_PHASE_3",
+    "PAUSED_FOR_DECISION": "RUNNING_EXECUTION",
+    "PAUSED_AT_GATE_3": "RUNNING_PHASE_V",
+    "PAUSED_AT_GATE_3B": "RUNNING_PHASE_V",
+}
+
+_TERMINAL_STATUSES = {"COMPLETED", "ABORTED", "FAILED"}
+
+
+def _run_edit_form(run_id: str, title: str, metadata: str, status: str) -> str:
+    rid = html.escape(run_id)
+    approvable = status in _APPROVABLE_STATUSES
+    approve_btn = ""
+    if approvable:
+        approve_btn = (
+            "<form method=\"post\" action=\"/run-approve\" style=\"display:inline;margin-left:10px\">"
+            f"<input type=\"hidden\" name=\"id\" value=\"{rid}\">"
+            "<button type=\"submit\" style=\"background:#1a6b2a\">✓ Duyệt &amp; tiếp tục</button>"
+            "</form>"
+        )
+    return (
+        "<div class=\"card\"><h2>Chỉnh sửa Run</h2>"
+        "<form method=\"post\" action=\"/run-edit\">"
+        f"<input type=\"hidden\" name=\"id\" value=\"{rid}\">"
+        "<label>Tiêu đề</label>"
+        f"<input name=\"title\" value=\"{html.escape(title)}\" required>"
+        "<label>Metadata (JSON)</label>"
+        f"<textarea name=\"metadata\" rows=\"4\">{html.escape(metadata)}</textarea>"
+        "<button type=\"submit\">Lưu ✓</button>"
+        "</form>"
+        f"{approve_btn}"
+        "</div>"
+    )
+
+
+def _do_run_edit(run_id: str, title: str, metadata_str: str) -> str | bytes:
+    """Process run edit. Returns redirect URL string or error page bytes."""
+    from ai_dev_system.db.repos.runs import RunRepo
+
+    run_id = run_id.strip()
+    title = title.strip()
+    if not run_id:
+        return _page("400", "<div class='card'><p class='caveat'>400 — Thiếu run id.</p></div>")
+    if not title:
+        return _page("400", "<div class='card'><p class='caveat'>400 — Tiêu đề không được để trống.</p></div>")
+
+    try:
+        json.loads(metadata_str)
+    except (json.JSONDecodeError, TypeError):
+        return _page("400", "<div class='card'><p class='caveat'>400 — Metadata JSON không hợp lệ.</p></div>")
+
+    cfg = _config()
+    conn = get_connection(cfg.database_url)
+    try:
+        row = conn.execute(
+            "SELECT run_id FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return _page("error", "<div class='card'><p class='caveat'>Run không tìm thấy.</p></div>")
+        RunRepo(conn).update_title_and_metadata(run_id, title, metadata_str)
+        conn.commit()
+    finally:
+        conn.close()
+
+    log = _progress_log()
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as f:
+            import datetime as _dt
+            f.write(f"[run-edit] {run_id[:8]} title={title!r} at {_dt.datetime.now(_dt.timezone.utc).isoformat()}\n")
+    except OSError:
+        pass
+
+    return f"/run?id={urllib.parse.quote(run_id)}"
+
+
+def _do_run_approve(run_id: str) -> str | bytes:
+    """Process run approve. Returns redirect URL string or error page bytes."""
+    from ai_dev_system.db.repos.runs import RunRepo
+
+    run_id = run_id.strip()
+    if not run_id:
+        return _page("400", "<div class='card'><p class='caveat'>400 — Thiếu run id.</p></div>")
+
+    cfg = _config()
+    conn = get_connection(cfg.database_url)
+    try:
+        row = conn.execute(
+            "SELECT run_id, status FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return _page("error", "<div class='card'><p class='caveat'>Run không tìm thấy.</p></div>")
+        current_status = row["status"]
+        next_status = _APPROVABLE_STATUSES.get(current_status)
+        if next_status is None:
+            return _page(
+                "400",
+                "<div class='card'><p class='caveat'>400 — Run không ở trạng thái có thể duyệt "
+                f"(hiện tại: {html.escape(current_status)}).</p></div>",
+            )
+        RunRepo(conn).update_status(run_id, next_status)
+        conn.commit()
+    finally:
+        conn.close()
+
+    log = _progress_log()
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as f:
+            import datetime as _dt
+            f.write(f"[run-approve] {run_id[:8]} {current_status}→{next_status} at {_dt.datetime.now(_dt.timezone.utc).isoformat()}\n")
+    except OSError:
+        pass
+
+    return f"/run?id={urllib.parse.quote(run_id)}"
+
+
 def _run_detail(run_id: str) -> bytes:
     cfg = _config()
     conn = get_connection(cfg.database_url)
     try:
         row = conn.execute(
-            "SELECT run_id, status, title, current_artifacts, created_at FROM runs WHERE run_id = ?",
+            "SELECT run_id, status, title, metadata, current_artifacts, created_at FROM runs WHERE run_id = ?",
             (run_id,),
         ).fetchone()
     finally:
@@ -200,6 +318,7 @@ def _run_detail(run_id: str) -> bytes:
     if row is None:
         head += "<div class='card muted'>Run không có trong DB. Vẫn thử đọc report từ storage…</div>"
         status_card = ""
+        edit_card = ""
     else:
         phase = {"RUNNING_PHASE_1A": "đang sinh câu hỏi…",
                  "RUNNING_PHASE_1B": "đang debate…"}.get(status, "")
@@ -211,18 +330,24 @@ def _run_detail(run_id: str) -> bytes:
             f"<pre>{html.escape(json.dumps(json.loads(row['current_artifacts'] or '{}'), indent=2, ensure_ascii=False))}</pre>"
             f"</details></div>"
         )
+        edit_card = _run_edit_form(
+            run_id,
+            row["title"] or "",
+            row["metadata"] or "{}",
+            status,
+        )
 
     report_path = _find_report_path(run_id)
     idle = _progress_idle_seconds(time.time())
     stale = _looks_stale(running, report_path is not None, idle)
     if status == "PAUSED_AT_GATE_1":
-        body = head + status_card + _gate1_review_page(run_id)
+        body = head + status_card + edit_card + _gate1_review_page(run_id)
         return _page(f"Run {run_id[:8]} · Gate 1", body)
     elif report_path is None and running:
         card = _stale_card(run_id, idle, run_status=status) if stale else _progress_card()
-        body = head + status_card + card
+        body = head + status_card + edit_card + card
     else:
-        body = head + status_card + _render_report(run_id)
+        body = head + status_card + edit_card + _render_report(run_id)
     # Auto-refresh only while genuinely progressing: not once the report exists,
     # and not when stale — refreshing a dead run would falsely imply it's alive.
     live = running and report_path is None and not stale
@@ -1220,6 +1345,30 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._send(_page("resumed", body,
                                  head_extra=f"<meta http-equiv='refresh' content='3;url={html.escape(back)}'>"))
+            elif path == "/run-edit":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                rid = (form.get("id") or [""])[0].strip()
+                title = (form.get("title") or [""])[0]
+                metadata_str = (form.get("metadata") or ["{}"])[0]
+                result = _do_run_edit(rid, title, metadata_str)
+                if isinstance(result, str):
+                    self.send_response(302)
+                    self.send_header("Location", result)
+                    self.end_headers()
+                else:
+                    self._send(result, 400)
+            elif path == "/run-approve":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                rid = (form.get("id") or [""])[0].strip()
+                result = _do_run_approve(rid)
+                if isinstance(result, str):
+                    self.send_response(302)
+                    self.send_header("Location", result)
+                    self.end_headers()
+                else:
+                    self._send(result, 400)
             elif path in ("/gate1-save", "/gate1-approve"):
                 length = int(self.headers.get("Content-Length", "0"))
                 form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
