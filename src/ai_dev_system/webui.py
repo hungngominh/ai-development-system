@@ -483,6 +483,151 @@ def _spawn_task_spec_worker(idea: str, repo: str) -> str:
     return spec_id
 
 
+def _spawn_task_executor(spec_id: str) -> None:
+    """Spawn single_task_executor as a detached background process."""
+    cfg = _config()
+    popen_kwargs: dict = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = (
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+    subprocess.Popen(
+        [
+            sys.executable, "-m",
+            "ai_dev_system.task_graph.single_task_executor",
+            "--id", spec_id,
+            "--storage-root", str(cfg.storage_root),
+            "--database-url", str(cfg.database_url),
+        ],
+        cwd=str(Path(__file__).resolve().parents[2]),
+        **popen_kwargs,
+    )
+
+
+def _task_exec_status(spec_id: str) -> dict:
+    path = Path(_config().storage_root) / "task_specs" / f"{spec_id}-exec.json"
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _task_exec_log_lines(spec_id: str) -> list[str]:
+    log_path = Path(_config().storage_root) / "task_specs" / f"{spec_id}-exec.log"
+    if not log_path.exists():
+        return []
+    try:
+        return log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-50:]
+    except OSError:
+        return []
+
+
+def _task_exec_diff(spec_id: str, run_id: str, cfg) -> str:
+    """Read diff.txt from the EXECUTION_LOG artifact for this run."""
+    conn = get_connection(cfg.database_url)
+    try:
+        row = conn.execute(
+            """
+            SELECT a.content_ref FROM artifacts a
+            JOIN task_runs tr ON tr.output_artifact_id = a.artifact_id
+            WHERE tr.run_id = ? AND a.artifact_type = 'EXECUTION_LOG'
+            ORDER BY a.created_at DESC LIMIT 1
+            """,
+            (run_id,),
+        ).fetchone()
+    except Exception:  # noqa: BLE001
+        row = None
+    finally:
+        conn.close()
+    if not row:
+        return "(diff chưa có — execution đang xử lý hoặc không có output)"
+    diff_file = Path(row["content_ref"]) / "diff.txt"
+    if not diff_file.exists():
+        return "(diff.txt không tìm thấy trong artifact)"
+    try:
+        return diff_file.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return f"(lỗi đọc diff: {exc})"
+
+
+def _task_exec_page(spec_id: str) -> bytes:
+    exec_st = _task_exec_status(spec_id)
+    log_lines = _task_exec_log_lines(spec_id)
+    log_pre = html.escape("\n".join(log_lines)) if log_lines else "(chưa có log)"
+    nav = "<p><a href='/'>← trang chủ</a></p>"
+    branch = html.escape(exec_st.get("branch") or "")
+    base = html.escape(exec_st.get("base_branch") or "")
+    run_id = exec_st.get("run_id") or ""
+    status = exec_st.get("status") or ""
+
+    if not exec_st:
+        return _page(
+            "task exec",
+            nav + "<div class='card muted'>Chưa có thông tin execution. "
+            "Thử refresh sau vài giây.</div>",
+            head_extra="<meta http-equiv='refresh' content='3'>",
+        )
+
+    branch_card = (
+        "<div class='card'>"
+        f"<h2>Branch</h2>"
+        f"<p class='muted'>Branch: <b>{branch}</b> (từ {base})</p>"
+        f"<p class='muted'>Run: {html.escape(run_id[:8]) if run_id else '—'}</p>"
+        "</div>"
+    )
+    log_card = (
+        f"<div class='card'><h2>Log tiến trình</h2><pre>{log_pre}</pre></div>"
+    )
+
+    if status == "running":
+        return _page(
+            "Task execution",
+            nav + branch_card + log_card,
+            head_extra="<meta http-equiv='refresh' content='5'>",
+        )
+
+    if status == "error":
+        err = html.escape(exec_st.get("error") or "")
+        return _page(
+            "Task execution",
+            nav + branch_card
+            + f"<div class='card'><h2>⚠ Lỗi execution</h2>"
+            f"<p class='caveat'>{err}</p></div>"
+            + log_card,
+        )
+
+    # status == "done"
+    cfg = _config()
+    diff_text = _task_exec_diff(spec_id, run_id, cfg)
+    diff_html = html.escape(diff_text)
+    exec_status_badge = _badge(exec_st.get("exec_status") or "COMPLETED")
+    diff_card = (
+        f"<div class='card'><h2>Git diff — {exec_status_badge}</h2>"
+        f"<pre style='max-height:600px;overflow-y:auto'>{diff_html}</pre></div>"
+    )
+    sid_escaped = html.escape(spec_id)
+    action_card = (
+        "<div class='card'><h2>Hành động</h2>"
+        "<form method='post' action='/task-exec' style='display:inline;margin-right:12px'>"
+        f"<input type='hidden' name='id' value='{sid_escaped}'>"
+        "<input type='hidden' name='action' value='accept'>"
+        "<button type='submit' style='background:#1a6b2a'>✓ Accept branch</button>"
+        "</form>"
+        "<form method='post' action='/task-exec' style='display:inline'>"
+        f"<input type='hidden' name='id' value='{sid_escaped}'>"
+        "<input type='hidden' name='action' value='reject'>"
+        "<button type='submit' style='background:#6b1a1a'>✗ Reject &amp; xóa branch</button>"
+        "</form>"
+        f"<p class='muted' style='margin-top:10px'>Accept: giữ branch <b>{branch}</b>, "
+        f"bạn merge thủ công. Reject: xóa branch, quay lại <b>{base}</b>.</p></div>"
+    )
+    return _page("Task execution", nav + branch_card + diff_card + action_card + log_card)
+
+
 def _render_report(run_id: str) -> str:
     path = _find_report_path(run_id)
     if path is None:
@@ -595,6 +740,9 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/task-spec":
                 qs = urllib.parse.parse_qs(parsed.query)
                 self._send(_task_spec_page((qs.get("id") or [""])[0]))
+            elif parsed.path == "/task-exec":
+                qs = urllib.parse.parse_qs(parsed.query)
+                self._send(_task_exec_page((qs.get("id") or [""])[0]))
             else:
                 self._send(_page("404", "<div class='card'>Not found. <a href='/'>home</a></div>"), 404)
         except Exception as exc:  # noqa: BLE001
@@ -623,9 +771,80 @@ class Handler(BaseHTTPRequestHandler):
                 if spec_id:
                     edits = {key: (form.get(f"facet_{key}") or [""])[0] for key in FACET_KEYS}
                     _save_task_spec_edits(spec_id, edits, storage_root=str(_config().storage_root))
-                redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}" if spec_id else "/"
+                    # Spawn executor when repo is available; redirect to exec progress page
+                    try:
+                        _spec_data = json.loads(
+                            (Path(_config().storage_root) / "task_specs" / f"{spec_id}.json")
+                            .read_text(encoding="utf-8")
+                        )
+                        if _spec_data.get("repo"):
+                            _spawn_task_executor(spec_id)
+                            redirect = f"/task-exec?id={urllib.parse.quote(spec_id)}"
+                        else:
+                            redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}"
+                    except Exception:  # noqa: BLE001
+                        redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}"
+                else:
+                    redirect = "/"
                 self._send(_page("saved", "<div class='card'><h2>Đã lưu &amp; duyệt ✓</h2></div>",
                                  head_extra=f"<meta http-equiv='refresh' content='1;url={html.escape(redirect)}'>"))
+            elif path == "/task-exec":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                spec_id = (form.get("id") or [""])[0].strip()
+                action = (form.get("action") or [""])[0].strip()
+                if not spec_id:
+                    self._send(
+                        _page("error", "<div class='card muted'>Thiếu spec id.</div>"), 400
+                    )
+                    return
+                exec_st = _task_exec_status(spec_id)
+                branch = exec_st.get("branch") or ""
+                base = exec_st.get("base_branch") or ""
+                repo = ""
+                try:
+                    _s = json.loads(
+                        (Path(_config().storage_root) / "task_specs" / f"{spec_id}.json")
+                        .read_text(encoding="utf-8")
+                    )
+                    repo = _s.get("repo") or ""
+                except Exception:  # noqa: BLE001
+                    pass
+                if action == "accept":
+                    body = (
+                        "<div class='card'><h2>Branch accepted ✓</h2>"
+                        f"<p>Branch <b>{html.escape(branch)}</b> đã được giữ lại.</p>"
+                        f"<p class='muted'>Để merge: "
+                        f"<code>git checkout {html.escape(base)} &amp;&amp; "
+                        f"git merge --no-ff {html.escape(branch)}</code></p>"
+                        "<p><a href='/'>← trang chủ</a></p></div>"
+                    )
+                    self._send(_page("accepted", body))
+                elif action == "reject":
+                    msg = "Branch đã bị xóa."
+                    if branch and repo:
+                        try:
+                            subprocess.run(
+                                ["git", "checkout", base],
+                                cwd=repo, capture_output=True,
+                                text=True, encoding="utf-8",
+                            )
+                            subprocess.run(
+                                ["git", "branch", "-D", branch],
+                                cwd=repo, capture_output=True,
+                                text=True, encoding="utf-8",
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            msg = f"Lỗi xóa branch: {html.escape(str(exc))}"
+                    body = (
+                        f"<div class='card'><h2>Branch rejected ✗</h2><p>{msg}</p>"
+                        "<p><a href='/'>← trang chủ</a></p></div>"
+                    )
+                    self._send(_page("rejected", body))
+                else:
+                    self._send(
+                        _page("error", "<div class='card muted'>Action không hợp lệ.</div>"), 400
+                    )
             elif path == "/spec-task":
                 length = int(self.headers.get("Content-Length", "0"))
                 form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
