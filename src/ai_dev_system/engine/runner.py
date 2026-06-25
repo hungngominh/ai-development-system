@@ -57,12 +57,17 @@ def run_execution(
 
     stop_event = threading.Event()
 
-    worker_thread = threading.Thread(
-        target=worker_loop,
-        args=(run_id, effective_config, agent, stop_event, conn_factory),
-        name=f"worker-{run_id[:8]}",
-        daemon=True,
-    )
+    n_workers = getattr(effective_config, "max_parallel_workers", 1)
+    worker_threads = []
+    for i in range(n_workers):
+        t = threading.Thread(
+            target=worker_loop,
+            args=(run_id, effective_config, agent, stop_event, conn_factory),
+            name=f"worker-{run_id[:8]}-{i}",
+            daemon=True,
+        )
+        worker_threads.append(t)
+
     background_thread = threading.Thread(
         target=background_loop,
         args=(run_id, effective_config, stop_event, conn_factory),
@@ -70,18 +75,21 @@ def run_execution(
         daemon=True,
     )
 
-    worker_thread.start()
+    for t in worker_threads:
+        t.start()
     background_thread.start()
-    logger.info("Execution runner started for run %s", run_id)
+    logger.info("Execution runner started for run %s (%d workers)", run_id, n_workers)
 
     final_status = _wait_for_terminal_state(run_id, effective_config, conn_factory)
 
     stop_event.set()
-    worker_thread.join(timeout=30)
+    for t in worker_threads:
+        t.join(timeout=30)
     background_thread.join(timeout=10)
 
-    if worker_thread.is_alive():
-        logger.warning("Worker thread did not stop cleanly for run %s", run_id)
+    stale = [t for t in worker_threads if t.is_alive()]
+    if stale:
+        logger.warning("%d worker thread(s) did not stop cleanly for run %s", len(stale), run_id)
 
     logger.info("Run %s finished with status %s", run_id, final_status)
     return ExecutionResult(run_id=run_id, status=final_status)

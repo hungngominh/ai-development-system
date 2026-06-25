@@ -37,6 +37,7 @@ class Config:
     heartbeat_interval_s: float = 30.0
     heartbeat_timeout_s: float = 120.0
     task_timeout_s: float = 3600.0
+    max_parallel_workers: int = 4
     retry_policy: dict = field(default_factory=_default_retry_policy)
 
     @classmethod
