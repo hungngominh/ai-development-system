@@ -166,29 +166,39 @@ class RepoBranchAgent:
         all_stdout: list[str] = []
         stderr_lines: list[str] = []
 
-        def _drain_stderr():
-            for line in proc.stderr:
-                stderr_lines.append(line)
-
-        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
-        stderr_thread.start()
-
-        try:
+        def _drain_stdout():
             for line in proc.stdout:
                 all_stdout.append(line)
                 if self.live_log_path:
                     msg = _parse_ndjson_event(line.strip())
                     if msg:
                         _append_log(self.live_log_path, msg)
+
+        def _drain_stderr():
+            for line in proc.stderr:
+                stderr_lines.append(line)
+
+        stdout_thread = threading.Thread(target=_drain_stdout, daemon=True)
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+
+        try:
             proc.wait(timeout=int(timeout_s))
         except subprocess.TimeoutExpired:
             proc.kill()
-            proc.wait()
+            try:
+                proc.wait(timeout=5)   # bounded wait after kill
+            except subprocess.TimeoutExpired:
+                pass
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
             return AgentResult(
                 output_path=output_path,
                 error=f"claude timed out after {timeout_s}s",
             )
         finally:
+            stdout_thread.join(timeout=5)
             stderr_thread.join(timeout=5)
 
         full_stdout = "".join(all_stdout)

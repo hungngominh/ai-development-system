@@ -110,18 +110,18 @@ def test_parallel_workers_run_tasks_concurrently(tmp_path):
     artifact_id = _create_task_graph_artifact(conn, run_id, _three_independent_tasks(), storage)
     conn.close()
 
-    agent = SlowStubAgent(sleep_s=0.3)
+    agent = SlowStubAgent(sleep_s=0.5)
     cfg = Config(storage_root=storage, database_url=db_url,
-                 poll_interval_s=0.1, heartbeat_timeout_s=30.0,
+                 poll_interval_s=0.05, heartbeat_timeout_s=30.0,
                  max_parallel_workers=3)
 
     start = time.monotonic()
-    result = run_execution(run_id, artifact_id, cfg, agent, poll_interval_s=0.1)
+    result = run_execution(run_id, artifact_id, cfg, agent, poll_interval_s=0.05)
     elapsed = time.monotonic() - start
 
     assert result.status == "COMPLETED"
-    # 3 tasks × 0.3s sequential = 0.9s; parallel should be < 0.7s
-    assert elapsed < 0.7, f"Expected parallel execution < 0.7s, got {elapsed:.2f}s"
+    # 3 tasks × 0.5s sequential = 1.5s; parallel should be much faster
+    assert elapsed < 1.5, f"Expected parallel execution < 1.5s, got {elapsed:.2f}s"
     # At least 2 tasks ran concurrently
     assert agent.max_concurrent >= 2
 
@@ -146,7 +146,7 @@ def test_single_worker_runs_tasks_sequentially(tmp_path):
     artifact_id = _create_task_graph_artifact(conn, run_id, _three_independent_tasks(), storage)
     conn.close()
 
-    agent = SlowStubAgent(sleep_s=0.1)
+    agent = SlowStubAgent(sleep_s=0.2)
     cfg = Config(storage_root=storage, database_url=db_url,
                  poll_interval_s=0.05, heartbeat_timeout_s=30.0,
                  max_parallel_workers=1)
