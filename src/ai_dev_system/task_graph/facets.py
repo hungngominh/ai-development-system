@@ -59,6 +59,10 @@ FACET_DEFINITIONS: dict[str, str] = {
 _VALID_STATUS = {"filled", "needs_human", "na"}
 _DISABLE_ENV = "AI_DEV_DISABLE_TASK_FACETS"
 
+# Sentinel dict for exec-time facets that should not be filled at spec time.
+# Immutable by convention — callers that need a mutable copy should use .copy().
+_EXEC_NA: dict = {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
+
 
 def is_implementation_task(task: dict) -> bool:
     return task.get("execution_type") == "atomic" and task.get("type") == "coding"
@@ -71,7 +75,7 @@ def _needs_human() -> dict:
 def _all_needs_human() -> dict[str, dict]:
     result = {k: _needs_human() for k in SPEC_FACET_KEYS}
     for k in EXEC_FACET_KEYS:
-        result[k] = {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
+        result[k] = _EXEC_NA.copy()
     return result
 
 
@@ -145,7 +149,7 @@ def generate_task_facets(task: dict, spec_content: dict[str, str], profile: dict
         return _all_needs_human()
     result = {k: _coerce_facet(data.get(k)) for k in SPEC_FACET_KEYS}
     for k in EXEC_FACET_KEYS:
-        result[k] = {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
+        result[k] = _EXEC_NA.copy()
     return result
 
 

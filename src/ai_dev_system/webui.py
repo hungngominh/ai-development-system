@@ -376,8 +376,9 @@ def _save_task_spec_edits(spec_id: str, edits: dict, *, storage_root: str) -> No
             content = (edits[key] or "").strip()
             if content:
                 facets[key] = {"status": "filled", "content": content, "reason": ""}
-            else:
+            elif (facets.get(key) or {}).get("status") != "na":
                 facets[key] = {"status": "needs_human", "content": "", "reason": ""}
+            # if stored status is "na" and content is blank, leave it unchanged
     data["facets"] = facets
     data["approved"] = True
     path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -600,67 +601,70 @@ class Handler(BaseHTTPRequestHandler):
             self._send(_page("error", f"<div class='card'><pre>{html.escape(repr(exc))}</pre></div>"), 500)
 
     def do_POST(self):
-        path = urllib.parse.urlparse(self.path).path
-        if path == "/abort":
-            length = int(self.headers.get("Content-Length", "0"))
-            form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
-            rid = (form.get("id") or [""])[0].strip()
-            if rid:
-                _abort_run(rid)
-            back = "/run?id=" + urllib.parse.quote(rid) if rid else "/"
-            body = (
-                "<div class='card'><h2>Đã đánh dấu ABORTED ✓</h2>"
-                f"<p class='muted'>Run đã được dọn. <a href='{html.escape(back)}'>← về run</a></p></div>"
-            )
-            self._send(_page("aborted", body,
-                             head_extra=f"<meta http-equiv='refresh' content='2;url={html.escape(back)}'>"))
-        elif path == "/task-spec":
-            length = int(self.headers.get("Content-Length", "0"))
-            form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
-            spec_id = (form.get("id") or [""])[0].strip()
-            if spec_id:
-                edits = {key: (form.get(f"facet_{key}") or [""])[0] for key in FACET_KEYS}
-                _save_task_spec_edits(spec_id, edits, storage_root=str(_config().storage_root))
-            redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}" if spec_id else "/"
-            self._send(_page("saved", "<div class='card'><h2>Đã lưu &amp; duyệt ✓</h2></div>",
-                             head_extra=f"<meta http-equiv='refresh' content='1;url={html.escape(redirect)}'>"))
-        elif path == "/spec-task":
-            length = int(self.headers.get("Content-Length", "0"))
-            form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
-            idea = (form.get("idea") or [""])[0].strip()
-            mode = (form.get("mode") or ["stub"])[0]
-            repo = (form.get("repo") or [""])[0].strip()
-            if repo:
-                spec_id = _spawn_task_spec_worker(idea, repo)
-                self._send(_page("task spec",
-                    "<div class='card'><h2>Đã khởi động (agentic) ✓</h2>"
-                    f"<p class='muted'>Đọc repo + sinh facet ở chạy nền.</p></div>",
-                    head_extra=f"<meta http-equiv='refresh' content='2;url=/task-spec?id={urllib.parse.quote(spec_id)}'>"))
+        try:
+            path = urllib.parse.urlparse(self.path).path
+            if path == "/abort":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                rid = (form.get("id") or [""])[0].strip()
+                if rid:
+                    _abort_run(rid)
+                back = "/run?id=" + urllib.parse.quote(rid) if rid else "/"
+                body = (
+                    "<div class='card'><h2>Đã đánh dấu ABORTED ✓</h2>"
+                    f"<p class='muted'>Run đã được dọn. <a href='{html.escape(back)}'>← về run</a></p></div>"
+                )
+                self._send(_page("aborted", body,
+                                 head_extra=f"<meta http-equiv='refresh' content='2;url={html.escape(back)}'>"))
+            elif path == "/task-spec":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                spec_id = (form.get("id") or [""])[0].strip()
+                if spec_id:
+                    edits = {key: (form.get(f"facet_{key}") or [""])[0] for key in FACET_KEYS}
+                    _save_task_spec_edits(spec_id, edits, storage_root=str(_config().storage_root))
+                redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}" if spec_id else "/"
+                self._send(_page("saved", "<div class='card'><h2>Đã lưu &amp; duyệt ✓</h2></div>",
+                                 head_extra=f"<meta http-equiv='refresh' content='1;url={html.escape(redirect)}'>"))
+            elif path == "/spec-task":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                idea = (form.get("idea") or [""])[0].strip()
+                mode = (form.get("mode") or ["stub"])[0]
+                repo = (form.get("repo") or [""])[0].strip()
+                if repo:
+                    spec_id = _spawn_task_spec_worker(idea, repo)
+                    self._send(_page("task spec",
+                        "<div class='card'><h2>Đã khởi động (agentic) ✓</h2>"
+                        f"<p class='muted'>Đọc repo + sinh facet ở chạy nền.</p></div>",
+                        head_extra=f"<meta http-equiv='refresh' content='2;url=/task-spec?id={urllib.parse.quote(spec_id)}'>"))
+                else:
+                    self._send(_spec_task(idea, mode))
+            elif path == "/start":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                name = (form.get("name") or [""])[0].strip() or "demo"
+                idea = (form.get("idea") or [""])[0].strip()
+                mode = (form.get("mode") or ["stub"])[0]
+                if idea:
+                    _start(name, idea, mode)
+                note = (
+                    "Stub: chỉ vài giây — trang sẽ tự refresh."
+                    if mode == "stub"
+                    else "Claude Max: chạy nhiều phút. Run xuất hiện ngay ở trạng thái "
+                         "RUNNING_PHASE_1A; refresh để theo dõi tới PAUSED_AT_GATE_1."
+                )
+                body = (
+                    "<div class='card'><h2>Đã khởi động debate ✓</h2>"
+                    f"<p>{html.escape(name)} · chế độ <b>{html.escape(mode)}</b></p>"
+                    f"<p class='muted'>{note}</p>"
+                    "<p><a href='/'>← về danh sách runs ngay</a></p></div>"
+                )
+                self._send(_page("started", body, head_extra="<meta http-equiv='refresh' content='5;url=/'>"))
             else:
-                self._send(_spec_task(idea, mode))
-        elif path == "/start":
-            length = int(self.headers.get("Content-Length", "0"))
-            form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
-            name = (form.get("name") or [""])[0].strip() or "demo"
-            idea = (form.get("idea") or [""])[0].strip()
-            mode = (form.get("mode") or ["stub"])[0]
-            if idea:
-                _start(name, idea, mode)
-            note = (
-                "Stub: chỉ vài giây — trang sẽ tự refresh."
-                if mode == "stub"
-                else "Claude Max: chạy nhiều phút. Run xuất hiện ngay ở trạng thái "
-                     "RUNNING_PHASE_1A; refresh để theo dõi tới PAUSED_AT_GATE_1."
-            )
-            body = (
-                "<div class='card'><h2>Đã khởi động debate ✓</h2>"
-                f"<p>{html.escape(name)} · chế độ <b>{html.escape(mode)}</b></p>"
-                f"<p class='muted'>{note}</p>"
-                "<p><a href='/'>← về danh sách runs ngay</a></p></div>"
-            )
-            self._send(_page("started", body, head_extra="<meta http-equiv='refresh' content='5;url=/'>"))
-        else:
-            self._send(_page("404", "<div class='card'>Not found.</div>"), 404)
+                self._send(_page("404", "<div class='card'>Not found.</div>"), 404)
+        except Exception as exc:  # noqa: BLE001
+            self._send(_page("error", f"<div class='card'><pre>{html.escape(repr(exc))}</pre></div>"), 500)
 
 
 def main() -> None:

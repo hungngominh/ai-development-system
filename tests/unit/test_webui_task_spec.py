@@ -206,6 +206,27 @@ def test_render_exec_na_shows_reason():
     assert "exec-time" in html_out
 
 
+# ---------------------------------------------------------------------------
+# Critical fix: _save_task_spec_edits must not overwrite exec-facet "na"
+# ---------------------------------------------------------------------------
+
+def test_save_edits_preserves_exec_facet_na_when_blank(tmp_path):
+    """Submitting a blank exec-facet textarea must not overwrite 'na' with 'needs_human'."""
+    from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS, EXEC_FACET_KEYS
+    d = tmp_path / "task_specs"; d.mkdir()
+    facets = {k: {"status": "filled", "content": f"{k} c", "reason": ""} for k in SPEC_FACET_KEYS}
+    facets.update({k: {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
+                   for k in EXEC_FACET_KEYS})
+    (d / "s1.json").write_text(
+        json.dumps({"task": {}, "facets": facets, "approved": False}), encoding="utf-8")
+    # submit with all exec facets blank (as the form would send)
+    edits = {k: "" for k in EXEC_FACET_KEYS}
+    webui._save_task_spec_edits("s1", edits, storage_root=str(tmp_path))
+    result = json.loads((d / "s1.json").read_text(encoding="utf-8"))
+    for k in EXEC_FACET_KEYS:
+        assert result["facets"][k]["status"] == "na", f"{k} should stay na"
+
+
 def test_task_spec_page_done_all_spec_needs_human_shows_warning(tmp_path, monkeypatch):
     monkeypatch.setattr(webui, "_config", lambda: types.SimpleNamespace(storage_root=str(tmp_path)))
     # all spec facets needs_human, exec facets na — simulates a full LLM failure

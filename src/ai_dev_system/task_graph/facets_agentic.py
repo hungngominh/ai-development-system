@@ -1,9 +1,10 @@
 """Agentic, repo-grounded facet generation (Level B).
 
 Runs the `claude` CLI in read-only, non-interactive mode with the target repo as
-cwd, letting it Read/Grep/Glob the actual code to ground each facet. Never raises:
-any failure yields all-`needs_human`. Tests inject `run` (a subprocess.run-like
-callable); the real `claude` CLI is never invoked under test.
+cwd, letting it Read/Grep/Glob the actual code to ground each facet.
+Raises on failure so callers can surface the error. Use `_all_needs_human()` at
+the call site when a silent fallback is wanted. Tests inject `run` (a
+subprocess.run-like callable); the real `claude` CLI is never invoked under test.
 """
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from ai_dev_system.task_graph.facets import (
     SPEC_FACET_KEYS,
     EXEC_FACET_KEYS,
     FACET_DEFINITIONS,
+    _EXEC_NA,
     _all_needs_human,
     _coerce_facet,
 )
@@ -150,17 +152,29 @@ def generate_task_facets_agentic(
         # Node.js on Windows (DETACHED_PROCESS) sometimes writes to stderr instead of stdout.
         _log("stdout trống, thử dùng stderr thay thế")
         stdout = stderr
-    raw = _extract_text(stdout)
-    text = ClaudeCodeLLMClient._strip_outer_code_fence(raw)
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        # claude prepended prose before the JSON fence — extract block directly.
-        text = _find_json_block(raw)
-        data = json.loads(text)
+        raw = _extract_text(stdout)
+        text = ClaudeCodeLLMClient._strip_outer_code_fence(raw)
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # claude prepended prose before the JSON fence — extract block directly.
+            text = _find_json_block(raw)
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(
+                    f"claude CLI trả về JSON không hợp lệ: {text[:200]!r}"
+                ) from e
+    except json.JSONDecodeError as e:
+        raise RuntimeError(
+            f"claude CLI trả về JSON không hợp lệ: {text[:200]!r}"
+        ) from e
+    except Exception:
+        raise
     if not isinstance(data, dict):
         raise RuntimeError(f"claude CLI trả về dữ liệu không phải dict: {text[:200]!r}")
     result = {k: _coerce_facet(data.get(k)) for k in SPEC_FACET_KEYS}
     for k in EXEC_FACET_KEYS:
-        result[k] = {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
+        result[k] = _EXEC_NA.copy()
     return result

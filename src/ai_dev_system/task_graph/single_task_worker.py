@@ -14,12 +14,10 @@ import time
 from pathlib import Path
 
 from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS as _SPEC_KEYS
-from ai_dev_system.task_graph.single_task import spec_single_task
+from ai_dev_system.task_graph.single_task import spec_single_task, _TITLE_MAX
 from ai_dev_system.llm_factory import make_real_llm_client
 
 logger = logging.getLogger(__name__)
-
-_TITLE_MAX = 60
 
 
 def _spec_log(log_path: Path, msg: str) -> None:
