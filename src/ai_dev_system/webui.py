@@ -205,7 +205,7 @@ def _run_detail(run_id: str) -> bytes:
     idle = _progress_idle_seconds(time.time())
     stale = _looks_stale(running, report_path is not None, idle)
     if report_path is None and running:
-        card = _stale_card(run_id, idle) if stale else _progress_card()
+        card = _stale_card(run_id, idle, run_status=status) if stale else _progress_card()
         body = head + status_card + card
     else:
         body = head + status_card + _render_report(run_id)
@@ -278,23 +278,60 @@ def _progress_card() -> str:
     )
 
 
-def _stale_card(run_id: str, idle_seconds: float | None) -> str:
+def _spawn_resume_executor(run_id: str) -> None:
+    """Spawn resume_executor as a detached background process."""
+    cfg = _config()
+    popen_kwargs: dict = {}
+    if os.name == "nt":
+        popen_kwargs["creationflags"] = (
+            subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        )
+    else:
+        popen_kwargs["start_new_session"] = True
+    subprocess.Popen(
+        [
+            sys.executable, "-m",
+            "ai_dev_system.task_graph.resume_executor",
+            "--id", run_id,
+            "--storage-root", str(cfg.storage_root),
+            "--database-url", str(cfg.database_url),
+        ],
+        cwd=str(Path(__file__).resolve().parents[2]),
+        **popen_kwargs,
+    )
+
+
+def _stale_card(run_id: str, idle_seconds: float | None, run_status: str = "") -> str:
     """Shown when a RUNNING run's progress log has gone silent — the background
     process likely died. Stops the misleading auto-refresh and offers cleanup.
     """
     mins = int((idle_seconds or 0) // 60)
     lines = _recent_progress()
     pre = html.escape("\n".join(lines)) if lines else "(không có dòng tiến độ)"
+    rid = html.escape(run_id)
+
+    resume_btn = ""
+    if run_status == "RUNNING_EXECUTION":
+        resume_btn = (
+            "<form method='post' action='/resume' style='display:inline;margin-right:12px'>"
+            f"<input type='hidden' name='id' value='{rid}'>"
+            "<button type='submit' style='background:#1a4b6b'>▶ Làm tiếp</button>"
+            "</form>"
+        )
+
     return (
         "<div class='card'><h2>⚠ Tiến trình có vẻ đã dừng</h2>"
         f"<p class='caveat'>Run đang ở trạng thái RUNNING nhưng log tiến độ đã đứng yên "
         f"~{mins} phút. Tiến trình debate nền nhiều khả năng đã chết (vd: server webui bị tắt "
         "giữa chừng). Trang đã ngừng tự refresh. Bạn có thể đánh dấu run này là ABORTED rồi "
         "chạy lại project.</p>"
-        "<form method='post' action='/abort' style='margin:0'>"
-        f"<input type='hidden' name='id' value='{html.escape(run_id)}'>"
+        "<div style='display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px'>"
+        + resume_btn +
+        "<form method='post' action='/abort' style='display:inline;margin:0'>"
+        f"<input type='hidden' name='id' value='{rid}'>"
         "<button type='submit'>Đánh dấu ABORTED &amp; dọn run</button>"
         "</form>"
+        "</div>"
         f"<pre>{pre}</pre></div>"
     )
 
@@ -859,6 +896,22 @@ class Handler(BaseHTTPRequestHandler):
                         head_extra=f"<meta http-equiv='refresh' content='2;url=/task-spec?id={urllib.parse.quote(spec_id)}'>"))
                 else:
                     self._send(_spec_task(idea, mode))
+            elif path == "/resume":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                rid = (form.get("id") or [""])[0].strip()
+                if not rid:
+                    self._send(_page("error", "<div class='card muted'>Thiếu run id.</div>"), 400)
+                    return
+                _spawn_resume_executor(rid)
+                back = f"/run?id={urllib.parse.quote(rid)}"
+                body = (
+                    "<div class='card'><h2>Đã khởi động lại ✓</h2>"
+                    f"<p class='muted'>Resume executor đang chạy nền cho run <b>{html.escape(rid[:8])}</b>.</p>"
+                    f"<p><a href='{html.escape(back)}'>← về run</a></p></div>"
+                )
+                self._send(_page("resumed", body,
+                                 head_extra=f"<meta http-equiv='refresh' content='3;url={html.escape(back)}'>"))
             elif path == "/start":
                 length = int(self.headers.get("Content-Length", "0"))
                 form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
