@@ -45,6 +45,27 @@ def _git_current_branch(repo_path: str) -> str:
     return proc.stdout.strip()
 
 
+def _git_base_branch(repo_path: str) -> str:
+    """Return the repo's default integration branch (master or main).
+
+    Never returns an ai-dev/ branch — if the repo is already on one, we probe
+    master/main instead so the new branch forks from the right base.
+    """
+    current = _git_current_branch(repo_path)
+    if not current.startswith("ai-dev/"):
+        return current
+    # Repo already on an ai-dev/ branch; find the real default
+    for candidate in ("master", "main"):
+        proc = _git(["rev-parse", "--verify", candidate], repo_path)
+        if proc.returncode == 0:
+            return candidate
+    # Last resort: origin/HEAD
+    proc = _git(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"], repo_path)
+    if proc.returncode == 0:
+        return proc.stdout.strip().removeprefix("origin/")
+    return "master"
+
+
 def _git_checkout_branch(repo_path: str, branch_name: str) -> None:
     proc = _git(["checkout", branch_name], repo_path)
     if proc.returncode != 0:
@@ -155,7 +176,7 @@ def run_executor(
 
     # 1. Get current branch and create execution branch
     try:
-        base_branch = _git_current_branch(repo_path)
+        base_branch = _git_base_branch(repo_path)
         _exec_log(log_path, f"Base branch: {base_branch}")
         _git_checkout_branch(repo_path, branch_name)
         _exec_log(log_path, f"Branch: {branch_name}")

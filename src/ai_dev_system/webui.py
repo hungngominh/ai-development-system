@@ -107,21 +107,32 @@ def _find_report_path(run_id: str) -> Path | None:
     return p if p.exists() else None
 
 
+def _parse_run_metadata(metadata) -> dict:
+    try:
+        return json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
+    except (TypeError, ValueError):
+        return {}
+
+
 def _is_task_spec_row(metadata) -> bool:
     """A runs row produced by the single-task-spec worker (metadata.kind)."""
-    try:
-        meta = json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
-    except (TypeError, ValueError):
-        return False
-    return isinstance(meta, dict) and meta.get("kind") == "task_spec"
+    return _parse_run_metadata(metadata).get("kind") == "task_spec"
 
 
 def _run_row_html(r: dict) -> str:
     rid = r["run_id"]
-    is_spec = _is_task_spec_row(r.get("metadata"))
-    # Task-spec rows open the facet page; debate runs open the run-detail page.
-    href = f"/task-spec?id={html.escape(rid)}" if is_spec else f"/run?id={html.escape(rid)}"
-    tag = " <span class='muted'>· spec</span>" if is_spec else ""
+    meta = _parse_run_metadata(r.get("metadata"))
+    kind = meta.get("kind") or ""
+    if kind == "task_spec":
+        href = f"/task-spec?id={html.escape(rid)}"
+        tag = " <span class='muted'>· spec</span>"
+    elif kind == "task_exec":
+        spec_id = meta.get("spec_id") or rid
+        href = f"/task-exec?id={html.escape(spec_id)}"
+        tag = " <span class='muted'>· exec</span>"
+    else:
+        href = f"/run?id={html.escape(rid)}"
+        tag = ""
     title = html.escape((r.get("title") or "")[:48])
     return (
         f"<tr><td><a href='{href}'>{html.escape(rid[:8])}</a></td>"
@@ -204,7 +215,10 @@ def _run_detail(run_id: str) -> bytes:
     report_path = _find_report_path(run_id)
     idle = _progress_idle_seconds(time.time())
     stale = _looks_stale(running, report_path is not None, idle)
-    if report_path is None and running:
+    if status == "PAUSED_AT_GATE_1":
+        body = head + status_card + _gate1_review_page(run_id)
+        return _page(f"Run {run_id[:8]} · Gate 1", body)
+    elif report_path is None and running:
         card = _stale_card(run_id, idle, run_status=status) if stale else _progress_card()
         body = head + status_card + card
     else:
@@ -754,6 +768,297 @@ def _spec_task(idea: str, mode: str) -> bytes:
     return _page("Task spec", body)
 
 
+# ---------------------------------------------------------------------------
+# Gate 1 review helpers
+# ---------------------------------------------------------------------------
+
+def _apply_brief_edits_from_state(brief: dict, state) -> dict:
+    """Return brief dict with all edits from session state applied sequentially."""
+    from ai_dev_system.gate.gate1_review.editor import apply_edit
+    current = dict(brief)
+    for entry in state.brief_edits:
+        result = apply_edit(current, entry.field_name, entry.operation, entry.value)
+        if result.accepted:
+            current = result.brief
+    return current
+
+
+def _render_gate1_form(run_id: str, ctx, state, extra_html: str = "") -> str:
+    """Render the Gate 1 review HTML form (not a full page)."""
+    from ai_dev_system.gate.gate1_review.editor import EDITABLE_FIELDS, LIST_FIELDS
+
+    rid = html.escape(run_id)
+
+    result_by_id = {
+        qdr["question"]["id"]: qdr
+        for qdr in ctx.debate_report.get("results", [])
+    }
+    brief = _apply_brief_edits_from_state(dict(ctx.brief), state)
+
+    scope_warning = ""
+    if state.scope_affected:
+        scope_warning = (
+            "<div class='card'><h2>⚠ Scope đã thay đổi</h2>"
+            "<p class='caveat'>Bạn đã chỉnh sửa scope_in hoặc scope_out. "
+            "Cần cân nhắc re-trigger debate pipeline để đảm bảo câu hỏi vẫn phản ánh đúng scope mới.</p></div>"
+        )
+
+    q_items = []
+    for q in ctx.questions:
+        qdr = result_by_id.get(q.id, {})
+        final = qdr.get("final", {})
+        a_pos = html.escape(str(final.get("agent_a_position") or "")[:300])
+        b_pos = html.escape(str(final.get("agent_b_position") or "")[:300])
+        mod_sum = html.escape(str(final.get("moderator_summary") or "")[:300])
+
+        ri = state.resolved.get(q.id)
+        cur_choice = ri.choice if ri else ""
+        cur_override = html.escape(ri.override_text or "") if ri else ""
+        a_chk = " checked" if cur_choice == "agent_a" else ""
+        b_chk = " checked" if cur_choice == "agent_b" else ""
+        m_chk = " checked" if cur_choice == "moderator" else ""
+        o_chk = " checked" if cur_choice == "override" else ""
+        qid = html.escape(q.id)
+
+        q_items.append(
+            f"<div class='q'>"
+            f"<div class='head'>[{html.escape(q.classification)}] {qid} · "
+            f"{html.escape(q.agent_a)} vs {html.escape(q.agent_b)}</div>"
+            f"<div class='text'>{html.escape(q.text)}</div>"
+            f"<label><input type='radio' name='q_{qid}_choice' value='agent_a'{a_chk}> "
+            f"Agent A: {a_pos}</label><br>"
+            f"<label><input type='radio' name='q_{qid}_choice' value='agent_b'{b_chk}> "
+            f"Agent B: {b_pos}</label><br>"
+            f"<label><input type='radio' name='q_{qid}_choice' value='moderator'{m_chk}> "
+            f"Moderator: {mod_sum}</label><br>"
+            f"<label><input type='radio' name='q_{qid}_choice' value='override'{o_chk}> "
+            f"Override (nhập thủ công)</label>"
+            f"<div style='margin-left:20px'>"
+            f"<textarea name='q_{qid}_override_text' rows='2' "
+            f"placeholder='Nhập câu trả lời override...' style='margin-top:6px'>{cur_override}</textarea>"
+            f"</div>"
+            f"</div>"
+        )
+
+    brief_rows = []
+    for field_name in sorted(EDITABLE_FIELDS):
+        cur_val = brief.get(field_name, "")
+        ops = ["set", "append", "remove"] if field_name in LIST_FIELDS else ["set"]
+        opts = "".join(f"<option value='{op}'>{op}</option>" for op in ops)
+        fn = html.escape(field_name)
+        brief_rows.append(
+            f"<tr>"
+            f"<td class='muted'>{fn}</td>"
+            f"<td class='muted' style='font-size:12px'>{html.escape(str(cur_val)[:80])}</td>"
+            f"<td><select name='brief_{fn}_op' style='width:auto'>"
+            f"<option value=''>--</option>{opts}</select></td>"
+            f"<td><input name='brief_{fn}_value' placeholder='giá trị mới'></td>"
+            f"</tr>"
+        )
+
+    brief_section = (
+        "<div class='card'><h2>Chỉnh sửa brief (tuỳ chọn)</h2>"
+        "<table><tr><th>Field</th><th>Hiện tại</th><th>Operation</th><th>Giá trị mới</th></tr>"
+        + "".join(brief_rows)
+        + "</table></div>"
+    )
+
+    questions_section = (
+        f"<div class='card'><h2>Gate 1 Review · {html.escape(ctx.project_name)} · "
+        f"{len(ctx.questions)} câu hỏi</h2>"
+        + "".join(q_items)
+        + "<div style='margin-top:16px'>"
+        + "<label style='display:block;margin-bottom:8px'>"
+        + "<input type='checkbox' name='approved_all' value='1'> "
+        + "Duyệt tất cả câu hỏi tự động (APPROVED_ALL)</label>"
+        + "<div style='display:flex;gap:12px;flex-wrap:wrap'>"
+        + "<button type='submit' formaction='/gate1-save' "
+        + "style='background:#1a4b6b'>💾 Lưu tiến trình</button>"
+        + "<button type='submit'>✓ Duyệt &amp; tiếp tục</button>"
+        + "</div></div></div>"
+    )
+
+    return (
+        extra_html
+        + scope_warning
+        + f"<form method='post' action='/gate1-approve'>"
+        + f"<input type='hidden' name='id' value='{rid}'>"
+        + questions_section
+        + brief_section
+        + "</form>"
+    )
+
+
+def _gate1_review_page(run_id: str, extra_html: str = "") -> str:
+    """Load gate1 context + state, return review form HTML."""
+    cfg = _config()
+    conn = get_connection(cfg.database_url)
+    try:
+        from ai_dev_system.gate.gate1_review.loader import load_gate1_context
+        from ai_dev_system.gate.gate1_review.state import load_state
+        try:
+            ctx = load_gate1_context(run_id, conn)
+        except ValueError as exc:
+            return (
+                "<div class='card'><h2>Lỗi tải Gate 1</h2>"
+                f"<p class='caveat'>{html.escape(str(exc))}</p></div>"
+            )
+        except FileNotFoundError as exc:
+            return (
+                "<div class='card'><h2>Lỗi tải artifact</h2>"
+                f"<p class='caveat'>{html.escape(str(exc))}</p></div>"
+            )
+        state = load_state(run_id, conn)
+    finally:
+        conn.close()
+
+    return _render_gate1_form(run_id, ctx, state, extra_html=extra_html)
+
+
+def _parse_gate1_choices(form: dict, questions) -> dict:
+    """Extract q_*_choice and q_*_override_text from parse_qs form dict."""
+    choices = {}
+    for q in questions:
+        choice = (form.get(f"q_{q.id}_choice") or [""])[0].strip()
+        if choice in ("agent_a", "agent_b", "moderator", "override"):
+            override_text = None
+            if choice == "override":
+                override_text = (form.get(f"q_{q.id}_override_text") or [""])[0].strip() or None
+            choices[q.id] = (choice, override_text)
+    return choices
+
+
+def _do_gate1_save(run_id: str, form: dict) -> str:
+    """Process /gate1-save POST. Updates session state. Returns redirect URL."""
+    from ai_dev_system.gate.gate1_review.loader import load_gate1_context
+    from ai_dev_system.gate.gate1_review.state import load_state, save_state
+    from ai_dev_system.gate.gate1_review.editor import apply_edit, EDITABLE_FIELDS, NON_EDITABLE_FIELDS
+
+    cfg = _config()
+    conn = get_connection(cfg.database_url)
+    try:
+        ctx = load_gate1_context(run_id, conn)
+        state = load_state(run_id, conn)
+
+        if (form.get("approved_all") or [""])[0].strip() in ("1", "true"):
+            state.approved_all = True
+
+        for q_id, (choice, override_text) in _parse_gate1_choices(form, ctx.questions).items():
+            state.record_choice(q_id, choice, override_text)
+
+        brief = _apply_brief_edits_from_state(dict(ctx.brief), state)
+        for field_name in EDITABLE_FIELDS | NON_EDITABLE_FIELDS:
+            op = (form.get(f"brief_{field_name}_op") or [""])[0].strip()
+            val = (form.get(f"brief_{field_name}_value") or [""])[0].strip()
+            if not op or not val:
+                continue
+            result = apply_edit(brief, field_name, op, val)
+            if result.accepted:
+                state.record_brief_edit(field_name, op, val)
+                brief = result.brief
+
+        save_state(run_id, state, conn)
+    finally:
+        conn.close()
+
+    return f"/run?id={urllib.parse.quote(run_id)}"
+
+
+def _do_gate1_approve(run_id: str, form: dict) -> bytes | str:
+    """Process /gate1-approve POST. Validates, finalizes, or returns error page bytes."""
+    from ai_dev_system.gate.gate1_review.loader import load_gate1_context
+    from ai_dev_system.gate.gate1_review.state import load_state, save_state, clear_state
+    from ai_dev_system.gate.gate1_review.editor import apply_edit, EDITABLE_FIELDS, NON_EDITABLE_FIELDS
+    from ai_dev_system.gate.gate1_bridge import finalize_gate1, Decision
+
+    cfg = _config()
+    conn = get_connection(cfg.database_url)
+    try:
+        ctx = load_gate1_context(run_id, conn)
+        state = load_state(run_id, conn)
+
+        if (form.get("approved_all") or [""])[0].strip() in ("1", "true"):
+            state.approved_all = True
+
+        for q_id, (choice, override_text) in _parse_gate1_choices(form, ctx.questions).items():
+            state.record_choice(q_id, choice, override_text)
+
+        brief = _apply_brief_edits_from_state(dict(ctx.brief), state)
+        for field_name in EDITABLE_FIELDS | NON_EDITABLE_FIELDS:
+            op = (form.get(f"brief_{field_name}_op") or [""])[0].strip()
+            val = (form.get(f"brief_{field_name}_value") or [""])[0].strip()
+            if not op or not val:
+                continue
+            result = apply_edit(brief, field_name, op, val)
+            if result.accepted:
+                state.record_brief_edit(field_name, op, val)
+                brief = result.brief
+
+        save_state(run_id, state, conn)
+
+        unresolved = [q.id for q in ctx.questions if not state.is_resolved(q.id)]
+        if unresolved:
+            ids_str = ", ".join(html.escape(q) for q in unresolved)
+            error_card = (
+                "<div class='card'><h2>⚠ Chưa giải quyết tất cả câu hỏi</h2>"
+                f"<p class='caveat'>Còn {len(unresolved)} câu hỏi chưa được chọn: {ids_str}</p></div>"
+            )
+            form_html = _render_gate1_form(run_id, ctx, state, extra_html=error_card)
+            title = f"Gate 1 · {html.escape(ctx.project_name)}"
+            return _page(title, "<p><a href='/'>← runs</a></p>" + form_html)
+
+        result_by_id = {
+            qdr["question"]["id"]: qdr
+            for qdr in ctx.debate_report.get("results", [])
+        }
+        decisions = []
+        for q in ctx.questions:
+            qdr = result_by_id.get(q.id, {})
+            final = qdr.get("final", {})
+            ri = state.resolved.get(q.id)
+
+            if ri is None:
+                answer = final.get("moderator_summary") or ""
+                resolution_type = "CONSENSUS"
+                rationale = ""
+            elif ri.choice == "agent_a":
+                answer = final.get("agent_a_position") or ""
+                resolution_type = "CONSENSUS"
+                rationale = ""
+            elif ri.choice == "agent_b":
+                answer = final.get("agent_b_position") or ""
+                resolution_type = "CONSENSUS"
+                rationale = ""
+            elif ri.choice == "moderator":
+                answer = final.get("moderator_summary") or ""
+                resolution_type = "CONSENSUS"
+                rationale = ""
+            else:
+                answer = ri.override_text or ""
+                resolution_type = "FORCED_HUMAN"
+                rationale = ri.override_text or ""
+
+            decisions.append(Decision(
+                question_id=q.id,
+                question_text=q.text,
+                classification=q.classification,
+                resolution_type=resolution_type,
+                answer=answer,
+                options_considered=[
+                    final.get("agent_a_position") or "",
+                    final.get("agent_b_position") or "",
+                ],
+                rationale=rationale,
+            ))
+
+        finalize_gate1(run_id, decisions, cfg.storage_root, conn)
+        clear_state(run_id, conn)
+    finally:
+        conn.close()
+
+    return f"/run?id={urllib.parse.quote(run_id)}"
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # silence
         pass
@@ -815,7 +1120,10 @@ class Handler(BaseHTTPRequestHandler):
                             .read_text(encoding="utf-8")
                         )
                         if _spec_data.get("repo"):
-                            _spawn_task_executor(spec_id)
+                            # Only spawn if not already running or done
+                            _exec_st = _task_exec_status(spec_id)
+                            if _exec_st.get("status") not in ("running", "done"):
+                                _spawn_task_executor(spec_id)
                             redirect = f"/task-exec?id={urllib.parse.quote(spec_id)}"
                         else:
                             redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}"
@@ -912,6 +1220,26 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._send(_page("resumed", body,
                                  head_extra=f"<meta http-equiv='refresh' content='3;url={html.escape(back)}'>"))
+            elif path in ("/gate1-save", "/gate1-approve"):
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                rid = (form.get("id") or [""])[0].strip()
+                if not rid:
+                    self._send(_page("error", "<div class='card muted'>Thiếu run id.</div>"), 400)
+                    return
+                if path == "/gate1-save":
+                    redirect = _do_gate1_save(rid, form)
+                    self.send_response(302)
+                    self.send_header("Location", redirect)
+                    self.end_headers()
+                else:
+                    result = _do_gate1_approve(rid, form)
+                    if isinstance(result, str):
+                        self.send_response(302)
+                        self.send_header("Location", result)
+                        self.end_headers()
+                    else:
+                        self._send(result, 200)
             elif path == "/start":
                 length = int(self.headers.get("Content-Length", "0"))
                 form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
