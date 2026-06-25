@@ -59,7 +59,7 @@ def materialize_task_runs(
     if artifact is None:
         raise ValueError(f"Artifact {graph_artifact_id} not found")
     graph_path = os.path.join(artifact["content_ref"], "task_graph.json")
-    with open(graph_path) as f:
+    with open(graph_path, encoding="utf-8") as f:
         graph = json.load(f)
 
     atomic_tasks = [t for t in graph["tasks"] if t.get("execution_type") == "atomic"]
