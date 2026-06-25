@@ -1,7 +1,7 @@
 import json
 
 from ai_dev_system.task_graph.single_task import build_single_task, spec_single_task
-from ai_dev_system.task_graph.facets import FACET_KEYS, is_implementation_task
+from ai_dev_system.task_graph.facets import FACET_KEYS, SPEC_FACET_KEYS, EXEC_FACET_KEYS, is_implementation_task
 from ai_dev_system.debate.llm import StubDebateLLMClient
 
 
@@ -11,7 +11,7 @@ class _FakeLLM:
 
 
 def _all_filled():
-    return json.dumps({k: {"status": "filled", "content": f"{k} c", "reason": ""} for k in FACET_KEYS})
+    return json.dumps({k: {"status": "filled", "content": f"{k} c", "reason": ""} for k in SPEC_FACET_KEYS})
 
 
 def test_build_single_task_is_minimal_coding_task():
@@ -40,7 +40,8 @@ def test_spec_single_task_returns_task_and_eight_facets():
 
 def test_spec_single_task_stub_yields_all_needs_human():
     result = spec_single_task("build a CSV importer", StubDebateLLMClient())
-    assert all(result["facets"][k]["status"] == "needs_human" for k in FACET_KEYS)
+    assert all(result["facets"][k]["status"] == "needs_human" for k in SPEC_FACET_KEYS)
+    assert all(result["facets"][k]["status"] == "na" for k in EXEC_FACET_KEYS)
 
 
 def test_spec_single_task_uses_agentic_when_repo_given(monkeypatch):
@@ -58,6 +59,7 @@ def test_spec_single_task_uses_agentic_when_repo_given(monkeypatch):
 
 def test_spec_single_task_uses_text_path_when_no_repo():
     from ai_dev_system.debate.llm import StubDebateLLMClient
-    from ai_dev_system.task_graph.facets import FACET_KEYS
+    from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS, EXEC_FACET_KEYS
     result = spec_single_task("add CSV import", StubDebateLLMClient())  # no repo_path
-    assert all(result["facets"][k]["status"] == "needs_human" for k in FACET_KEYS)  # stub Mode A
+    assert all(result["facets"][k]["status"] == "needs_human" for k in SPEC_FACET_KEYS)  # stub Mode A
+    assert all(result["facets"][k]["status"] == "na" for k in EXEC_FACET_KEYS)

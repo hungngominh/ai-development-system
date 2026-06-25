@@ -13,10 +13,24 @@ from __future__ import annotations
 import json
 import os
 
-FACET_KEYS: tuple[str, ...] = (
+SPEC_FACET_KEYS: tuple[str, ...] = (
     "input", "auth_permission", "business_rule", "database",
     "response", "error_cases", "non_functional", "test_cases",
+    "validation_rules", "api_endpoints", "security_rules",
+    "concurrency_rules", "logging_audit",
 )
+
+EXEC_FACET_KEYS: tuple[str, ...] = (
+    "impl_document", "api_review", "db_review",
+    "business_rule_mapping", "test_evidence", "deployment_note", "change_log",
+)
+
+FACET_KEYS: tuple[str, ...] = SPEC_FACET_KEYS + EXEC_FACET_KEYS
+
+FACET_STAGE: dict[str, str] = {
+    **{k: "spec" for k in SPEC_FACET_KEYS},
+    **{k: "exec" for k in EXEC_FACET_KEYS},
+}
 
 # Human-readable intent per facet — drives the prompt and is stable doc.
 FACET_DEFINITIONS: dict[str, str] = {
@@ -28,6 +42,18 @@ FACET_DEFINITIONS: dict[str, str] = {
     "error_cases": "Known failure modes and how each is handled (flavored by the vertical).",
     "non_functional": "Task-level performance/security/logging/reliability.",
     "test_cases": "Concrete test scenarios (unit/integration) for this task.",
+    "validation_rules": "Input validation constraints, required fields, format rules, allowed values.",
+    "api_endpoints": "REST endpoints this task creates or modifies: method, path, purpose.",
+    "security_rules": "Rate limits, HTTPS, CSRF protection, data sanitisation, OWASP mitigations.",
+    "concurrency_rules": "Race conditions, locking strategy, idempotency, retry behaviour.",
+    "logging_audit": "What must be logged, at what level, and what audit trail is required.",
+    "impl_document": "Developer implementation notes: approach taken, key decisions, gotchas.",
+    "api_review": "API review notes: contract changes, versioning impact, consumer impact.",
+    "db_review": "Database review notes: migration steps, rollback plan, index strategy.",
+    "business_rule_mapping": "Map of business rules to code locations (file:function).",
+    "test_evidence": "Test run evidence: passed/failed counts, coverage, CI link.",
+    "deployment_note": "Deployment steps, env vars, feature flags, rollout order.",
+    "change_log": "Summary of changes made in this task for the changelog.",
 }
 
 _VALID_STATUS = {"filled", "needs_human", "na"}
@@ -43,7 +69,10 @@ def _needs_human() -> dict:
 
 
 def _all_needs_human() -> dict[str, dict]:
-    return {k: _needs_human() for k in FACET_KEYS}
+    result = {k: _needs_human() for k in SPEC_FACET_KEYS}
+    for k in EXEC_FACET_KEYS:
+        result[k] = {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
+    return result
 
 
 def _coerce_facet(raw) -> dict:
@@ -52,22 +81,31 @@ def _coerce_facet(raw) -> dict:
     status = raw.get("status")
     if status not in _VALID_STATUS:
         return _needs_human()
-    return {
+    result = {
         "status": status,
         "content": str(raw.get("content") or ""),
         "reason": str(raw.get("reason") or ""),
     }
+    reasoning = str(raw.get("reasoning") or "").strip()
+    if reasoning:
+        result["reasoning"] = reasoning
+    return result
 
 
 def _build_facet_prompt(task: dict, spec_content: dict[str, str], profile: dict | None):
-    facet_lines = "\n".join(f"- {k}: {FACET_DEFINITIONS[k]}" for k in FACET_KEYS)
+    facet_lines = "\n".join(f"- {k}: {FACET_DEFINITIONS[k]}" for k in SPEC_FACET_KEYS)
     system = (
-        "You are a senior engineer detailing one implementation task. For each of "
-        "the 8 engineering facets below, write a concrete task-level detail, OR mark "
-        'it "na" (with a reason) when irrelevant, OR "needs_human" when you cannot '
-        "determine it from the given context. Return ONLY a JSON object keyed by the "
-        "8 facet names; each value is "
-        '{"status": "filled"|"na"|"needs_human", "content": "...", "reason": "..."}.\n'
+        "You are a senior engineer detailing one implementation task. "
+        "Before filling each facet, briefly consider three engineering lenses:\n"
+        "• Developer — what must be built and how\n"
+        "• QA / Security — edge cases, auth risks, error modes\n"
+        "• Data — schema implications, query patterns, integrity\n\n"
+        "For each of the 13 engineering facets, write a concrete task-level detail, OR "
+        'mark it "na" (with a reason) when irrelevant, OR "needs_human" when you cannot '
+        "determine it from the given context.\n"
+        "Return ONLY a JSON object keyed by the 13 facet names; each value is:\n"
+        '{"status": "filled"|"na"|"needs_human", "content": "...", "reason": "...", '
+        '"reasoning": "one sentence summarising the key insight from the lenses above"}.\n'
         "Facets:\n" + facet_lines
     )
     # Only the most relevant project sections, truncated.
@@ -96,7 +134,7 @@ def _build_facet_prompt(task: dict, spec_content: dict[str, str], profile: dict 
 
 
 def generate_task_facets(task: dict, spec_content: dict[str, str], profile: dict | None, llm) -> dict[str, dict]:
-    """Fill the 8 facets for one task. Never raises; failures → all needs_human."""
+    """Fill the 13 spec facets for one task. Never raises; failures → all needs_human."""
     system, user = _build_facet_prompt(task, spec_content, profile)
     try:
         raw = llm.complete(system=system, user=user)
@@ -105,7 +143,10 @@ def generate_task_facets(task: dict, spec_content: dict[str, str], profile: dict
         return _all_needs_human()
     if not isinstance(data, dict):
         return _all_needs_human()
-    return {k: _coerce_facet(data.get(k)) for k in FACET_KEYS}
+    result = {k: _coerce_facet(data.get(k)) for k in SPEC_FACET_KEYS}
+    for k in EXEC_FACET_KEYS:
+        result[k] = {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
+    return result
 
 
 def generate_task_facets_for_graph(tasks, spec_content, profile, llm):

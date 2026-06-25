@@ -25,18 +25,21 @@ def build_single_task(idea: str, *, title: str | None = None) -> dict:
         "execution_type": "atomic",
         "required_inputs": [],
         "expected_outputs": [],
+        "out_of_scope": "",
     }
 
 
-def spec_single_task(idea: str, llm, *, title: str | None = None, repo_path: str | None = None) -> dict:
+def spec_single_task(idea: str, llm, *, title: str | None = None,
+                     repo_path: str | None = None, log=None) -> dict:
     """-> {"task": <task with .facets>, "facets": <8-facet dict>}.
 
     repo_path set → agentic, repo-grounded facets (llm unused).
     else → text/spec facets via `llm` (slice-2 path).
+    log: optional callable(str) forwarded to generate_task_facets_agentic.
     """
     task = build_single_task(idea, title=title)
     if repo_path:
-        facets = generate_task_facets_agentic(task, repo_path)
+        facets = generate_task_facets_agentic(task, repo_path, log=log)
     else:
         facets = generate_task_facets(task, {}, None, llm)
     task["facets"] = facets
