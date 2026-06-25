@@ -24,7 +24,7 @@ from pathlib import Path
 
 from ai_dev_system.config import Config
 from ai_dev_system.db.connection import get_connection
-from ai_dev_system.task_graph.facets import FACET_KEYS
+from ai_dev_system.task_graph.facets import FACET_KEYS, SPEC_FACET_KEYS, EXEC_FACET_KEYS
 
 PORT = int(os.environ.get("AIDEV_UI_PORT", "8765"))
 # A run that's RUNNING but whose progress log hasn't advanced in this many
@@ -92,7 +92,8 @@ def _list_runs():
     conn = get_connection(cfg.database_url)
     try:
         rows = conn.execute(
-            "SELECT run_id, status, title, created_at FROM runs ORDER BY created_at DESC LIMIT 100"
+            "SELECT run_id, status, title, created_at, metadata "
+            "FROM runs ORDER BY created_at DESC LIMIT 100"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -106,14 +107,33 @@ def _find_report_path(run_id: str) -> Path | None:
     return p if p.exists() else None
 
 
+def _is_task_spec_row(metadata) -> bool:
+    """A runs row produced by the single-task-spec worker (metadata.kind)."""
+    try:
+        meta = json.loads(metadata) if isinstance(metadata, str) else (metadata or {})
+    except (TypeError, ValueError):
+        return False
+    return isinstance(meta, dict) and meta.get("kind") == "task_spec"
+
+
+def _run_row_html(r: dict) -> str:
+    rid = r["run_id"]
+    is_spec = _is_task_spec_row(r.get("metadata"))
+    # Task-spec rows open the facet page; debate runs open the run-detail page.
+    href = f"/task-spec?id={html.escape(rid)}" if is_spec else f"/run?id={html.escape(rid)}"
+    tag = " <span class='muted'>· spec</span>" if is_spec else ""
+    title = html.escape((r.get("title") or "")[:48])
+    return (
+        f"<tr><td><a href='{href}'>{html.escape(rid[:8])}</a></td>"
+        f"<td>{_badge(r['status'])}</td><td>{title}{tag}</td>"
+        f"<td class='muted'>{html.escape(str(r.get('created_at') or ''))[:19]}</td></tr>"
+    )
+
+
 def _home() -> bytes:
     runs = _list_runs()
-    rows = "".join(
-        f"<tr><td><a href='/run?id={html.escape(r['run_id'])}'>{html.escape(r['run_id'][:8])}</a></td>"
-        f"<td>{_badge(r['status'])}</td><td>{html.escape((r.get('title') or '')[:48])}</td>"
-        f"<td class='muted'>{html.escape(str(r.get('created_at') or ''))[:19]}</td></tr>"
-        for r in runs
-    ) or "<tr><td colspan='4' class='muted'>Chưa có run nào trong DB.</td></tr>"
+    rows = "".join(_run_row_html(r) for r in runs) \
+        or "<tr><td colspan='4' class='muted'>Chưa có run nào trong DB.</td></tr>"
 
     form = """
     <div class='card'><h2>Tạo project mới</h2>
@@ -147,7 +167,7 @@ def _home() -> bytes:
       </select>
       <button type='submit'>Sinh TaskSpec →</button>
     </form>
-    <p class='muted'>Trả về 8 facet (Input/Auth/Business rule/DB/Response/Error/NFR/Test) cho task.</p></div>
+    <p class='muted'>Trả về 20 facet (13 spec + 7 impl-docs) cho task.</p></div>
     """
     return _page("AI Dev System", form + task_form + table)
 
@@ -297,23 +317,70 @@ def _abort_run(run_id: str) -> None:
         conn.close()
 
 
-def _render_task_spec(task: dict, facets: dict) -> str:
-    rows = []
-    for key in FACET_KEYS:
+def _render_task_spec(task: dict, facets: dict, spec_id: str | None = None) -> str:
+    def _row(key: str) -> str:
         f = facets.get(key) or {"status": "needs_human", "content": "", "reason": ""}
         status = f.get("status")
-        if status == "filled" and f.get("content"):
-            val = html.escape(str(f["content"]))
+        content = f.get("content") or ""
+        if spec_id:
+            escaped = html.escape(content)
+            reasoning = html.escape(str(f.get("reasoning") or "")).strip()
+            reasoning_block = (
+                f"<details><summary class='muted' style='font-size:12px;cursor:pointer'>"
+                f"reasoning</summary><div class='muted' style='font-size:12px;margin:4px 0 6px'>"
+                f"{reasoning}</div></details>"
+                if reasoning else ""
+            )
+            val = (
+                reasoning_block
+                + f"<textarea name='facet_{html.escape(key)}' rows='3' "
+                f"placeholder='Nhập nội dung...'>{escaped}</textarea>"
+            )
+        elif status == "filled" and content:
+            val = html.escape(content)
         elif status == "na":
             val = f"<span class='muted'>N/A — {html.escape(str(f.get('reason') or ''))}</span>"
-        else:  # needs_human (or empty filled)
+        else:
             val = "<span class='caveat'>(cần làm rõ)</span>"
-        rows.append(f"<tr><td class='muted'>{html.escape(key)}</td><td>{val}</td></tr>")
+        return f"<tr><td class='muted'>{html.escape(key)}</td><td>{val}</td></tr>"
+
+    spec_rows = "".join(_row(k) for k in SPEC_FACET_KEYS)
+    exec_rows = "".join(_row(k) for k in EXEC_FACET_KEYS)
     title = html.escape(str(task.get("title") or "Task"))
-    return (
-        f"<div class='card'><h2>Task spec · {title}</h2>"
-        "<table>" + "".join(rows) + "</table></div>"
+    table = (
+        "<table>"
+        "<tr><th colspan='2' style='color:#5fb0f0;padding-top:10px'>Spec facets (13)</th></tr>"
+        + spec_rows
+        + "<tr><th colspan='2' style='color:#5fd07f;padding-top:14px'>Implementation documents (7)</th></tr>"
+        + exec_rows
+        + "</table>"
     )
+    if spec_id:
+        return (
+            f"<form method='POST' action='/task-spec'>"
+            f"<input type='hidden' name='id' value='{html.escape(spec_id)}'>"
+            f"<div class='card'><h2>Task spec · {title}</h2>"
+            f"{table}"
+            f"<button type='submit'>Lưu &amp; Duyệt</button>"
+            f"</div></form>"
+        )
+    return f"<div class='card'><h2>Task spec · {title}</h2>{table}</div>"
+
+
+def _save_task_spec_edits(spec_id: str, edits: dict, *, storage_root: str) -> None:
+    path = Path(storage_root) / "task_specs" / f"{spec_id}.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    facets = data.get("facets") or {}
+    for key in FACET_KEYS:
+        if key in edits:
+            content = (edits[key] or "").strip()
+            if content:
+                facets[key] = {"status": "filled", "content": content, "reason": ""}
+            else:
+                facets[key] = {"status": "needs_human", "content": "", "reason": ""}
+    data["facets"] = facets
+    data["approved"] = True
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _save_task_spec(task: dict, facets: dict, *, storage_root: str) -> Path:
@@ -328,6 +395,22 @@ def _save_task_spec(task: dict, facets: dict, *, storage_root: str) -> Path:
     return path
 
 
+def _task_spec_log_lines(spec_id: str) -> list[str]:
+    log_path = Path(_config().storage_root) / "task_specs" / f"{spec_id}.log"
+    if not log_path.exists():
+        return []
+    try:
+        return log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-40:]
+    except OSError:
+        return []
+
+
+def _task_spec_log_card(spec_id: str, title: str = "Log tiến trình") -> str:
+    lines = _task_spec_log_lines(spec_id)
+    pre = html.escape("\n".join(lines)) if lines else "(chưa có log — worker đang khởi động…)"
+    return f"<div class='card'><h2>{html.escape(title)}</h2><pre>{pre}</pre></div>"
+
+
 def _task_spec_page(spec_id: str) -> bytes:
     path = Path(_config().storage_root) / "task_specs" / f"{spec_id}.json"
     if not path.exists():
@@ -339,15 +422,36 @@ def _task_spec_page(spec_id: str) -> bytes:
         return _page("task spec", f"<div class='card muted'>Lỗi đọc TaskSpec: {html.escape(str(exc))}</div>")
     status = data.get("status")
     if status == "done":
-        return _page("Task spec", _render_task_spec(data.get("task") or {}, data.get("facets") or {})
+        facets = data.get("facets") or {}
+        needs_human = sum(1 for f in facets.values() if f.get("status") == "needs_human")
+        warning = ""
+        if needs_human == 8:
+            log_lines = _task_spec_log_lines(spec_id)
+            log_pre = html.escape("\n".join(log_lines)) if log_lines else "(không có log)"
+            warning = (
+                "<div class='card'><h2>⚠ Tất cả facets đều trống</h2>"
+                "<p class='caveat'>Claude CLI đã chạy nhưng không trả về nội dung nào — "
+                "có thể đã timeout hoặc gặp lỗi nội bộ. Xem log bên dưới để biết chi tiết.</p>"
+                f"<pre>{log_pre}</pre></div>"
+            )
+        approved_badge = ("<p><span class='badge b-done'>Đã duyệt ✓</span></p>"
+                          if data.get("approved") else "")
+        return _page("Task spec",
+                     warning
+                     + approved_badge
+                     + _render_task_spec(data.get("task") or {}, facets, spec_id)
                      + "<p class='muted'><a href='/'>← trang chủ</a></p>")
     if status == "error":
-        return _page("task spec", "<div class='card muted'>Lỗi sinh TaskSpec: "
-                     f"{html.escape(str(data.get('error') or ''))}</div>")
+        err = html.escape(str(data.get("error") or ""))
+        return _page("task spec",
+                     "<div class='card'><h2>Lỗi sinh TaskSpec</h2>"
+                     f"<p class='caveat'>{err}</p></div>"
+                     + _task_spec_log_card(spec_id))
     # running (or anything else)
     return _page("task spec",
                  "<div class='card'><h2>Đang chạy — sinh TaskSpec (agentic đọc repo)…</h2>"
-                 "<p class='muted'>Trang tự refresh mỗi 5s.</p></div>",
+                 "<p class='muted'>Trang tự refresh mỗi 5s.</p></div>"
+                 + _task_spec_log_card(spec_id),
                  head_extra="<meta http-equiv='refresh' content='5'>")
 
 
@@ -368,7 +472,8 @@ def _spawn_task_spec_worker(idea: str, repo: str) -> str:
     subprocess.Popen(
         [sys.executable, "-m", "ai_dev_system.task_graph.single_task_worker",
          "--id", spec_id, "--idea", idea, "--repo", repo,
-         "--storage-root", str(_config().storage_root)],
+         "--storage-root", str(_config().storage_root),
+         "--database-url", str(_config().database_url)],
         cwd=str(Path(__file__).resolve().parents[2]), **popen_kwargs,
     )
     return spec_id
@@ -506,6 +611,16 @@ class Handler(BaseHTTPRequestHandler):
             )
             self._send(_page("aborted", body,
                              head_extra=f"<meta http-equiv='refresh' content='2;url={html.escape(back)}'>"))
+        elif path == "/task-spec":
+            length = int(self.headers.get("Content-Length", "0"))
+            form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+            spec_id = (form.get("id") or [""])[0].strip()
+            if spec_id:
+                edits = {key: (form.get(f"facet_{key}") or [""])[0] for key in FACET_KEYS}
+                _save_task_spec_edits(spec_id, edits, storage_root=str(_config().storage_root))
+            redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}" if spec_id else "/"
+            self._send(_page("saved", "<div class='card'><h2>Đã lưu &amp; duyệt ✓</h2></div>",
+                             head_extra=f"<meta http-equiv='refresh' content='1;url={html.escape(redirect)}'>"))
         elif path == "/spec-task":
             length = int(self.headers.get("Content-Length", "0"))
             form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))

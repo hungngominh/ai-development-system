@@ -2,7 +2,7 @@ import json
 import types
 
 from ai_dev_system import webui
-from ai_dev_system.task_graph.facets import FACET_KEYS
+from ai_dev_system.task_graph.facets import FACET_KEYS, SPEC_FACET_KEYS, EXEC_FACET_KEYS
 
 
 def _facets(over=None):
@@ -123,7 +123,8 @@ def test_task_spec_page_unknown_id(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_spawn_caps_idea_length(tmp_path, monkeypatch):
-    monkeypatch.setattr(webui, "_config", lambda: types.SimpleNamespace(storage_root=str(tmp_path)))
+    monkeypatch.setattr(webui, "_config", lambda: types.SimpleNamespace(
+        storage_root=str(tmp_path), database_url="sqlite:///:memory:"))
     recorded = {}
 
     def _fake_popen(cmd, **kw):
@@ -139,3 +140,67 @@ def test_spawn_caps_idea_length(tmp_path, monkeypatch):
     assert spec_id and (tmp_path / "task_specs" / f"{spec_id}.json").exists()
     idea_arg = recorded["cmd"][recorded["cmd"].index("--idea") + 1]
     assert len(idea_arg) <= 8000
+
+
+# ---------------------------------------------------------------------------
+# Task-specs appear in the home "Runs" table (linked to /task-spec, not /run)
+# ---------------------------------------------------------------------------
+
+def test_home_lists_task_spec_row_linking_to_task_spec(monkeypatch, file_config):
+    from ai_dev_system.db.connection import get_connection
+    from ai_dev_system.db.helpers import dump_json
+
+    run_id = "abc123def456"
+    conn = get_connection(file_config.database_url)
+    conn.execute(
+        "INSERT INTO runs (run_id, project_id, status, title, metadata) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (run_id, "adhoc-task-spec", "COMPLETED", "My spec task",
+         dump_json({"kind": "task_spec", "spec_id": run_id})),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(webui, "_config", lambda: file_config)
+    page = webui._home().decode("utf-8")
+    # task-spec rows route to the facet page, never the debate run-detail page
+    assert f"/task-spec?id={run_id}" in page
+    assert f"/run?id={run_id}" not in page
+
+
+def test_home_lists_debate_run_linking_to_run_detail(monkeypatch, file_config):
+    from ai_dev_system.db.connection import get_connection
+
+    run_id = "debate999aaa"
+    conn = get_connection(file_config.database_url)
+    conn.execute(
+        "INSERT INTO runs (run_id, project_id, status, title) VALUES (?, ?, ?, ?)",
+        (run_id, "proj1", "COMPLETED", "Pipeline: debate"),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setattr(webui, "_config", lambda: file_config)
+    page = webui._home().decode("utf-8")
+    # ordinary runs keep their /run?id= link
+    assert f"/run?id={run_id}" in page
+    assert f"/task-spec?id={run_id}" not in page
+
+
+# ---------------------------------------------------------------------------
+# Task 3: grouped rendering — spec facets section + exec facets section
+# ---------------------------------------------------------------------------
+
+def test_render_shows_spec_and_exec_sections():
+    facets = _facets()
+    html_out = webui._render_task_spec({"title": "T"}, facets)
+    assert "Spec facets" in html_out or "spec" in html_out.lower()
+    assert "Implementation" in html_out or "impl" in html_out.lower()
+
+
+def test_render_exec_na_shows_reason():
+    facets = _facets()
+    for k in EXEC_FACET_KEYS:
+        facets[k] = {"status": "na", "content": "", "reason": "exec-time — fill after implementation"}
+    html_out = webui._render_task_spec({"title": "T"}, facets)
+    assert "exec-time" in html_out
