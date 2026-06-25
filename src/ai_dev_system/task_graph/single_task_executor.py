@@ -283,7 +283,10 @@ def run_executor(
             },
         )
     except Exception as exc:
+        import traceback
+        tb = traceback.format_exc()
         _exec_log(log_path, f"LỖI execution: {type(exc).__name__}: {exc}")
+        _exec_log(log_path, f"Traceback:\n{tb}")
         _write_exec_status(
             status_path,
             {
