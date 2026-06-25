@@ -188,7 +188,7 @@ def _run_detail(run_id: str) -> bytes:
     conn = get_connection(cfg.database_url)
     try:
         row = conn.execute(
-            "SELECT run_id, status, title, current_artifacts, created_at FROM runs WHERE run_id = ?",
+            "SELECT run_id, status, title, current_artifacts, created_at, metadata FROM runs WHERE run_id = ?",
             (run_id,),
         ).fetchone()
     finally:
@@ -200,6 +200,8 @@ def _run_detail(run_id: str) -> bytes:
     if row is None:
         head += "<div class='card muted'>Run không có trong DB. Vẫn thử đọc report từ storage…</div>"
         status_card = ""
+        edit_form = ""
+        approve_card = ""
     else:
         phase = {"RUNNING_PHASE_1A": "đang sinh câu hỏi…",
                  "RUNNING_PHASE_1B": "đang debate…"}.get(status, "")
@@ -211,6 +213,30 @@ def _run_detail(run_id: str) -> bytes:
             f"<pre>{html.escape(json.dumps(json.loads(row['current_artifacts'] or '{}'), indent=2, ensure_ascii=False))}</pre>"
             f"</details></div>"
         )
+        _meta_display = html.escape(row["metadata"] or "{}")
+        _title_display = html.escape(row["title"] or "")
+        _rid_q = html.escape(urllib.parse.quote(run_id))
+        edit_form = (
+            f"<div class='card'><h3>Chỉnh sửa</h3>"
+            f"<form method='POST' action='/run-edit'>"
+            f"<input type='hidden' name='id' value='{html.escape(run_id)}'>"
+            f"<label>Tiêu đề</label>"
+            f"<input type='text' name='title' value='{_title_display}' style='width:100%;box-sizing:border-box'>"
+            f"<label style='margin-top:8px;display:block'>Metadata (JSON)</label>"
+            f"<textarea name='metadata' rows='4' style='width:100%;box-sizing:border-box'>{_meta_display}</textarea>"
+            f"<button type='submit' style='margin-top:8px'>Lưu ✓</button>"
+            f"</form></div>"
+        )
+        if status in _APPROVE_NEXT_STATUS:
+            approve_card = (
+                f"<div class='card'>"
+                f"<form method='POST' action='/run-approve'>"
+                f"<input type='hidden' name='id' value='{html.escape(run_id)}'>"
+                f"<button type='submit'>Duyệt &amp; tiếp tục →</button>"
+                f"</form></div>"
+            )
+        else:
+            approve_card = ""
 
     report_path = _find_report_path(run_id)
     idle = _progress_idle_seconds(time.time())
@@ -220,9 +246,9 @@ def _run_detail(run_id: str) -> bytes:
         return _page(f"Run {run_id[:8]} · Gate 1", body)
     elif report_path is None and running:
         card = _stale_card(run_id, idle, run_status=status) if stale else _progress_card()
-        body = head + status_card + card
+        body = head + status_card + approve_card + edit_form + card
     else:
-        body = head + status_card + _render_report(run_id)
+        body = head + status_card + approve_card + edit_form + _render_report(run_id)
     # Auto-refresh only while genuinely progressing: not once the report exists,
     # and not when stale — refreshing a dead run would falsely imply it's alive.
     live = running and report_path is None and not stale
@@ -366,6 +392,98 @@ def _abort_run(run_id: str) -> None:
             conn.commit()
     finally:
         conn.close()
+
+
+_APPROVE_NEXT_STATUS: dict[str, str] = {
+    "PAUSED_AT_GATE_2": "RUNNING_PHASE_3",
+    "PAUSED_FOR_DECISION": "RUNNING_EXECUTION",
+    "PAUSED_AT_GATE_3": "RUNNING_PHASE_V",
+    "PAUSED_AT_GATE_3B": "RUNNING_PHASE_V",
+}
+
+
+def _do_run_edit(run_id: str, form: dict) -> bytes | str:
+    """Process POST /run-edit. Validates and updates title + metadata. Returns redirect URL or error bytes."""
+    import json as _json
+    from ai_dev_system.db.repos.runs import RunRepo
+    from ai_dev_system.db.helpers import dump_json
+
+    if not run_id:
+        return _page("error", "<div class='card muted'>Thiếu run id.</div>")
+    title = (form.get("title") or [""])[0].strip()
+    if not title:
+        return _page("error", "<div class='card'>Tiêu đề không được để trống.</div>")
+    metadata_raw = (form.get("metadata") or ["{}"])[0].strip()
+    try:
+        metadata_parsed = _json.loads(metadata_raw)
+        metadata_str = dump_json(metadata_parsed)
+    except _json.JSONDecodeError:
+        return _page(
+            "error",
+            "<div class='card'>metadata không hợp lệ JSON.</div>",
+        )
+    cfg = _config()
+    conn = get_connection(cfg.database_url)
+    try:
+        row = conn.execute(
+            "SELECT run_id FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return _page("error", "<div class='card muted'>Run không tìm thấy.</div>")
+        RunRepo(conn).update_meta(run_id, title, metadata_str)
+        conn.commit()
+    finally:
+        conn.close()
+
+    log = _progress_log()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    try:
+        with log.open("a", encoding="utf-8") as _f:
+            _f.write(f"[run-edit] {run_id[:8]} title={title!r} at {ts}\n")
+    except OSError:
+        pass
+
+    return f"/run?id={urllib.parse.quote(run_id)}"
+
+
+def _do_run_approve(run_id: str) -> bytes | str:
+    """Process POST /run-approve. Validates PAUSED state and advances status. Returns redirect URL or error bytes."""
+    from ai_dev_system.db.repos.runs import RunRepo
+
+    if not run_id:
+        return _page("error", "<div class='card muted'>Thiếu run id.</div>")
+    cfg = _config()
+    conn = get_connection(cfg.database_url)
+    try:
+        row = conn.execute(
+            "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        if row is None:
+            return _page("error", "<div class='card muted'>Run không tìm thấy.</div>")
+        current_status = str(row["status"])
+        next_status = _APPROVE_NEXT_STATUS.get(current_status)
+        if next_status is None:
+            return _page(
+                "error",
+                f"<div class='card'>Run không ở trạng thái có thể duyệt "
+                f"(hiện tại: {html.escape(current_status)}).</div>",
+            )
+        RunRepo(conn).update_status(run_id, next_status)
+        conn.commit()
+    finally:
+        conn.close()
+
+    log = _progress_log()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    try:
+        with log.open("a", encoding="utf-8") as _f:
+            _f.write(f"[run-approve] {run_id[:8]} {current_status}→{next_status} at {ts}\n")
+    except OSError:
+        pass
+
+    return f"/run?id={urllib.parse.quote(run_id)}"
 
 
 def _render_task_spec(task: dict, facets: dict, spec_id: str | None = None) -> str:
@@ -1240,6 +1358,20 @@ class Handler(BaseHTTPRequestHandler):
                         self.end_headers()
                     else:
                         self._send(result, 200)
+            elif path in ("/run-edit", "/run-approve"):
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                rid = (form.get("id") or [""])[0].strip()
+                if path == "/run-edit":
+                    result = _do_run_edit(rid, form)
+                else:
+                    result = _do_run_approve(rid)
+                if isinstance(result, str):
+                    self.send_response(302)
+                    self.send_header("Location", result)
+                    self.end_headers()
+                else:
+                    self._send(result, 400)
             elif path == "/start":
                 length = int(self.headers.get("Content-Length", "0"))
                 form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))

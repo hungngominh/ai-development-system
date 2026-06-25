@@ -268,6 +268,7 @@ def run_executor(
         repo_path=repo_path,
         branch_name=branch_name,
         base_branch=base_branch,
+        live_log_path=log_path,
     )
 
     try:

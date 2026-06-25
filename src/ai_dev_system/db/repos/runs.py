@@ -58,6 +58,15 @@ class RunRepo:
             (status, run_id),
         )
 
+    def update_meta(self, run_id: str, title: str, metadata: str) -> None:
+        self.conn.execute(
+            """
+            UPDATE runs SET title = ?, metadata = ?, last_activity_at = CURRENT_TIMESTAMP
+            WHERE run_id = ?
+            """,
+            (title, metadata, run_id),
+        )
+
     def record_output(self, run_id: str, name: str, artifact_id: str) -> None:
         """Record a task's logical output name -> artifact_id under
         current_artifacts.outputs, so downstream tasks can resolve their

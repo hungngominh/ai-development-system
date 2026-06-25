@@ -103,8 +103,18 @@ def test_agent_writes_diff_and_summary_on_success(tmp_path):
             return _diff_proc()
         return _ok_proc()
 
+    def _fake_popen(cmd, **kw):
+        class FakePopen:
+            returncode = 0
+            stdout = iter([json.dumps({"type": "result", "result": "Done — committed changes."}) + "\n"])
+            stderr = iter([])
+            def wait(self, timeout=None):
+                self.returncode = 0
+        return FakePopen()
+
     with patch("ai_dev_system.agents.repo_branch_agent.ClaudeCodeLLMClient._resolve_claude_cmd",
                return_value="claude"), \
+         patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", side_effect=_fake_popen), \
          patch("ai_dev_system.agents.repo_branch_agent.subprocess.run", side_effect=_fake_run):
         result = agent.run("TASK-ADHOC", out, context=_ctx())
 
@@ -123,8 +133,18 @@ def test_agent_writes_diff_even_on_claude_failure(tmp_path):
             return _diff_proc()
         return _fail_proc()
 
+    def _fake_popen(cmd, **kw):
+        class FakePopen:
+            returncode = 1
+            stdout = iter([])
+            stderr = iter(["auth error\n"])
+            def wait(self, timeout=None):
+                self.returncode = 1
+        return FakePopen()
+
     with patch("ai_dev_system.agents.repo_branch_agent.ClaudeCodeLLMClient._resolve_claude_cmd",
                return_value="claude"), \
+         patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", side_effect=_fake_popen), \
          patch("ai_dev_system.agents.repo_branch_agent.subprocess.run", side_effect=_fake_run):
         result = agent.run("TASK-ADHOC", out, context=_ctx())
 
@@ -142,8 +162,18 @@ def test_agent_creates_output_dir_if_missing(tmp_path):
             return _diff_proc()
         return _ok_proc()
 
+    def _fake_popen(cmd, **kw):
+        class FakePopen:
+            returncode = 0
+            stdout = iter([json.dumps({"type": "result", "result": "Done — committed changes."}) + "\n"])
+            stderr = iter([])
+            def wait(self, timeout=None):
+                self.returncode = 0
+        return FakePopen()
+
     with patch("ai_dev_system.agents.repo_branch_agent.ClaudeCodeLLMClient._resolve_claude_cmd",
                return_value="claude"), \
+         patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", side_effect=_fake_popen), \
          patch("ai_dev_system.agents.repo_branch_agent.subprocess.run", side_effect=_fake_run):
         result = agent.run("TASK-ADHOC", deep_out, context=_ctx())
 
