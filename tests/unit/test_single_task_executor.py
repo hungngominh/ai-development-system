@@ -78,6 +78,45 @@ def test_checkout_branch_creates_new_when_not_exists(tmp_path):
     assert any("-b" in cmd for cmd in calls)
 
 
+# ── push branch + GitHub compare URL ────────────────────────────────────────────
+
+def test_normalize_github_url_variants():
+    from ai_dev_system.task_graph.single_task_executor import _normalize_github_url
+    assert _normalize_github_url("https://github.com/o/r.git") == "https://github.com/o/r"
+    assert _normalize_github_url("git@github.com:o/r.git") == "https://github.com/o/r"
+    assert _normalize_github_url("https://github.com/o/r/") == "https://github.com/o/r"
+
+
+def test_push_branch_compare_builds_url(tmp_path):
+    from ai_dev_system.task_graph.single_task_executor import _push_branch_compare
+
+    def _fake_run(cmd, **kw):
+        if cmd[:2] == ["git", "push"]:
+            return _fake_git_ok("")
+        if cmd[:3] == ["git", "remote", "get-url"]:
+            return _fake_git_ok("https://github.com/o/r.git\n")
+        return _fake_git_ok("")
+
+    with patch("ai_dev_system.task_graph.single_task_executor.subprocess.run",
+               side_effect=_fake_run):
+        info = _push_branch_compare(str(tmp_path), "ai-dev/task-x", "master")
+
+    assert info["pushed"] is True
+    assert info["compare_url"] == "https://github.com/o/r/compare/master...ai-dev/task-x"
+
+
+def test_push_branch_compare_push_failure(tmp_path):
+    from ai_dev_system.task_graph.single_task_executor import _push_branch_compare
+
+    with patch("ai_dev_system.task_graph.single_task_executor.subprocess.run",
+               return_value=_fake_git_fail()):
+        info = _push_branch_compare(str(tmp_path), "ai-dev/task-x", "master")
+
+    assert info["pushed"] is False
+    assert info["compare_url"] is None
+    assert "not a git repository" in (info["push_error"] or "")
+
+
 # ── _create_task_graph_artifact ────────────────────────────────────────────────
 
 def _minimal_db(tmp_path: Path) -> sqlite3.Connection:

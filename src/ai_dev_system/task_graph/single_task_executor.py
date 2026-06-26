@@ -76,6 +76,38 @@ def _git_checkout_branch(repo_path: str, branch_name: str) -> None:
             )
 
 
+def _normalize_github_url(remote: str) -> str:
+    """Best-effort convert a git remote URL into an https GitHub web URL base."""
+    remote = (remote or "").strip()
+    if remote.endswith(".git"):
+        remote = remote[:-4]
+    if remote.startswith("git@github.com:"):
+        remote = "https://github.com/" + remote[len("git@github.com:"):]
+    elif remote.startswith("ssh://git@github.com/"):
+        remote = "https://github.com/" + remote[len("ssh://git@github.com/"):]
+    return remote.rstrip("/")
+
+
+def _push_branch_compare(repo_path: str, branch: str, base: str) -> dict:
+    """Push ``branch`` to origin and build a GitHub compare URL. Best-effort.
+
+    Returns ``{"pushed", "compare_url", "push_error"}`` — never raises so a push
+    failure (no remote / auth) does not sink an otherwise-successful run.
+    """
+    info: dict = {"pushed": False, "compare_url": None, "push_error": None}
+    push = _git(["push", "-u", "origin", branch], repo_path)
+    if push.returncode != 0:
+        info["push_error"] = (push.stderr or push.stdout or "").strip()[:300]
+        return info
+    info["pushed"] = True
+    remote = _git(["remote", "get-url", "origin"], repo_path)
+    if remote.returncode == 0 and remote.stdout.strip():
+        base_url = _normalize_github_url(remote.stdout.strip())
+        if "github.com/" in base_url:
+            info["compare_url"] = f"{base_url}/compare/{base}...{branch}"
+    return info
+
+
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
@@ -276,13 +308,24 @@ def run_executor(
             run_id, graph_artifact_id, cfg, agent, poll_interval_s=5.0
         )
         _exec_log(log_path, f"Execution xong: {result.status}")
-        _write_exec_status(
-            status_path,
-            {
-                "status": "done", "exec_status": result.status,
-                "run_id": run_id, "branch": branch_name, "base_branch": base_branch,
-            },
-        )
+        exec_data = {
+            "status": "done", "exec_status": result.status,
+            "run_id": run_id, "branch": branch_name, "base_branch": base_branch,
+        }
+        # On success, push the branch so it can be reviewed on GitHub before
+        # the human Accepts (which then opens the PR).
+        if result.status == "COMPLETED":
+            push_info = _push_branch_compare(repo_path, branch_name, base_branch)
+            exec_data.update(push_info)
+            if push_info["pushed"]:
+                _exec_log(
+                    log_path,
+                    "Đã push branch lên origin. Compare: "
+                    f"{push_info.get('compare_url') or '(không có URL GitHub)'}",
+                )
+            else:
+                _exec_log(log_path, f"Push branch thất bại: {push_info.get('push_error')}")
+        _write_exec_status(status_path, exec_data)
     except Exception as exc:
         import traceback
         tb = traceback.format_exc()
