@@ -730,6 +730,82 @@ def _task_exec_diff(spec_id: str, run_id: str, cfg) -> str:
         return f"(lỗi đọc diff: {exc})"
 
 
+def _accept_branch_create_pr(
+    branch: str, base: str, repo: str, title: str, body_text: str = ""
+) -> dict:
+    """Push ``branch`` to origin and open a PR against ``base`` via the gh CLI.
+
+    Returns ``{"ok", "pr_url", "pushed", "error"}``. Never raises — git/gh
+    failures are captured so the caller can fall back to the manual merge hint.
+    """
+    result: dict = {"ok": False, "pr_url": None, "pushed": False, "error": None}
+    if not (branch and repo):
+        result["error"] = "thiếu branch hoặc repo path"
+        return result
+
+    # 1. Push the branch to origin
+    try:
+        push = subprocess.run(
+            ["git", "push", "-u", "origin", branch],
+            cwd=repo, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+    except Exception as exc:  # noqa: BLE001
+        result["error"] = f"git push lỗi: {exc}"
+        return result
+    if push.returncode != 0:
+        detail = (push.stderr or push.stdout or "").strip()
+        result["error"] = f"git push thất bại: {detail[:500]}"
+        return result
+    result["pushed"] = True
+
+    # 2. Create the PR via gh
+    pr_title = (title or branch)[:120]
+    pr_body = body_text or (
+        "Tạo tự động bởi ai-dev single-task executor.\n\n"
+        f"Branch: {branch}\nReview diff trước khi merge."
+    )
+    try:
+        pr = subprocess.run(
+            ["gh", "pr", "create", "--base", base, "--head", branch,
+             "--title", pr_title, "--body", pr_body],
+            cwd=repo, capture_output=True, text=True,
+            encoding="utf-8", errors="replace",
+        )
+    except FileNotFoundError:
+        result["error"] = "gh CLI không tìm thấy (branch đã được push lên origin)"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        result["error"] = f"gh pr create lỗi: {exc} (branch đã được push)"
+        return result
+
+    if pr.returncode != 0:
+        err = (pr.stderr or pr.stdout or "").strip()
+        # A PR for this head may already exist — try to recover its URL.
+        try:
+            existing = subprocess.run(
+                ["gh", "pr", "view", branch, "--json", "url", "-q", ".url"],
+                cwd=repo, capture_output=True, text=True,
+                encoding="utf-8", errors="replace",
+            )
+            url = (existing.stdout or "").strip()
+            if existing.returncode == 0 and url.startswith("http"):
+                result["ok"] = True
+                result["pr_url"] = url
+                return result
+        except Exception:  # noqa: BLE001
+            pass
+        result["error"] = f"gh pr create thất bại: {err[:500]} (branch đã được push)"
+        return result
+
+    # gh prints the PR URL on stdout (usually a single line).
+    out = (pr.stdout or "").strip()
+    url = next((ln.strip() for ln in out.splitlines() if ln.strip().startswith("http")), "")
+    result["ok"] = True
+    result["pr_url"] = url or out
+    return result
+
+
 def _task_exec_page(spec_id: str) -> bytes:
     exec_st = _task_exec_status(spec_id)
     log_lines = _task_exec_log_lines(spec_id)
@@ -1272,23 +1348,50 @@ class Handler(BaseHTTPRequestHandler):
                 branch = exec_st.get("branch") or ""
                 base = exec_st.get("base_branch") or ""
                 repo = ""
+                title = ""
                 try:
                     _s = json.loads(
                         (Path(_config().storage_root) / "task_specs" / f"{spec_id}.json")
                         .read_text(encoding="utf-8")
                     )
                     repo = _s.get("repo") or ""
+                    title = str((_s.get("task") or {}).get("title") or _s.get("idea") or "")
                 except Exception:  # noqa: BLE001
                     pass
                 if action == "accept":
-                    body = (
-                        "<div class='card'><h2>Branch accepted ✓</h2>"
-                        f"<p>Branch <b>{html.escape(branch)}</b> đã được giữ lại.</p>"
-                        f"<p class='muted'>Để merge: "
-                        f"<code>git checkout {html.escape(base)} &amp;&amp; "
-                        f"git merge --no-ff {html.escape(branch)}</code></p>"
-                        "<p><a href='/'>← trang chủ</a></p></div>"
-                    )
+                    pr = _accept_branch_create_pr(branch, base, repo, title)
+                    if pr["ok"]:
+                        url = html.escape(pr.get("pr_url") or "")
+                        body = (
+                            "<div class='card'><h2>Branch pushed &amp; PR đã tạo ✓</h2>"
+                            f"<p>Branch <b>{html.escape(branch)}</b> đã được push lên origin.</p>"
+                            f"<p>Pull request: <a href='{url}' target='_blank'>{url}</a></p>"
+                            "<p><a href='/'>← trang chủ</a></p></div>"
+                        )
+                        # Leave the working tree clean on the base branch.
+                        try:
+                            subprocess.run(
+                                ["git", "checkout", base], cwd=repo,
+                                capture_output=True, text=True,
+                                encoding="utf-8", errors="replace",
+                            )
+                        except Exception:  # noqa: BLE001
+                            pass
+                    else:
+                        err = html.escape(pr.get("error") or "không rõ")
+                        pushed_note = (
+                            "<p class='muted'>Branch đã được push lên origin.</p>"
+                            if pr.get("pushed") else ""
+                        )
+                        body = (
+                            "<div class='card'><h2>⚠ Chưa tạo được PR</h2>"
+                            f"<p class='caveat'>{err}</p>"
+                            f"{pushed_note}"
+                            f"<p class='muted'>Có thể merge thủ công: "
+                            f"<code>git checkout {html.escape(base)} &amp;&amp; "
+                            f"git merge --no-ff {html.escape(branch)}</code></p>"
+                            "<p><a href='/'>← trang chủ</a></p></div>"
+                        )
                     self._send(_page("accepted", body))
                 elif action == "reject":
                     msg = "Branch đã bị xóa."
