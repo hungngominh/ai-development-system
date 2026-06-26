@@ -48,12 +48,7 @@ def test_run_edit_valid_updates_db_and_redirects(monkeypatch, file_config):
 
     monkeypatch.setattr(webui, "_config", lambda: file_config)
 
-    form = {
-        "id": [run_id],
-        "title": ["New Title"],
-        "metadata": ['{"key": "value"}'],
-    }
-    result = webui._do_run_edit(run_id, form)
+    result = webui._do_run_edit(run_id, "New Title", '{"key": "value"}')
 
     # Should return redirect URL string
     assert isinstance(result, str)
@@ -81,12 +76,7 @@ def test_run_edit_invalid_json_metadata_returns_error(monkeypatch, file_config):
 
     monkeypatch.setattr(webui, "_config", lambda: file_config)
 
-    form = {
-        "id": [run_id],
-        "title": ["New Title"],
-        "metadata": ["not valid json {{{"],
-    }
-    result = webui._do_run_edit(run_id, form)
+    result = webui._do_run_edit(run_id, "New Title", "not valid json {{{")
 
     # Should return error bytes, not a redirect URL
     assert isinstance(result, bytes)
@@ -109,8 +99,7 @@ def test_run_edit_invalid_json_metadata_returns_error(monkeypatch, file_config):
 def test_run_edit_empty_run_id_returns_error(monkeypatch, file_config):
     monkeypatch.setattr(webui, "_config", lambda: file_config)
 
-    form = {"id": [""], "title": ["Some Title"], "metadata": ["{}"]}
-    result = webui._do_run_edit("", form)
+    result = webui._do_run_edit("", "Some Title", "{}")
 
     assert isinstance(result, bytes)
     html_str = result.decode("utf-8")
@@ -184,8 +173,8 @@ def test_run_detail_paused_shows_approve_and_edit(monkeypatch, file_config):
 
     # Edit form should be present
     assert "run-edit" in page
-    assert "name='title'" in page
-    assert "name='metadata'" in page
+    assert 'name="title"' in page or "name='title'" in page
+    assert 'name="metadata"' in page or "name='metadata'" in page
 
     # Approve button/form should be present for approvable state
     assert "run-approve" in page
