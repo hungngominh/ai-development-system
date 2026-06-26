@@ -215,6 +215,24 @@ def worker_loop(
                     conn.execute("ROLLBACK")
                 except Exception:
                     pass
+                # Best-effort: mark task FAILED_FINAL so the run can transition.
+                # If this also fails, background_loop's recover_dead_tasks will
+                # catch the stale heartbeat on the next cycle.
+                try:
+                    conn.execute(
+                        "UPDATE task_runs SET status='FAILED_FINAL', "
+                        "error_type='EXECUTION_ERROR', "
+                        "error_detail='promote_or_failure_handler_crashed', "
+                        "completed_at=CURRENT_TIMESTAMP "
+                        "WHERE task_run_id=? AND status='RUNNING'",
+                        (task["task_run_id"],),
+                    )
+                    from ai_dev_system.engine.failure import propagate_failure
+                    propagate_failure(conn, run_id, failed_task_id=task["task_id"],
+                                      failed_task_run_id=task["task_run_id"])
+                except Exception:
+                    logger.exception("Could not recover task %s after failure handler crash",
+                                     task["task_id"])
     finally:
         conn.close()
 

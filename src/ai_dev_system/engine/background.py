@@ -131,25 +131,31 @@ def recover_dead_tasks(
         max_env = config.retry_policy["ENVIRONMENT_ERROR"]["max_retries"]
         delay = config.retry_policy["ENVIRONMENT_ERROR"]["retry_delay_s"]
 
+        from ai_dev_system.engine.failure import propagate_failure
+
+        def _finalize_failed(task_run_id: str, task_id: str) -> None:
+            repo.mark_failed_final(task_run_id, "ENVIRONMENT_ERROR", "worker_heartbeat_timeout")
+            propagate_failure(conn, run_id, failed_task_id=task_id, failed_task_run_id=task_run_id)
+            logger.error("Dead worker: task %s → FAILED_FINAL", task_id)
+
         if task["retry_count"] < max_env:
-            repo.mark_failed_retryable(
-                task["task_run_id"], "ENVIRONMENT_ERROR", "worker_heartbeat_timeout"
-            )
-            repo.create_retry(run_id, task, retry_delay_s=delay, reset_retry_count=False)
-            logger.warning("Dead worker detected: task %s rescheduled", task["task_id"])
+            next_attempt = task["attempt_number"] + 1
+            slot_exists = conn.execute(
+                "SELECT 1 FROM task_runs WHERE run_id=? AND task_id=? AND attempt_number=?",
+                (run_id, task["task_id"], next_attempt),
+            ).fetchone()
+            if slot_exists:
+                # Retry slot already exists (duplicate executor / previous cycle) —
+                # escalate to FAILED_FINAL so the run can transition.
+                _finalize_failed(task["task_run_id"], task["task_id"])
+            else:
+                repo.mark_failed_retryable(
+                    task["task_run_id"], "ENVIRONMENT_ERROR", "worker_heartbeat_timeout"
+                )
+                repo.create_retry(run_id, task, retry_delay_s=delay, reset_retry_count=False)
+                logger.warning("Dead worker detected: task %s rescheduled", task["task_id"])
         else:
-            repo.mark_failed_final(
-                task["task_run_id"], "ENVIRONMENT_ERROR", "worker_heartbeat_timeout"
-            )
-            from ai_dev_system.engine.failure import propagate_failure
-            propagate_failure(
-                conn, run_id,
-                failed_task_id=task["task_id"],
-                failed_task_run_id=task["task_run_id"],
-            )
-            logger.error(
-                "Dead worker: task %s exhausted retries → FAILED_FINAL", task["task_id"]
-            )
+            _finalize_failed(task["task_run_id"], task["task_id"])
 
 
 def check_completion(conn: sqlite3.Connection, run_id: str) -> None:
