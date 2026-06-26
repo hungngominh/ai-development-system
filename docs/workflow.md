@@ -2,120 +2,118 @@
 
 ## Giới thiệu
 
-Tài liệu này mô tả luồng làm việc hoàn chỉnh sử dụng cả 5 component trong hệ thống: **OpenSpec**, **Superpowers**, **Beads**, **CrewAI**, và **agency-agents**. Để minh họa cụ thể, chúng ta sẽ đi qua một ví dụ thực tế: **"Xây forum chia sẻ kiến thức cho công ty"** — một internal knowledge-sharing forum có contributor leaderboard.
+Tài liệu này mô tả luồng làm việc hoàn chỉnh của AI Development System — một Python monorepo với các module: `intake`, `debate`, `gate.gate1_review`, `spec`, `task_graph`, và `engine`. Người dùng chỉ can thiệp tại 2 approval gate.
+
+Để minh họa cụ thể, chúng ta đi qua ví dụ: **"Xây forum chia sẻ kiến thức nội bộ"**.
 
 ---
 
 ## Ví dụ: Forum chia sẻ kiến thức
 
-### Giai đoạn 1: Định nghĩa yêu cầu (OpenSpec + Superpowers)
+### Phase 1a: Intake + Normalize (`ai_dev_system.intake`)
 
-Bắt đầu bằng việc khám phá ý tưởng với **Superpowers brainstorming skill**:
-
-- Những feature nào cần có? Posts, comments, voting, leaderboard, categories
-- Ai là user? Toàn bộ nhân viên công ty
-- Ràng buộc về tech stack? React frontend, Node.js backend, PostgreSQL
-
-Sau khi brainstorm xong, **OpenSpec** formalize yêu cầu thành spec chính thức:
+Người dùng bắt đầu bằng lệnh:
 
 ```bash
-/opsx:propose "Forum chia sẻ kiến thức"
+ai-dev intake start "Xây forum chia sẻ kiến thức nội bộ công ty"
 ```
 
-**Output** gồm `proposal.md` và thư mục `specs/` chứa các requirement:
+Module `intake.brief` normalize ý tưởng thô thành `initial_brief`:
 
-- "Hệ thống MUST cho phép đăng bài với tiêu đề và nội dung"
-- "Hệ thống MUST hiển thị bảng xếp hạng top contributors"
-- "Hệ thống MUST hỗ trợ voting (upvote/downvote) cho mỗi bài đăng"
-- "Hệ thống MUST phân loại bài đăng theo categories"
-
-Mỗi requirement đi kèm scenario ở định dạng **Given/When/Then**:
-
-```gherkin
-Given một nhân viên đã đăng nhập
-When họ tạo bài đăng mới với tiêu đề và nội dung
-Then bài đăng xuất hiện trong danh sách và contributor score tăng 1 điểm
+```
+Problem: Nhân viên không có nơi chia sẻ kiến thức
+Users: Developers nội bộ
+Success: Post/search bài viết, contributor leaderboard
+Constraints: Internal only, auth bắt buộc
+Unknowns: Scale? Real-time cần không?
 ```
 
-### Giai đoạn 2: Lập kế hoạch (Beads + Superpowers)
+Module `intake.suggest` sinh câu hỏi phân loại:
 
-**Superpowers writing-plans** tạo danh sách task chi tiết dựa trên spec từ giai đoạn 1.
+- `REQUIRED`: Feature MVP là gì? Primary users?
+- `STRATEGIC`: Backend tech stack? Frontend framework? Authentication?
+- `OPTIONAL`: Testing strategy? Notification?
 
-**Beads** chuyển danh sách đó thành task graph có thể track được:
+### Phase 1b: AI Debate (`ai_dev_system.debate`)
+
+Module `debate` cho từng câu hỏi REQUIRED + STRATEGIC:
+
+| Câu hỏi | Loại | Status |
+|---|---|---|
+| Feature MVP? | REQUIRED | RESOLVED (2 vòng) |
+| Primary users? | REQUIRED | RESOLVED (1 vòng) |
+| Backend stack? | STRATEGIC | RESOLVED (3 vòng) |
+| Authentication? | STRATEGIC | ESCALATE_TO_HUMAN (5 vòng) |
+| Database schema? | STRATEGIC | RESOLVED (2 vòng) |
+
+Kết quả: `debate_report.json` lưu vào SQLite.
+
+### Gate 1: Duyệt debate report (`ai_dev_system.gate.gate1_review`)
+
+Người dùng nhận report qua CLI, quyết định ESCALATE items trước:
+
+```
+❗ CẦN QUYẾT ĐỊNH:
+  Authentication — 5 vòng, confidence 0.55
+    • OAuth2 + JWT (stateless, scale tốt)
+    • Session + Redis (đơn giản, revoke ngay)
+    → Chọn: OAuth2 + JWT + short expiry
+
+✅ ĐÃ RESOLVED: Approve tất cả
+```
+
+Module `gate1_review.core` ghi `decision_log.json` và `approved_answers.json` vào SQLite.
+
+### Phase 1d: Build spec bundle (`ai_dev_system.spec`)
 
 ```bash
-bd create "Thiết kế DB schema" --type task --priority high
-bd create "API endpoints" --type task
-bd create "React frontend" --type task
-bd dep add <api-id> blocks <frontend-id>
-bd dep add <db-id> blocks <api-id>
+# Tự động sau Gate 1 approve
 ```
 
-Kiểm tra task nào sẵn sàng để bắt tay vào làm:
+`spec.pipeline` → `spec.planner` sinh 5 artifact:
+- `proposal.md` — tổng quan feature
+- `design.md` — thiết kế kỹ thuật
+- `functional.md` — yêu cầu chức năng
+- `non-functional.md` — yêu cầu phi chức năng
+- `acceptance-criteria.md` — tiêu chí nghiệm thu
+
+`spec.grounding` kiểm tra spec với codebase thực tế.
+`spec.repair` tự động sửa conflict.
+
+### Phase 2: Task Graph Generator (`ai_dev_system.task_graph`)
+
+`task_graph.generator` sinh tasks với metadata đầy đủ:
+
+```
+TASK-1: Thiết kế PostgreSQL schema
+  agent_type: Database Specialist
+  required_inputs: functional.md, non-functional.md
+  expected_outputs: schema.sql, erd.md
+  done_definition: Schema cover đủ entities trong spec
+
+TASK-2: Setup OAuth2 + JWT (blocked by TASK-1)
+TASK-3: API endpoints FastAPI (blocked by TASK-1, TASK-2)
+TASK-4: React + TypeScript setup (blocked by TASK-3)
+TASK-5: UI components (blocked by TASK-4)
+TASK-6: Testing + QA (blocked by TASK-3, TASK-5)
+```
+
+### Gate 2: Duyệt task graph
+
+Người dùng review và approve (hoặc sửa trước khi approve).
+`task_graph.approved.json` lưu vào SQLite.
+
+### Phase 3: Execution (`ai_dev_system.engine`)
+
+> ⚠️ **Lưu ý:** Single-task execution đã hoạt động. Multi-task graph execution với required_inputs/promoted_outputs đang phát triển.
 
 ```bash
-bd ready
+ai-dev phase-b run
 ```
 
-Kết quả: **DB schema** là task duy nhất ở trạng thái ready — vì API phụ thuộc vào DB, và frontend phụ thuộc vào API.
-
-### Giai đoạn 3: Thực thi (CrewAI + agency-agents + Superpowers)
-
-**CrewAI** orchestrate các agent thực thi tuần tự theo dependency graph:
-
-**Agent 1: Backend Architect** (từ agency-agents)
-
-- **Task:** Thiết kế DB schema + API dựa trên OpenSpec specs
-- **Superpowers:** TDD — viết test trước, rồi mới implement
-- Khi hoàn thành:
-
-```bash
-bd update <db-id> --status closed
-```
-
-**Agent 2: Frontend Developer** (từ agency-agents)
-
-- **Task:** Xây React UI + leaderboard component
-- **Superpowers:** Code review sau khi implement xong
-- Khi hoàn thành:
-
-```bash
-bd update <frontend-id> --status closed
-```
-
-Mỗi bước đều tuân theo quy trình: **implement → test → review → verify → close task** trong Beads.
-
-### Giai đoạn 4: Kiểm tra (Superpowers + OpenSpec)
-
-**Superpowers verification-before-completion** đảm bảo mọi thứ đúng trước khi tuyên bố hoàn thành:
-
-1. Chạy toàn bộ test suite, hiển thị output
-2. Đối chiếu với OpenSpec specs: mọi requirement đều có test pass?
-3. Validate implementation khớp với spec:
-
-```bash
-/opsx:verify
-```
-
-Nếu có requirement chưa được cover hoặc test fail, quay lại giai đoạn 3 để fix.
-
-### Giai đoạn 5: Hoàn thành (Beads + OpenSpec)
-
-Archive và tổng kết:
-
-```bash
-# Merge specs vào source of truth, chuyển sang archive
-/opsx:archive
-
-# Xem thống kê tổng quan
-bd admin stats
-# Output: total tasks, closed tasks, average lead time
-
-# Xem audit trail đầy đủ cho bất kỳ task nào
-bd show <id>
-```
-
-Toàn bộ công việc được **documented và traceable** — từ requirement ban đầu đến implementation cuối cùng.
+`engine.runner` + `engine.worker` (max 4 parallel workers) thực thi theo dependency order.
+`engine.failure` — retry tối đa 2 lần / task.
+`engine.escalation` — escalate to human khi hết retry.
 
 ---
 
@@ -124,67 +122,67 @@ Toàn bộ công việc được **documented và traceable** — từ requireme
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant SP as Superpowers
-    participant OS as OpenSpec
-    participant BD as Beads
-    participant CR as CrewAI
-    participant AA as agency-agents
+    participant CLI as ai-dev CLI
+    participant IN as intake
+    participant DB_mod as debate
+    participant G1 as gate.gate1_review
+    participant SP as spec
+    participant TG as task_graph
+    participant ENG as engine
+    participant DB as db (SQLite)
 
-    Note over U, AA: Giai đoạn 1 — Định nghĩa yêu cầu
+    Note over U,DB: Phase 1a — Intake + Normalize
+    U->>CLI: ai-dev intake start "ý tưởng"
+    CLI->>IN: engine.py — wizard flow
+    IN->>IN: brief.py — normalize
+    IN->>IN: suggest.py — sinh câu hỏi
+    IN->>DB: Lưu run
+    IN-->>CLI: initial_brief + câu hỏi
 
-    U->>SP: Brainstorm ý tưởng forum
-    SP-->>U: Features, users, tech constraints
-    U->>OS: /opsx:propose "Forum chia sẻ kiến thức"
-    OS-->>U: proposal.md + specs/ (requirements, scenarios)
+    Note over U,DB: Phase 1b — AI Debate
+    CLI->>DB_mod: run_debate (câu hỏi REQUIRED+STRATEGIC)
+    DB_mod->>DB_mod: agents/ + moderator (tối đa 5 vòng)
+    DB_mod->>DB: debate_report
+    DB_mod-->>CLI: debate_report.json
 
-    Note over U, AA: Giai đoạn 2 — Lập kế hoạch
+    Note over U,DB: Gate 1 — Duyệt + Decision Log
+    CLI-->>U: Debate Report (ESCALATE trước)
+    U-->>CLI: Quyết định ESCALATE items + confirm RESOLVED
+    CLI->>G1: core.py — ghi decision log
+    G1->>DB: decision_log + approved_answers
 
-    U->>SP: writing-plans từ specs
-    SP-->>U: Danh sách task chi tiết
-    U->>BD: bd create tasks + bd dep add dependencies
-    BD-->>U: Task graph với dependency tracking
-    U->>BD: bd ready
-    BD-->>U: Tasks sẵn sàng để thực thi
+    Note over U,DB: Phase 1d — Build spec bundle
+    CLI->>SP: pipeline.py — build_spec_bundle
+    SP->>SP: planner + grounding + repair + tracer
+    SP->>DB: spec bundle
 
-    Note over U, AA: Giai đoạn 3 — Thực thi
+    Note over U,DB: Phase 2 — Task Graph
+    SP->>TG: generator.py — sinh task graph
+    TG->>TG: enricher + validator
+    TG->>DB: task_graph.generated
+    TG-->>CLI: task_graph.generated.json
 
-    U->>CR: Khởi động crew với task graph
-    CR->>AA: Assign Backend Architect
-    AA->>SP: TDD — viết test trước
-    SP-->>AA: Tests
-    AA-->>CR: DB schema + API hoàn thành
-    CR->>BD: bd update <db-id> --status closed
-    CR->>AA: Assign Frontend Developer
-    AA->>SP: Code review
-    SP-->>AA: Review report
-    AA-->>CR: React UI + leaderboard hoàn thành
-    CR->>BD: bd update <frontend-id> --status closed
+    Note over U,DB: Gate 2 — Duyệt Task Graph
+    CLI-->>U: Task Graph Report
+    U-->>CLI: Approve (với edits nếu có)
+    CLI->>DB: task_graph.approved
 
-    Note over U, AA: Giai đoạn 4 — Kiểm tra
-
-    U->>SP: verification-before-completion
-    SP-->>U: Chạy tests, hiển thị kết quả
-    U->>OS: /opsx:verify
-    OS-->>U: Spec compliance report
-
-    Note over U, AA: Giai đoạn 5 — Hoàn thành
-
-    U->>OS: /opsx:archive
-    OS-->>U: Specs archived
-    U->>BD: bd admin stats
-    BD-->>U: Thống kê: total, closed, lead time
-    U->>BD: bd show <id>
-    BD-->>U: Full audit trail
+    Note over U,DB: Phase 3 — Execution
+    CLI->>ENG: runner.py — execute tasks
+    ENG->>ENG: worker.py (max 4 parallel)
+    ENG->>DB: Cập nhật status
+    ENG-->>U: Kết quả thực thi
 ```
 
 ---
 
 ## Output mong đợi mỗi giai đoạn
 
-| Giai đoạn | Công cụ | Output |
+| Giai đoạn | Module | Output |
 |---|---|---|
-| 1 — Định nghĩa yêu cầu | OpenSpec + Superpowers | `proposal.md`, `specs/` (requirements + scenarios), `design.md`, `tasks.md` |
-| 2 — Lập kế hoạch | Beads + Superpowers | Task graph với dependencies, implementation plan chi tiết |
-| 3 — Thực thi | CrewAI + agency-agents + Superpowers | Source code, tests, review reports |
-| 4 — Kiểm tra | Superpowers + OpenSpec | Verification report, spec compliance check |
-| 5 — Hoàn thành | Beads + OpenSpec | Audit trail, statistics, archived specs |
+| Intake + Normalize | `intake` | `initial_brief.json`, câu hỏi phân loại |
+| AI Debate | `debate` | `debate_report.json` |
+| Gate 1 | `gate.gate1_review` | `decision_log.json`, `approved_answers.json` |
+| Spec bundle | `spec` | 5 artifact (proposal/design/functional/non-functional/acceptance-criteria) |
+| Task Graph | `task_graph` | `task_graph.generated.json`, `task_graph.approved.json` |
+| Execution | `engine` | Task results, audit trail trong SQLite |

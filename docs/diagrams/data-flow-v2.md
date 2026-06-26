@@ -1,106 +1,101 @@
 # Luồng dữ liệu v2: Human-as-Approver
 
-Biểu đồ này thể hiện luồng dữ liệu trong mô hình mới, nơi con người chỉ duyệt thay vì tự tay làm.
-So với v1: thêm Idea Normalization, Question Classification, Debate Crew, Decision Log, Approval Gates, Task Graph Generator, và Failure Handling.
+Biểu đồ này thể hiện luồng dữ liệu thực tế qua các Python module trong `src/ai_dev_system/`.
+Người dùng chỉ xuất hiện tại 2 approval gate thay vì can thiệp từng bước.
 
 ```mermaid
 sequenceDiagram
-    participant U as Con nguoi
-    participant SK as Skill
-    participant SP as Superpowers
-    participant DC as Debate Crew
-    participant MOD as Moderator
-    participant AA as Agent A
-    participant AB as Agent B
-    participant OS as OpenSpec
-    participant TG as Task Generator
-    participant RR as Rule Registry
-    participant BD as Beads
-    participant CR as CrewAI
-    participant AG as agency-agents
+    participant U as Con người
+    participant CLI as ai_dev_system.cli
+    participant IN as ai_dev_system.intake
+    participant DB_mod as ai_dev_system.debate
+    participant G1 as ai_dev_system.gate.gate1_review
+    participant SP as ai_dev_system.spec
+    participant TG as ai_dev_system.task_graph
+    participant RU as ai_dev_system.rules
+    participant ENG as ai_dev_system.engine
+    participant DB as ai_dev_system.db (SQLite)
 
-    Note over U,AG: === PHASE 1a: NORMALIZE + SINH CAU HOI ===
-    U->>SK: Y tuong tho ("Forum chia se kien thuc")
-    SK->>SK: Normalize → initial_brief.json
-    SK->>SP: Superpowers brainstorming (feed initial_brief)
-    SP-->>SK: N cau hoi phan loai (REQUIRED/STRATEGIC/OPTIONAL)
+    Note over U,DB: === PHASE 1a: INTAKE + NORMALIZE ===
+    U->>CLI: ai-dev intake start "Ý tưởng thô"
+    CLI->>IN: intake.engine — chạy wizard
+    IN->>IN: brief.py — Normalize → initial_brief.json
+    IN->>IN: suggest.py — Sinh câu hỏi phân loại
+    IN->>DB: Lưu run (SQLite)
+    IN-->>CLI: N câu hỏi (REQUIRED/STRATEGIC/OPTIONAL)
 
-    Note over U,AG: === PHASE 1b: AI DEBATE ===
-    SK->>DC: run_debate (REQUIRED + STRATEGIC questions)
-    loop Moi cau hoi
-        DC->>AG: Chon cap agent theo domain
-        AG-->>AA: Load backstory Agent A
-        AG-->>AB: Load backstory Agent B
-        AA->>AA: Buoc 1: Dua ra quan diem
-        AB->>AB: Buoc 2: Phan bien
-        AA->>AA: Buoc 3: Phan hoi (lap toi da 5 vong)
-        MOD->>MOD: Buoc 4: Resolution status + confidence
-        Note right of MOD: RESOLVED / RESOLVED_WITH_CAVEAT<br/>ESCALATE_TO_HUMAN / NEED_MORE_EVIDENCE
+    Note over U,DB: === PHASE 1b: AI DEBATE ===
+    CLI->>DB_mod: run_debate (câu hỏi REQUIRED + STRATEGIC)
+    loop Mỗi câu hỏi
+        DB_mod->>DB_mod: agents/ — Ghép cặp agent theo domain
+        DB_mod->>DB_mod: Debate (tối đa 5 vòng)
+        DB_mod->>DB_mod: Moderator — resolution status + confidence
+        Note right of DB_mod: RESOLVED / RESOLVED_WITH_CAVEAT<br/>ESCALATE_TO_HUMAN / NEED_MORE_EVIDENCE
     end
-    DC-->>SK: Debate results (structured)
-    SK->>SK: Ghi debate_report.json
+    DB_mod->>DB: Lưu debate results (SQLite)
+    DB_mod-->>CLI: debate_report.json
 
-    Note over U,AG: === GATE 1: DUYET + DECISION LOG ===
-    SK-->>U: Debate Report<br/>(ESCALATE_TO_HUMAN truoc, RESOLVED cuoi)
-    U->>U: Quyet dinh ESCALATE items (bat buoc)<br/>Confirm RESOLVED items (1-click)
-    U-->>SK: Dap an da duyet
-    SK->>SK: Ghi decision_log.json + approved_answers.json
+    Note over U,DB: === GATE 1: DUYỆT + DECISION LOG ===
+    CLI-->>U: Debate Report<br/>(ESCALATE_TO_HUMAN trước, RESOLVED cuối)
+    U->>U: Quyết định ESCALATE items (bắt buộc)<br/>Confirm RESOLVED items (1-click)
+    U-->>CLI: Đáp án đã duyệt
+    CLI->>G1: gate1_review.core — ghi decision log
+    G1->>DB: decision_log.json + approved_answers.json (SQLite)
 
-    Note over U,AG: === PHASE 1d: BUILD SPEC BUNDLE ===
-    SK->>OS: build_spec_bundle (approved_answers.json)
-    OS->>OS: proposal + design + functional + non-functional + acceptance-criteria
-    alt Spec mau thuan
-        OS-->>SK: Conflict
-        SK-->>U: Hoi resolve
-        SK->>OS: build_spec_bundle lai
+    Note over U,DB: === PHASE 1d: BUILD SPEC BUNDLE ===
+    CLI->>SP: spec.pipeline — build_spec_bundle(approved_answers)
+    SP->>SP: planner.py — LLM sinh spec artifacts
+    SP->>SP: grounding.py — Grounding check
+    SP->>SP: repair.py — Conflict repair
+    SP->>SP: tracer.py — Trace map
+    alt Spec mâu thuẫn
+        SP-->>CLI: Conflict warning
+        CLI-->>U: Hỏi resolve
+        U-->>CLI: Resolve
+        CLI->>SP: build_spec_bundle lại
     end
+    SP->>DB: spec bundle (SQLite)
 
-    Note over U,AG: === PHASE 2a: SINH TASK GRAPH (voi metadata) ===
-    OS->>TG: Spec bundle lam dau vao
-    TG->>TG: Planner xac dinh tasks (voi agent_type, done_definition)
-    TG->>TG: Architect xac dinh dependencies
-    TG-->>SK: task_graph.generated.json
+    Note over U,DB: === PHASE 2a: SINH TASK GRAPH ===
+    SP->>TG: task_graph.generator — spec bundle làm đầu vào
+    TG->>TG: generator.py — Sinh tasks (agent_type, inputs, outputs, done_definition)
+    TG->>TG: enricher.py — Enrich metadata (facets, personalization)
+    TG->>TG: validator.py — Validate graph
+    TG->>DB: task_graph.generated (SQLite)
+    TG-->>CLI: task_graph.generated.json
 
-    Note over U,AG: === GATE 2: DUYET TASK GRAPH ===
-    SK-->>U: Task Graph Report
+    Note over U,DB: === GATE 2: DUYỆT TASK GRAPH ===
+    CLI-->>U: Task Graph Report
     U->>U: Review, approve/edit/reject
     alt Reject
-        U->>SK: Reject
-        SK->>TG: regenerate_task_graph
-        TG-->>SK: task_graph.generated.json moi
-        SK-->>U: Present lai
+        U->>CLI: Reject
+        CLI->>TG: regenerate_task_graph
+        TG-->>CLI: task_graph.generated.json mới
+        CLI-->>U: Present lại
     end
-    U-->>SK: Approve (voi edits neu co)
-    SK->>SK: Ghi task_graph.approved.json
-    SK->>BD: bd create + bd dep add
+    U-->>CLI: Approve (với edits nếu có)
+    CLI->>DB: task_graph.approved (SQLite)
 
-    Note over U,AG: === PHASE 3: RULE MATCHING + EXECUTION + FAILURE HANDLING ===
-    loop Moi task (theo dependency order)
-        SK->>RR: match-rules (task type/tags)
-        RR-->>SK: file_rules + skill_rules
-        SK->>SP: Invoke skill_rules
-        SK->>CR: execute-task (enriched backstory)
-        CR->>AG: Agent thuc thi
+    Note over U,DB: === PHASE 3: RULE MATCHING + EXECUTION ===
+    Note over ENG: ⚠️ Single-task execution hoạt động.<br/>Multi-task graph (required_inputs/promoted_outputs) chưa hoàn chỉnh.
+    loop Mỗi task (theo dependency order)
+        CLI->>RU: rules — match-rules (task type/tags)
+        RU-->>CLI: file_rules + skill_rules
+        CLI->>ENG: engine.runner — execute-task
+        ENG->>ENG: worker.py — chạy task (max 4 parallel workers)
         alt Task fail
-            CR-->>SK: Fail → retry (max 2)
-            alt Van fail
-                SK-->>U: Escalate: skip/fix/abort?
+            ENG-->>CLI: Fail → retry (max 2)
+            alt Vẫn fail
+                CLI-->>U: Escalate: skip/fix/abort?
             end
         end
-        SK->>SP: Verification
-        alt Verification fail
-            SP-->>SK: Fail → re-verify (max 3)
-            alt Van fail
-                SK-->>U: Escalate
-            end
-        end
-        BD->>BD: Cap nhat status + audit trail
+        ENG->>DB: Cập nhật status (SQLite)
     end
 
-    Note over U,AG: === PHASE 4-5: TONG KET ===
-    SP->>U: Verification report
-    BD->>U: Audit trail + thong ke
-    CR->>U: San pham hoan chinh
+    Note over U,DB: === PHASE 4-5: TỔNG KẾT ===
+    ENG-->>U: Kết quả thực thi
+    CLI->>DB: Audit trail (SQLite)
+    DB-->>U: Báo cáo + thống kê
 ```
 
 ## So sánh Data Flow v1 vs v2
@@ -108,25 +103,25 @@ sequenceDiagram
 ### v1: Con người ở giữa mỗi bước
 
 ```
-U -> SP -> U -> OS -> U -> BD -> CR -> SP -> BD -> U
-     hỏi    trả lời   tạo task       thực thi
+U -> intake -> U -> spec -> U -> task_graph -> engine -> U
+     hỏi         trả lời      tạo task
 ```
 
 ### v2: Con người chỉ ở 2 approval gates
 
 ```
-U -> Normalize -> SP(questions) -> DC(debate) -> [GATE 1+log] -> OS -> TG -> [GATE 2] -> CR(+rules+retry) -> U
+U -> intake -> debate -> [GATE 1 + decision_log] -> spec -> task_graph -> [GATE 2] -> engine -> U
 ```
 
 ## Điểm khác biệt chính
 
 | Bước | v1 Data | v2 Data |
 |---|---|---|
-| Input | Ý tưởng thô | Ý tưởng thô → normalized brief |
-| Brainstorming | SP hỏi → User trả lời | SP sinh câu hỏi phân loại → DC tranh luận → Report |
-| Quyết định | User suy nghĩ + trả lời | Resolution status → User approve/override + decision log |
-| Spec | Free-form | 5 artifact cố định (contract) |
-| Tạo task | User chạy `bd create` (manual) | TG sinh JSON với metadata → User approve |
-| Dependency | User chạy `bd dep add` (manual) | TG tự phân tích → User approve |
-| Execution | Không retry | Retry policy + escalate |
-| Execution | Agent không biết rules | Rule Registry inject đúng rules theo task type |
+| Input | Ý tưởng thô | Ý tưởng thô → normalized brief (`intake.brief`) |
+| Brainstorming | User trả lời từng câu | AI debate (`debate` module) → User approve report |
+| Quyết định | User tự suy nghĩ | Resolution status → User approve/override + decision log |
+| Spec | Free-form | 5 artifact cố định (`spec.pipeline`) |
+| Tạo task | User tự tạo thủ công | `task_graph.generator` sinh JSON → User approve |
+| Dependency | User tự thiết lập | `task_graph.generator` phân tích → User approve |
+| Execution | Không retry | `engine.failure` — retry policy + escalate |
+| Persistence | Không có | SQLite (`ai_dev_system.db`) — toàn bộ state |

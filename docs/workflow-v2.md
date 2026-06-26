@@ -172,93 +172,90 @@ Beads lưu audit trail.
 ```mermaid
 sequenceDiagram
     participant U as Con nguoi
-    participant SK as Skill (Interface)
-    participant DC as Debate Crew
-    participant AG as agency-agents
-    participant OS as OpenSpec
-    participant TG as Task Generator
-    participant RR as Rule Registry
-    participant SP as Superpowers
-    participant CR as CrewAI
-    participant BD as Beads
+    participant CLI as ai-dev CLI
+    participant IN as intake
+    participant DC as debate
+    participant G1 as gate.gate1_review
+    participant SP as spec
+    participant TG as task_graph
+    participant RR as rules
+    participant ENG as engine
+    participant DB as db (SQLite)
 
-    Note over U,BD: Phase 1a — Normalize + Sinh cau hoi
-    U->>SK: Y tuong tho
-    SK->>SK: Normalize → initial_brief.json
-    SK->>SP: Superpowers brainstorming (feed initial_brief)
-    SP-->>SK: N cau hoi (REQUIRED/STRATEGIC/OPTIONAL)
+    Note over U,DB: Phase 1a — Normalize + Sinh cau hoi
+    U->>CLI: ai-dev intake start "Y tuong tho"
+    CLI->>IN: intake.engine — wizard flow
+    IN->>IN: brief.py — Normalize → initial_brief.json
+    IN->>IN: suggest.py — Sinh cau hoi (REQUIRED/STRATEGIC/OPTIONAL)
+    IN->>DB: Luu run (SQLite)
+    IN-->>CLI: N cau hoi phan loai
 
-    Note over U,BD: Phase 1b — AI Debate
-    SK->>DC: run_debate (cau hoi da phan loai)
+    Note over U,DB: Phase 1b — AI Debate
+    CLI->>DC: debate — run_debate (cau hoi da phan loai)
     loop Moi cau hoi REQUIRED + STRATEGIC
-        DC->>AG: Chon cap agent theo domain
-        AG-->>DC: Agent A + Agent B backstories
+        DC->>DC: agents/ — Chon cap agent theo domain
         DC->>DC: Debate (toi da 5 vong)
         DC->>DC: Moderator: resolution status + confidence
     end
-    DC-->>SK: Debate results (structured)
-    SK->>SK: Ghi debate_report.json
+    DC->>DB: Luu debate results (SQLite)
+    DC-->>CLI: debate_report.json
 
-    Note over U,BD: Gate 1 — Duyet + Decision Log
-    SK-->>U: ESCALATE_TO_HUMAN truoc, RESOLVED cuoi
+    Note over U,DB: Gate 1 — Duyet + Decision Log
+    CLI-->>U: ESCALATE_TO_HUMAN truoc, RESOLVED cuoi
     U->>U: Quyet dinh ESCALATE items (bat buoc)
-    U-->>SK: Dap an da duyet
-    SK->>SK: Ghi decision_log.json + approved_answers.json
+    U-->>CLI: Dap an da duyet
+    CLI->>G1: gate1_review.core — ghi decision log
+    G1->>DB: decision_log.json + approved_answers.json (SQLite)
 
-    Note over U,BD: Phase 1d — Build spec bundle
-    SK->>OS: build_spec_bundle (approved_answers.json)
-    OS->>OS: proposal + design + functional + non-functional + acceptance-criteria
+    Note over U,DB: Phase 1d — Build spec bundle
+    CLI->>SP: spec.pipeline — build_spec_bundle(approved_answers)
+    SP->>SP: planner + grounding + repair + tracer
     alt Spec mau thuan
-        OS-->>SK: Conflict warning
-        SK-->>U: Hoi resolve
-        U-->>SK: Resolve
-        SK->>OS: build_spec_bundle lai
+        SP-->>CLI: Conflict warning
+        CLI-->>U: Hoi resolve
+        U-->>CLI: Resolve
+        CLI->>SP: build_spec_bundle lai
     end
+    SP->>DB: spec bundle (SQLite)
 
-    Note over U,BD: Phase 2a — Task Graph (voi metadata day du)
-    OS->>TG: Spec bundle lam dau vao
-    TG->>TG: Sinh tasks (voi agent_type, inputs, outputs, done_definition)
-    TG-->>SK: task_graph.generated.json
+    Note over U,DB: Phase 2a — Task Graph (voi metadata day du)
+    SP->>TG: task_graph.generator — spec bundle lam dau vao
+    TG->>TG: generator.py — Sinh tasks (agent_type, inputs, outputs, done_definition)
+    TG->>TG: enricher.py — Enrich metadata
+    TG->>DB: task_graph.generated (SQLite)
+    TG-->>CLI: task_graph.generated.json
 
-    Note over U,BD: Gate 2 — Duyet task graph
-    SK-->>U: Present task graph
+    Note over U,DB: Gate 2 — Duyet task graph
+    CLI-->>U: Present task graph
     U->>U: Review, approve/edit/reject
     alt Reject
-        U->>SK: Reject
-        SK->>TG: regenerate_task_graph
-        TG-->>SK: task_graph.generated.json moi
-        SK-->>U: Present lai
+        U->>CLI: Reject
+        CLI->>TG: regenerate_task_graph
+        TG-->>CLI: task_graph.generated.json moi
+        CLI-->>U: Present lai
     end
-    U-->>SK: Approve (voi edits neu co)
-    SK->>SK: Ghi task_graph.approved.json
-    SK->>BD: bd create + bd dep add
+    U-->>CLI: Approve (voi edits neu co)
+    CLI->>DB: task_graph.approved (SQLite)
 
-    Note over U,BD: Phase 3 — Rule matching + Execution + Failure handling
+    Note over U,DB: Phase 3 — Rule matching + Execution + Failure handling
+    Note over ENG: ⚠️ Single-task hoat dong. Multi-task (required_inputs/promoted_outputs) chua hoan chinh.
     loop Moi task (theo dependency order)
-        SK->>RR: match-rules
-        RR-->>SK: file_rules + skill_rules
-        SK->>SP: Invoke skill_rules
-        SK->>CR: execute-task (voi enriched backstory)
-        CR->>AG: Agent thuc thi
+        CLI->>RR: rules — match-rules (task type/tags)
+        RR-->>CLI: file_rules + skill_rules
+        CLI->>ENG: engine.runner — execute-task
+        ENG->>ENG: worker.py (max 4 parallel workers)
         alt Task fail
-            CR-->>SK: Fail
-            SK->>CR: Retry (max 2)
+            ENG-->>CLI: Fail
+            CLI->>ENG: Retry (max 2)
             alt Van fail
-                SK-->>U: Escalate: skip/fix/abort?
+                CLI-->>U: Escalate: skip/fix/abort?
             end
         end
-        SK->>SP: Quality verification
-        alt Verification fail
-            SP-->>SK: Fail
-            SK->>CR: Agent sua + re-verify (max 3)
-            alt Van fail
-                SK-->>U: Escalate
-            end
-        end
-        BD->>BD: Cap nhat status + audit trail
+        ENG->>DB: Cap nhat status (SQLite)
     end
-    SP->>U: Verification report
-    BD->>U: Audit trail + thong ke
+    ENG-->>U: Ket qua thuc thi
+    CLI->>DB: Audit trail (SQLite)
+    DB-->>U: Audit trail + thong ke
 ```
 
 ---
@@ -397,24 +394,24 @@ Xác nhận để tiếp tục? (hoặc "sửa Q4" nếu muốn thay đổi)
 5. **Moderator Structured Output** — resolution status (RESOLVED / ESCALATE_TO_HUMAN / NEED_MORE_EVIDENCE) thay vì binary
 6. **Approval Gate 1** — duyệt đáp án debate
 7. **Decision Log** — artifact traceability cho mọi quyết định tại Gate 1
-8. **OpenSpec Output Contract** — 5 file cố định thay vì free-form
+8. **Spec Output Contract** — 5 file cố định (`spec.pipeline`) thay vì free-form
 9. **Task Execution Metadata** — agent_type, inputs, outputs, done_definition, verification_steps
 10. **Approval Gate 2** — duyệt task graph
-11. **Task Graph Generator** — tự động sinh tasks và dependencies
-12. **Failure / Retry Policy** — retry + escalate thay vì crash silently
+11. **Task Graph Generator** — `task_graph.generator` tự động sinh tasks và dependencies
+12. **Failure / Retry Policy** — `engine.failure` retry + `engine.escalation` escalate thay vì crash silently
+13. **SQLite Persistence** — toàn bộ state lưu trong SQLite (`ai_dev_system.db`)
 
 ### Giữ nguyên
 
-- Phase 3: CrewAI + agency-agents execution
-- Phase 4: Superpowers quality gates (TDD, code review, verification)
-- Phase 5: Beads audit trail + reporting
-- Toàn bộ cơ chế memory (LanceDB, Dolt, files)
+- Phase 3: `engine` execution (với `agents.ClaudeMaxAgent`)
+- Phase 4: Verification tích hợp trong `engine.worker`
+- Phase 5: Audit trail trong SQLite
 
 ### Con người chỉ cần làm
 
 | Trước (v1) | Sau (v2) |
 |---|---|
 | Trả lời 8+ câu hỏi brainstorming | Duyệt report, chỉ quyết định FORCED items |
-| Chạy `bd create` cho từng task | 1-click approve task graph |
-| Chạy `bd dep add` cho từng dependency | Sửa nếu cần, approve |
+| Tạo task thủ công | 1-click approve task graph từ `task_graph.generator` |
+| Thiết lập dependency thủ công | `task_graph.generator` phân tích → User approve |
 | Tổng thời gian: 30-60 phút | Tổng thời gian: 5-10 phút |

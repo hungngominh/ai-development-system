@@ -2,57 +2,102 @@
 
 ## Tổng quan
 
-Hệ thống AI Development System gồm 5 thành phần chính, mỗi thành phần đảm nhận một vai trò cụ thể trong quy trình phát triển phần mềm với sự hỗ trợ của AI. Các thành phần được thiết kế để bổ sung lẫn nhau: từ việc cung cấp chuyên môn cho AI agent, điều phối chúng làm việc cùng nhau, đảm bảo quy trình chặt chẽ, kiểm soát chất lượng, đến lưu trữ toàn bộ lịch sử làm việc.
+AI Development System là một **Python monorepo** duy nhất (`src/ai_dev_system/`).
+Không có external repo hay external service nào — toàn bộ logic nằm trong các Python module bên dưới.
 
 Xem sơ đồ tổng quan tại [docs/diagrams/system-overview.md](diagrams/system-overview.md).
 
-## 5 thành phần
+## Các module chính
 
-### 1. agency-agents — Chuyên môn
+### 1. `ai_dev_system.intake` — Intake wizard
 
-agency-agents cung cấp thư viện prompt chuyên biệt cho các AI agent, được tổ chức theo division: engineering, design, marketing, sales, và nhiều lĩnh vực khác. Mỗi file agent định nghĩa đầy đủ identity, mission, capabilities, workflow cụ thể, và deliverables mong đợi. Các prompt này được sử dụng làm backstory input khi khởi tạo CrewAI agent, giúp mỗi agent có "chuyên môn sâu" thay vì chỉ là một LLM chung chung. Nhờ đó, mỗi agent hiểu rõ vai trò của mình và biết cần làm gì trong từng tình huống cụ thể.
+Module tiếp nhận ý tưởng thô từ người dùng và chuẩn hóa thành `initial_brief`.
+`brief.py` normalize đầu vào thành cấu trúc cố định (problem, target users, success criteria, constraints, unknowns).
+`suggest.py` sinh câu hỏi phân loại (REQUIRED / STRATEGIC / OPTIONAL) cho debate.
+`engine.py` điều phối toàn bộ wizard flow.
 
-Chi tiết: [references/agency-agents.md](../references/agency-agents.md)
+### 2. `ai_dev_system.debate` — Debate engine
 
-### 2. CrewAI — Điều phối
+Module điều hành tranh luận AI. Mỗi câu hỏi REQUIRED/STRATEGIC được debate bởi 2 agent đối lập (tối đa 5 vòng).
+`agents/` quản lý agent pairing theo domain câu hỏi.
+`questions/` phân loại câu hỏi theo loại.
+Moderator tổng hợp → resolution status: RESOLVED / RESOLVED_WITH_CAVEAT / ESCALATE_TO_HUMAN / NEED_MORE_EVIDENCE.
 
-CrewAI là Python framework chịu trách nhiệm orchestration nhiều agent cùng làm việc trên một dự án. Framework hỗ trợ cả sequential process (agent làm tuần tự) và hierarchical process (có manager agent phân công). Hệ thống memory thống nhất sử dụng LanceDB với semantic search, scoped memory theo agent/task, và composite scoring để truy xuất thông tin liên quan nhất. Các agent giao tiếp với nhau thông qua cơ chế task context passing — output của agent trước trở thành input cho agent sau.
+### 3. `ai_dev_system.gate.gate1_review` — Gate 1
 
-Chi tiết: [references/crewai.md](../references/crewai.md)
+Người dùng duyệt debate report tại Gate 1.
+`core.py` điều phối flow: hiển thị ESCALATE_TO_HUMAN trước, RESOLVED sau.
+Ghi `decision_log.json` và `approved_answers.json` vào SQLite.
 
-### 3. OpenSpec — Quy trình
+### 4. `ai_dev_system.spec` — Spec bundle
 
-OpenSpec là framework phát triển theo spec-driven approach, bắt buộc "nghĩ trước khi code". Quy trình đi theo artifact graph rõ ràng: proposal → specs (yêu cầu MUST/SHALL với Given/When/Then scenario) → design → tasks. Trước khi bắt đầu implementation, hệ thống validate toàn bộ specs để đảm bảo không có liên kết thiếu hoặc yêu cầu mâu thuẫn. Mỗi thay đổi được archive kèm timestamp để đảm bảo traceability.
+Module sinh spec bundle từ `approved_answers`.
+`pipeline.py` điều phối toàn bộ quá trình.
+`planner.py` dùng LLM sinh 5 artifact cố định: proposal / design / functional / non-functional / acceptance-criteria.
+`grounding.py` kiểm tra grounding với codebase thực tế.
+`repair.py` tự động repair conflict.
+`tracer.py` tạo trace map liên kết spec → task.
 
-Chi tiết: [references/openspec.md](../references/openspec.md)
+### 5. `ai_dev_system.task_graph` — Task graph
 
-### 4. Superpowers — Phương pháp
+Module sinh task graph từ spec bundle.
+`generator.py` sinh tasks với metadata đầy đủ (agent_type, required_inputs, expected_outputs, done_definition, verification_steps).
+`enricher.py` enrich metadata (facets, personalization).
+`validator.py` validate graph.
+`single_task.py` / `single_task_executor.py` hỗ trợ chế độ single-task (đã hoạt động trên Windows).
 
-Superpowers gồm 14 skill bao phủ toàn bộ vòng đời phát triển phần mềm: brainstorming, planning, TDD, code review, systematic debugging, verification-before-completion, parallel dispatch, git worktrees, và nhiều kỹ năng khác. Triết lý cốt lõi là "evidence over claims" — mọi khẳng định phải có bằng chứng cụ thể từ kết quả thực thi, không chấp nhận việc tuyên bố "đã xong" mà không chứng minh. Các skill hoạt động như guardrails, đảm bảo AI agent tuân thủ quy trình chất lượng.
+### 6. `ai_dev_system.engine` — Execution runner (⚠️ Partially implemented)
 
-Chi tiết: [references/superpowers.md](../references/superpowers.md)
+Module thực thi task graph.
+`runner.py` + `worker.py` — tối đa 4 parallel workers.
+`failure.py` — retry policy (max 2 lần / task).
+`escalation.py` — escalate to human khi retry hết.
+**⚠️ Lưu ý:** single-task execution đã hoạt động. Multi-task graph execution với required_inputs/promoted_outputs resolution chưa hoàn chỉnh.
 
-### 5. Beads — Lưu vết
+### 7. `ai_dev_system.db` — SQLite persistence
 
-Beads là distributed graph issue tracker xây trên Dolt (Git cho database), chuyên theo dõi toàn bộ công việc trong hệ thống. Task graph có dependency-aware giúp hiểu rõ task nào phụ thuộc task nào, từ đó xác định thứ tự thực hiện và phát hiện bottleneck. Mọi event được ghi vào immutable audit trail, kết hợp interaction log (LLM calls, tool calls) để biết chính xác AI đã làm gì. Hệ thống cung cấp statistics (lead time, blocked count) và hỗ trợ `--as-of` để xem trạng thái tại bất kỳ thời điểm nào trong quá khứ.
+Persistent storage duy nhất của hệ thống.
+`connection.py` — stdlib `sqlite3`, zero external dependency.
+`migrator.py` — schema migrations.
+`repos/` — repository layer cho từng entity.
+**Không có** LanceDB, Dolt, hay PostgreSQL.
 
-Chi tiết: [references/beads.md](../references/beads.md)
+### 8. `ai_dev_system.eval` — Eval harness
+
+`metrics/` — 18 evaluation metrics.
+Golden dataset cho baseline runs.
+CLI: `ai-dev eval run / compare / list / show`.
+
+### 9. `ai_dev_system.agents` — LLM providers
+
+`ClaudeMaxAgent` — dùng `claude` CLI (Claude Max subscription, không cần API key).
+
+### 10. `ai_dev_system.rules` — Rule registry
+
+Match rules theo task type/tags, inject `file_rules` và `skill_rules` vào execution context.
+
+### 11. `ai_dev_system.cli` — CLI
+
+Entry point `ai-dev` cho tất cả commands:
+- `ai-dev intake start / resume / abort / show`
+- `ai-dev gate review`
+- `ai-dev phase-b run / resume / abort`
+- `ai-dev eval run / compare / list / show`
 
 ## Bảng mapping vấn đề → giải pháp
 
-| Vấn đề | Thành phần | Cách giải quyết |
+| Vấn đề | Module | Cách giải quyết |
 |---|---|---|
-| AI không có chuyên môn sâu | agency-agents | Prompt chuyên biệt với workflow và deliverables cụ thể |
-| Các agent không phối hợp được | CrewAI | Orchestration tự động, context passing, shared memory |
-| Code trước nghĩ sau | OpenSpec | Spec validation bắt buộc trước khi code |
-| Không kiểm soát chất lượng | Superpowers | TDD bắt buộc, code review tự động, verification |
-| Mất dấu vết công việc | Beads | Audit trail bất biến, dependency graph, thống kê |
-| AI mất trí nhớ | CrewAI Memory + Beads + OpenSpec | 3 tầng persistent storage |
+| Không rõ yêu cầu | `intake` | Normalize brief, sinh câu hỏi phân loại |
+| Quyết định thiếu căn cứ | `debate` | AI debate đa vòng, moderator resolution |
+| Con người can thiệp quá nhiều | `gate.gate1_review` | Chỉ 2 approval gates (Gate 1 + Gate 2) |
+| Spec tự mâu thuẫn | `spec` | grounding + repair tự động |
+| Task không có metadata | `task_graph` | generator sinh metadata đầy đủ |
+| Mất dữ liệu giữa sessions | `db` | SQLite persistent storage |
+| Không đo chất lượng | `eval` | Golden dataset + 18 metrics |
 
 ## Giới hạn đã biết
 
-1. **Intra-session memory**: Context window là giới hạn vật lý của LLM. Khi conversation vượt quá kích thước context, thông tin cũ bị mất. Các cơ chế memory (LanceDB, Beads) giảm thiểu vấn đề này nhưng chưa giải quyết triệt để vì việc retrieve đúng thông tin cần thiết vẫn là bài toán khó.
-
-2. **Handoff quality**: Output giữa các agent có thể mất implicit knowledge — những hiểu biết ngầm không được ghi rõ trong output. Agent sau chỉ nhận được những gì agent trước viết ra, không phải toàn bộ reasoning process.
-
-3. **Memory accuracy**: Hệ thống không tự động validate xem memory cũ còn đúng không. Thông tin đã lưu có thể trở nên outdated khi codebase thay đổi, nhưng vẫn được retrieve và sử dụng như thể còn chính xác.
+1. **Engine chưa hoàn chỉnh**: Multi-task graph execution với required_inputs/promoted_outputs resolution đang trong quá trình phát triển. Single-task execution đã hoạt động.
+2. **Intra-session context**: LLM context window là giới hạn vật lý. Conversation dài có thể mất thông tin đầu. Workaround: plan files trên disk.
+3. **Memory accuracy**: Không có cơ chế tự động validate memory cũ còn đúng không.

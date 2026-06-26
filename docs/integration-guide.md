@@ -1,185 +1,154 @@
-# Hướng dẫn tích hợp 5 thành phần
+# Hướng dẫn sử dụng hệ thống
 
-Tài liệu này hướng dẫn từng bước cách tích hợp tất cả 5 thành phần trong hệ thống: **OpenSpec**, **Beads**, **CrewAI**, **agency-agents**, và **Superpowers**. Mỗi bước bao gồm các command cụ thể và output mong đợi.
+Tài liệu này mô tả cách chạy AI Development System end-to-end bằng CLI `ai-dev`.
+Hệ thống là một Python monorepo (`src/ai_dev_system/`) — không cần cài external repo.
 
 ## Prerequisites
 
-Trước khi bắt đầu, đảm bảo bạn đã chuẩn bị:
-
-- Tất cả 5 repo đã được clone trong cùng một workspace
-- Python >= 3.10, Node.js 18+, Go 1.25+, Git đã cài đặt
-- CrewAI đã cài đặt: `pip install crewai`
-- OpenSpec đã cài đặt: `npm install -g @fission-ai/openspec`
-- Beads đã cài đặt (build from source theo hướng dẫn trong Beads README)
-
-## Bước 1: Viết Spec (OpenSpec)
-
-**Mục đích:** Định nghĩa requirements trước khi viết code. Spec là nguồn gốc của mọi thứ — không có spec, không có task, không có code.
-
-### Các command chính
-
-Khởi tạo OpenSpec lần đầu:
+- Python >= 3.10
+- `claude` CLI (Claude Max subscription) đã cài và đăng nhập
+- Cài package:
 
 ```bash
-openspec init
+pip install -e .
 ```
 
-Đề xuất một feature mới thông qua AI assistant:
-
-```
-/opsx:propose "Tên feature"
-```
-
-Hoặc validate một change đã có:
+Xác nhận CLI hoạt động:
 
 ```bash
-openspec validate <change-name>
+ai-dev --help
 ```
 
-### Output mong đợi
+## Bước 1: Intake + Normalize (`ai_dev_system.intake`)
 
-Sau khi hoàn tất, thư mục `openspec/changes/<name>/` sẽ chứa:
+**Mục đích:** Nhận ý tưởng thô và chuẩn hóa thành brief + câu hỏi phân loại.
 
-- `proposal.md` — mô tả tổng quan feature
-- `specs/` — các specification chi tiết
-- `design.md` — thiết kế kỹ thuật
-- `tasks.md` — danh sách task cần thực hiện
-
-Tham khảo thêm: [references/openspec.md](../references/openspec.md)
-
-## Bước 2: Tạo Task Graph (Beads)
-
-**Mục đích:** Tạo các task có thể theo dõi với dependency rõ ràng từ spec ở Bước 1.
-
-### Các command chính
-
-Tạo task mới:
+Bắt đầu intake mới:
 
 ```bash
-bd create "Task title" --type task --priority high
+ai-dev intake start "Ý tưởng của bạn"
 ```
 
-Thiết lập dependency giữa các task:
+Resume một run đang dở:
 
 ```bash
-bd dep add <child-id> blocks <parent-id>
+ai-dev intake resume <run-id>
 ```
 
-Xem tất cả task:
+Xem trạng thái:
 
 ```bash
-bd list
+ai-dev intake show <run-id>
 ```
 
-Xem các task sẵn sàng để thực hiện (không còn dependency nào chặn):
+Hủy run:
 
 ```bash
-bd ready
+ai-dev intake abort <run-id>
 ```
 
-### Output mong đợi
+**Output:** `initial_brief.json` + câu hỏi phân loại (REQUIRED/STRATEGIC/OPTIONAL) lưu vào SQLite.
 
-Các task được lưu trong Beads với dependency graph hoàn chỉnh. Dùng `bd list` để kiểm tra trạng thái tổng thể.
+## Bước 2: AI Debate + Gate 1 (`ai_dev_system.debate` + `ai_dev_system.gate.gate1_review`)
 
-Tham khảo thêm: [references/beads.md](../references/beads.md)
+**Mục đích:** Debate AI cho từng câu hỏi REQUIRED/STRATEGIC → người dùng duyệt tại Gate 1.
 
-## Bước 3: Chạy Pipeline (CrewAI + agency-agents)
+Sau khi intake xong, debate chạy tự động. Người dùng được hiển thị debate report và cần quyết định các ESCALATE_TO_HUMAN items trước, rồi confirm RESOLVED items.
 
-**Mục đích:** Các agent tự động thực hiện task từ task graph. Mỗi agent có role, goal, và backstory được định nghĩa từ agency-agents.
-
-### Code snippet
-
-```python
-from crewai import Agent, Task, Crew, Process
-
-agent = Agent(
-    role="Backend Architect",
-    goal="Design database schema",
-    backstory=open("../agency-agents/engineering/engineering-backend-architect.md").read(),
-    llm="claude-sonnet-4-6"
-)
-
-task = Task(
-    description="Thiết kế database schema cho user management",
-    expected_output="SQL migration file và ERD diagram",
-    agent=agent
-)
-
-crew = Crew(
-    agents=[agent],
-    tasks=[task],
-    process=Process.sequential
-)
-
-result = crew.kickoff()
-```
-
-Bạn có thể tạo nhiều agent với các role khác nhau (Frontend Developer, QA Engineer, DevOps Specialist, ...) và kết hợp chúng trong cùng một Crew.
-
-Tham khảo thêm: [references/crewai.md](../references/crewai.md) và [references/agency-agents.md](../references/agency-agents.md)
-
-## Bước 4: Đảm bảo chất lượng (Superpowers)
-
-**Mục đích:** Áp dụng quality gate ở mọi giai đoạn của quy trình, đảm bảo output đạt tiêu chuẩn trước khi chuyển sang bước tiếp theo.
-
-### Các skill quan trọng
-
-| Skill | Vai trò |
-|---|---|
-| **brainstorming** | Khám phá requirements trước khi implementation — không bỏ qua bước này |
-| **test-driven-development** | Viết test trước, luôn luôn — code chỉ được viết sau khi test đã tồn tại |
-| **requesting-code-review** | Dispatch reviewer agent sau mỗi task hoàn thành |
-| **verification-before-completion** | Phải có bằng chứng cụ thể trước khi tuyên bố hoàn thành |
-| **systematic-debugging** | Quy trình 4 phase để tìm root cause khi có lỗi |
-
-Các skill này không phải optional — chúng là quality gate bắt buộc trong quy trình.
-
-Tham khảo thêm: [references/superpowers.md](../references/superpowers.md)
-
-## Bước 5: Lưu kết quả (Beads)
-
-**Mục đích:** Đóng task, tạo report, và duy trì audit trail đầy đủ cho toàn bộ quá trình.
-
-### Các command chính
-
-Đóng task khi hoàn thành:
+Chạy Gate 1 review:
 
 ```bash
-bd update <id> --status closed
+ai-dev gate review <run-id>
 ```
 
-Xem thống kê tổng quan (open, closed, blocked, lead time):
+**Output:** `decision_log.json` + `approved_answers.json` lưu vào SQLite.
+
+## Bước 3: Build Spec Bundle (`ai_dev_system.spec`)
+
+**Mục đích:** Từ approved answers, sinh 5 spec artifact cố định.
+
+Chạy tự động sau Gate 1 approve, hoặc:
 
 ```bash
-bd admin stats
+ai-dev phase-b run <run-id>
 ```
 
-Xem toàn bộ lịch sử thay đổi của một task:
+`spec.pipeline` → `spec.planner` (LLM) → `spec.grounding` → `spec.repair` → `spec.tracer`.
+
+**Output:** 5 artifact trong SQLite:
+- proposal
+- design
+- functional
+- non-functional
+- acceptance-criteria
+
+## Bước 4: Task Graph Generator (`ai_dev_system.task_graph`)
+
+**Mục đích:** Từ spec bundle, sinh task graph với metadata đầy đủ.
+
+Chạy tự động sau spec bundle, hoặc resume:
 
 ```bash
-bd show <id>
+ai-dev phase-b resume <run-id>
 ```
 
-Xem trạng thái của task tại một thời điểm cụ thể trong quá khứ:
+`task_graph.generator` → `task_graph.enricher` → `task_graph.validator`.
+
+**Output:** `task_graph.generated.json` trong SQLite.
+Người dùng review và approve/reject tại Gate 2.
+
+## Bước 5: Execution (`ai_dev_system.engine`)
+
+> ⚠️ **Lưu ý:** Single-task execution đã hoạt động. Multi-task graph với required_inputs/promoted_outputs đang phát triển.
 
 ```bash
-bd show <id> --as-of <ref>
+ai-dev phase-b run <run-id>
 ```
 
-### Output mong đợi
+`engine.runner` khởi động với tối đa 4 parallel workers (`engine.worker`).
+Retry tối đa 2 lần / task (`engine.failure`).
+Escalate to human khi hết retry (`engine.escalation`).
 
-- Audit trail hoàn chỉnh cho mỗi task
-- Thống kê về throughput và lead time
-- Lịch sử thay đổi có thể truy vết tại bất kỳ thời điểm nào
+Audit trail được lưu vào SQLite sau mỗi task.
 
-## Tổng kết
+## Bước 6: Eval Harness (`ai_dev_system.eval`)
 
-Quy trình 5 bước trên tạo thành một vòng lặp khép kín:
+**Mục đích:** Đánh giá chất lượng hệ thống so với golden baseline.
 
-1. **Spec** (OpenSpec) — định nghĩa cần làm gì
-2. **Task Graph** (Beads) — chia nhỏ và theo dõi tiến độ
-3. **Pipeline** (CrewAI + agency-agents) — thực thi tự động
-4. **Quality Gates** (Superpowers) — đảm bảo chất lượng
-5. **Audit Trail** (Beads) — lưu kết quả và học từ dữ liệu
+Chạy eval:
 
-Xem [docs/workflow.md](workflow.md) để tham khảo ví dụ end-to-end hoàn chỉnh.
+```bash
+ai-dev eval run
+```
+
+So sánh với baseline:
+
+```bash
+ai-dev eval compare <run-id-1> <run-id-2>
+```
+
+Xem danh sách runs:
+
+```bash
+ai-dev eval list
+```
+
+Xem chi tiết một run:
+
+```bash
+ai-dev eval show <run-id>
+```
+
+## Tổng kết pipeline
+
+```
+ai-dev intake start → debate (auto) → ai-dev gate review
+    → spec bundle (auto) → task graph (auto) → Gate 2 (manual approve)
+    → ai-dev phase-b run → execution
+```
+
+Tất cả state lưu trong SQLite (`ai_dev_system.db`).
+Không có external service hay external CLI nào khác ngoài `claude` CLI.
+
+Xem [docs/diagrams/data-flow-v2.md](diagrams/data-flow-v2.md) cho sequence diagram đầy đủ.
+Xem [docs/architecture.md](architecture.md) cho mô tả từng module.
