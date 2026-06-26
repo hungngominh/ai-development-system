@@ -36,6 +36,11 @@ class HeartbeatThread(threading.Thread):
                     UPDATE task_runs SET heartbeat_at = CURRENT_TIMESTAMP
                     WHERE task_run_id = ? AND status = 'RUNNING'
                 """, (self.task_run_id,))
+                # get_connection() opens SQLite in manual-commit mode
+                # (isolation_level=''), so without this commit the UPDATE is
+                # rolled back on close() and heartbeat_at never advances —
+                # causing false worker_heartbeat_timeout on any long task.
+                conn.commit()
             except Exception:
                 logger.warning(
                     "HeartbeatThread: failed to update heartbeat for %s",

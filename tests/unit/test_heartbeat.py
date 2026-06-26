@@ -41,6 +41,59 @@ def test_heartbeat_updates_heartbeat_at(conn, config, seed_run, seed_task_run):
     assert len(calls) >= 1
 
 
+def test_heartbeat_at_actually_advances_in_db(file_db_url):
+    """End-to-end: heartbeat_at must be committed so a SEPARATE connection (like
+    the background stale-sweep) sees it advance.
+
+    Regression for the missing-commit bug: HeartbeatThread.run() ran the UPDATE
+    but never committed, and get_connection() opens SQLite in manual-commit mode
+    (isolation_level=''), so every heartbeat was rolled back on close(). Effect:
+    heartbeat_at never moved past claim time → any task running longer than
+    heartbeat_timeout_s got a false worker_heartbeat_timeout and a spurious retry.
+    """
+    from ai_dev_system.db.connection import get_connection
+    from ai_dev_system.db.helpers import new_uuid
+
+    run_id = new_uuid()
+    task_run_id = new_uuid()
+    stale = "2000-01-01 00:00:00"
+
+    seed = get_connection(file_db_url)
+    seed.execute(
+        "INSERT INTO runs (run_id, project_id, status, title, current_artifacts, metadata)"
+        " VALUES (?, 'p1', 'RUNNING_PHASE_3', 'hb', '{}', '{}')",
+        (run_id,),
+    )
+    seed.execute(
+        "INSERT INTO task_runs (task_run_id, run_id, task_id, attempt_number, status,"
+        " agent_type, input_artifact_ids, resolved_dependencies, promoted_outputs,"
+        " worker_id, heartbeat_at)"
+        " VALUES (?, ?, 'TASK-1', 1, 'RUNNING', 'StubAgent', '[]', '[]', '[]', 'w1', ?)",
+        (task_run_id, run_id, stale),
+    )
+    seed.commit()
+    seed.close()
+
+    hb = HeartbeatThread(
+        conn_factory=lambda: get_connection(file_db_url),
+        task_run_id=task_run_id,
+        interval_s=0.05,
+    )
+    hb.start()
+    time.sleep(0.3)
+    hb.stop()
+
+    check = get_connection(file_db_url)
+    hb_at = check.execute(
+        "SELECT heartbeat_at FROM task_runs WHERE task_run_id = ?", (task_run_id,)
+    ).fetchone()["heartbeat_at"]
+    check.close()
+
+    assert hb_at != stale, (
+        "heartbeat_at was never persisted — HeartbeatThread.run() is missing conn.commit()"
+    )
+
+
 def test_heartbeat_stops_cleanly(config, seed_run, seed_task_run):
     """stop() terminates the thread within timeout."""
 
