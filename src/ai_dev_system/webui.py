@@ -806,6 +806,78 @@ def _accept_branch_create_pr(
     return result
 
 
+def _split_diff_by_file(diff_text: str) -> list[tuple[str, str]]:
+    """Split a unified ``git diff`` into ``(path, chunk_text)`` per file."""
+    files: list[tuple[str, str]] = []
+    cur_path: str | None = None
+    cur: list[str] = []
+    for line in (diff_text or "").splitlines(keepends=True):
+        if line.startswith("diff --git "):
+            if cur_path is not None:
+                files.append((cur_path, "".join(cur)))
+            cur = [line]
+            parts = line.split()
+            if len(parts) >= 4 and parts[3].startswith("b/"):
+                cur_path = parts[3][2:]
+            elif len(parts) >= 3 and parts[2].startswith("a/"):
+                cur_path = parts[2][2:]
+            else:
+                cur_path = "?"
+        else:
+            cur.append(line)
+    if cur_path is not None:
+        files.append((cur_path, "".join(cur)))
+    return files
+
+
+def _diff_stat(chunk: str) -> tuple[int, int]:
+    """Count added/removed content lines in a single-file diff chunk."""
+    added = removed = 0
+    for ln in chunk.splitlines():
+        if ln.startswith("+") and not ln.startswith("+++"):
+            added += 1
+        elif ln.startswith("-") and not ln.startswith("---"):
+            removed += 1
+    return added, removed
+
+
+def _render_diff(diff_text: str) -> str:
+    """Render a git diff as a changed-files summary + per-file collapsible blocks.
+
+    Falls back to a raw <pre> block when there are no parseable file headers
+    (empty diff, placeholder text, etc.).
+    """
+    diff_text = diff_text or ""
+    files = _split_diff_by_file(diff_text)
+    if not files:
+        return f"<pre style='max-height:600px;overflow-y:auto'>{html.escape(diff_text)}</pre>"
+
+    open_attr = " open" if len(files) <= 3 else ""
+    rows: list[str] = []
+    blocks: list[str] = []
+    for i, (path, chunk) in enumerate(files):
+        a, r = _diff_stat(chunk)
+        ep = html.escape(path)
+        rows.append(
+            f"<tr><td><a href='#f{i}'>{ep}</a></td>"
+            f"<td style='text-align:right;white-space:nowrap'>"
+            f"<span style='color:#5fd07f'>+{a}</span> "
+            f"<span style='color:#f07f7f'>−{r}</span></td></tr>"
+        )
+        blocks.append(
+            f"<details id='f{i}'{open_attr}><summary style='cursor:pointer'>{ep} "
+            f"<span class='muted'>(+{a} −{r})</span></summary>"
+            f"<pre style='max-height:500px;overflow-y:auto'>{html.escape(chunk)}</pre>"
+            "</details>"
+        )
+    summary = (
+        f"<table><tr><th>File đã đổi ({len(files)})</th>"
+        "<th style='text-align:right'>+/−</th></tr>"
+        + "".join(rows) + "</table>"
+    )
+    return summary + "<div style='margin-top:12px'>" + "".join(blocks) + "</div>"
+
+
 def _task_exec_page(spec_id: str) -> bytes:
     exec_st = _task_exec_status(spec_id)
     log_lines = _task_exec_log_lines(spec_id)
@@ -855,11 +927,16 @@ def _task_exec_page(spec_id: str) -> bytes:
     # status == "done"
     cfg = _config()
     diff_text = _task_exec_diff(spec_id, run_id, cfg)
-    diff_html = html.escape(diff_text)
     exec_status_badge = _badge(exec_st.get("exec_status") or "COMPLETED")
+    compare_url = exec_st.get("compare_url") or ""
+    gh_link = (
+        f"<p style='margin:0 0 12px'>🔗 <a href='{html.escape(compare_url)}' target='_blank'>"
+        "Xem &amp; review trên GitHub →</a></p>"
+        if compare_url else ""
+    )
     diff_card = (
         f"<div class='card'><h2>Git diff — {exec_status_badge}</h2>"
-        f"<pre style='max-height:600px;overflow-y:auto'>{diff_html}</pre></div>"
+        f"{gh_link}{_render_diff(diff_text)}</div>"
     )
     sid_escaped = html.escape(spec_id)
     action_card = (
@@ -867,15 +944,15 @@ def _task_exec_page(spec_id: str) -> bytes:
         "<form method='post' action='/task-exec' style='display:inline;margin-right:12px'>"
         f"<input type='hidden' name='id' value='{sid_escaped}'>"
         "<input type='hidden' name='action' value='accept'>"
-        "<button type='submit' style='background:#1a6b2a'>✓ Accept branch</button>"
+        "<button type='submit' style='background:#1a6b2a'>✓ Accept &amp; tạo PR</button>"
         "</form>"
         "<form method='post' action='/task-exec' style='display:inline'>"
         f"<input type='hidden' name='id' value='{sid_escaped}'>"
         "<input type='hidden' name='action' value='reject'>"
         "<button type='submit' style='background:#6b1a1a'>✗ Reject &amp; xóa branch</button>"
         "</form>"
-        f"<p class='muted' style='margin-top:10px'>Accept: giữ branch <b>{branch}</b>, "
-        f"bạn merge thủ công. Reject: xóa branch, quay lại <b>{base}</b>.</p></div>"
+        f"<p class='muted' style='margin-top:10px'>Accept: push branch <b>{branch}</b> "
+        f"+ mở pull request. Reject: xóa branch (local + remote), quay lại <b>{base}</b>.</p></div>"
     )
     return _page("Task execution", nav + branch_card + diff_card + action_card + log_card)
 
@@ -1394,18 +1471,25 @@ class Handler(BaseHTTPRequestHandler):
                         )
                     self._send(_page("accepted", body))
                 elif action == "reject":
-                    msg = "Branch đã bị xóa."
+                    msg = "Branch đã bị xóa (local + remote)."
                     if branch and repo:
                         try:
                             subprocess.run(
                                 ["git", "checkout", base],
                                 cwd=repo, capture_output=True,
-                                text=True, encoding="utf-8",
+                                text=True, encoding="utf-8", errors="replace",
                             )
                             subprocess.run(
                                 ["git", "branch", "-D", branch],
                                 cwd=repo, capture_output=True,
-                                text=True, encoding="utf-8",
+                                text=True, encoding="utf-8", errors="replace",
+                            )
+                            # Best-effort: drop the remote branch too (it was
+                            # auto-pushed when execution completed).
+                            subprocess.run(
+                                ["git", "push", "origin", "--delete", branch],
+                                cwd=repo, capture_output=True,
+                                text=True, encoding="utf-8", errors="replace",
                             )
                         except Exception as exc:  # noqa: BLE001
                             msg = f"Lỗi xóa branch: {html.escape(str(exc))}"

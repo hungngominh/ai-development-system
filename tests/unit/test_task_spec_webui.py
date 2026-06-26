@@ -326,3 +326,76 @@ def test_accept_branch_create_pr_missing_repo():
     res = webui._accept_branch_create_pr("ai-dev/task-x", "master", "", "t")
     assert res["ok"] is False
     assert res["pushed"] is False
+
+
+# ── _render_diff: changed-files summary + collapsible per-file ───────────────────
+
+_SAMPLE_DIFF = (
+    "diff --git a/src/foo.py b/src/foo.py\n"
+    "index 111..222 100644\n"
+    "--- a/src/foo.py\n"
+    "+++ b/src/foo.py\n"
+    "@@ -1,2 +1,2 @@\n"
+    " import os\n"
+    "+import sys\n"
+    "-old = 1\n"
+    "diff --git a/README.md b/README.md\n"
+    "index 333..444 100644\n"
+    "--- a/README.md\n"
+    "+++ b/README.md\n"
+    "@@ -1 +1,2 @@\n"
+    " # Title\n"
+    "+more\n"
+)
+
+
+def test_split_diff_by_file_parses_paths():
+    from ai_dev_system.webui import _split_diff_by_file
+    files = _split_diff_by_file(_SAMPLE_DIFF)
+    assert [p for p, _ in files] == ["src/foo.py", "README.md"]
+
+
+def test_render_diff_lists_changed_files_with_counts():
+    from ai_dev_system.webui import _render_diff
+    out = _render_diff(_SAMPLE_DIFF)
+    assert "File đã đổi (2)" in out
+    assert "src/foo.py" in out
+    assert "README.md" in out
+    # foo.py: +1 (import sys) / −1 (old = 1)
+    assert "+1 −1" in out
+
+
+def test_render_diff_collapsible_per_file():
+    from ai_dev_system.webui import _render_diff
+    out = _render_diff(_SAMPLE_DIFF)
+    assert out.count("<details") == 2
+    assert "<summary" in out
+
+
+def test_render_diff_empty_falls_back_to_pre():
+    from ai_dev_system.webui import _render_diff
+    out = _render_diff("(diff chưa có)")
+    assert "<details" not in out
+    assert "<pre" in out
+
+
+def test_task_exec_page_done_shows_github_link_and_file_summary(tmp_path, monkeypatch):
+    """Done state with a compare_url shows the GitHub link + changed-file summary."""
+    import ai_dev_system.webui as webui
+    spec_id = "exec010"
+    exec_status = {
+        "status": "done", "exec_status": "COMPLETED",
+        "run_id": "r10", "branch": "ai-dev/task-exec010", "base_branch": "master",
+        "compare_url": "https://github.com/o/r/compare/master...ai-dev/task-exec010",
+    }
+    spec_dir = tmp_path / "task_specs"
+    spec_dir.mkdir()
+    (spec_dir / f"{spec_id}-exec.json").write_text(json.dumps(exec_status), encoding="utf-8")
+    (spec_dir / f"{spec_id}-exec.log").write_text("[10:05:00] done\n", encoding="utf-8")
+    monkeypatch.setattr(webui, "_config", lambda: _fake_cfg(str(tmp_path)))
+    monkeypatch.setattr(webui, "_task_exec_diff", lambda sid, rid, cfg: _SAMPLE_DIFF)
+
+    body = webui._task_exec_page(spec_id).decode("utf-8")
+    assert "compare/master...ai-dev/task-exec010" in body  # GitHub review link
+    assert "src/foo.py" in body                            # file summary present
+    assert "<details" in body                              # collapsible diff
