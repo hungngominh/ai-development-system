@@ -8,3 +8,8 @@ Thumbs.db
 *.swp
 *.swo
 .worktrees/
+
+# Local SQLite DB artifacts
+ai_dev.db
+*.sqlite
+*.sqlite3
