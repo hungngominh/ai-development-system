@@ -71,6 +71,79 @@ def _apply_v5_add_columns(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE runs SET legacy = 1 WHERE pipeline_version = 1 AND legacy = 0")
 
 
+# Full events.event_type allow-list as of v6 (mirror of control-layer-schema.sql).
+# Used only to rebuild OLD DBs whose events CHECK predates 'RULE_LEARNED'.
+_V6_EVENT_TYPES = [
+    'RUN_CREATED', 'RUN_COMPLETED', 'RUN_ABORTED',
+    'PHASE_STARTED', 'PHASE_COMPLETED',
+    'GATE_ENTERED', 'GATE_APPROVED', 'GATE_REJECTED',
+    'ARTIFACT_CREATED', 'ARTIFACT_APPROVED', 'ARTIFACT_SUPERSEDED', 'ARTIFACT_FAILED',
+    'TASK_READY', 'TASK_STARTED', 'TASK_COMPLETED', 'TASK_FAILED', 'TASK_RETRYING', 'TASK_SKIPPED',
+    'VERIFICATION_PASSED', 'VERIFICATION_FAILED',
+    'VERIFICATION_STARTED', 'VERIFICATION_COMPLETED', 'REMEDIATION_CREATED',
+    'ESCALATION_RAISED', 'HUMAN_DECISION_RECORDED',
+    'RULES_APPLIED', 'BEADS_SYNC_WARNING',
+    'INTAKE_STARTED', 'INTAKE_FIELD_ANSWERED', 'INTAKE_FIELD_SUGGESTED',
+    'INTAKE_RESUMED', 'INTAKE_COMPLETED', 'INTAKE_ABORTED',
+    'QUESTION_INVENTORY_GENERATED', 'QUESTION_DRAFT_GENERATED',
+    'CRITIC_ITERATION_DONE', 'COVERAGE_REPORT_GENERATED',
+    'MODERATOR_PARSE_FAIL',
+    'SECTION_GENERATION_DEGRADED', 'SECTION_LENGTH_EXCEEDED',
+    'BRIEF_EDIT_APPLIED',
+    'G8_RETRIGGER_STARTED', 'G8_NOOP', 'G8_RETRIGGER_COMPLETED',
+    'BRIEF_EDIT_THRESHOLD_EXCEEDED',
+    'RULE_LEARNED',
+]
+
+
+def _apply_v6_events_check(conn: sqlite3.Connection) -> None:
+    """Allow 'RULE_LEARNED' on events.event_type. Conditional + idempotent.
+
+    SQLite cannot ALTER a CHECK in place. Fresh DBs already permit 'RULE_LEARNED'
+    (control-layer-schema.sql), so this is a no-op there — we only rebuild an OLD
+    events table whose CHECK predates the value. Guarding on the live CHECK keeps
+    fresh DBs from ever rebuilding (so a future event type added to control-layer
+    can't be silently dropped by this frozen list). Safe: nothing REFERENCES events.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'"
+    ).fetchone()
+    if row is None:
+        return  # no events table yet (control-layer not applied) — nothing to do
+    existing_sql = row["sql"] or ""
+    if "RULE_LEARNED" in existing_sql:
+        return  # already permitted — fresh DB, no rebuild
+
+    allowed = ", ".join(f"'{t}'" for t in _V6_EVENT_TYPES)
+    conn.executescript(
+        f"""
+        CREATE TABLE events_new (
+            event_id        TEXT            PRIMARY KEY,
+            run_id          TEXT            NOT NULL REFERENCES runs(run_id),
+            task_run_id     TEXT            REFERENCES task_runs(task_run_id),
+            correlation_id  TEXT,
+            event_type      TEXT            NOT NULL,
+            occurred_at     TEXT            NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            actor           TEXT            NOT NULL DEFAULT 'system',
+            payload         TEXT            NOT NULL DEFAULT '{{}}'
+                                            CHECK (json_valid(payload)),
+            CHECK (event_type IN ({allowed}))
+        );
+        INSERT INTO events_new SELECT * FROM events;
+        DROP TABLE events;
+        ALTER TABLE events_new RENAME TO events;
+        CREATE INDEX IF NOT EXISTS idx_events_run_occurred
+            ON events(run_id, occurred_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_events_task_run_occurred
+            ON events(task_run_id, occurred_at DESC) WHERE task_run_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_events_correlation
+            ON events(correlation_id) WHERE correlation_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_events_type_occurred
+            ON events(event_type, occurred_at DESC);
+        """
+    )
+
+
 def _read_sql(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -143,6 +216,8 @@ def apply_schema(conn: sqlite3.Connection, schema_dir: Path | None = None) -> li
         try:
             if name.startswith("v5-"):
                 _apply_v5_add_columns(conn)
+            if name.startswith("v6-"):
+                _apply_v6_events_check(conn)
 
             if stripped:
                 conn.executescript(sql)

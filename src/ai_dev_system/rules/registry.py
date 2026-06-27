@@ -1,7 +1,10 @@
 # src/ai_dev_system/rules/registry.py
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -16,10 +19,25 @@ class RuleRegistry:
         self.rules = self._load_rules()
 
     def _load_rules(self) -> list[dict]:
+        """Load every rule YAML, skipping any that are corrupt.
+
+        A single malformed file (e.g. a half-written learned rule) must not
+        crash registry construction for ALL tasks — it is logged and skipped.
+        The learning loop writes atomically to avoid producing such files, but
+        this guard makes the worker resilient regardless.
+        """
         rules = []
         for yaml_file in sorted(self.rules_dir.glob("*.yaml")):
-            with open(yaml_file, encoding="utf-8") as f:
-                rules.append(yaml.safe_load(f))
+            try:
+                with open(yaml_file, encoding="utf-8") as f:
+                    rule = yaml.safe_load(f)
+            except (OSError, yaml.YAMLError):
+                logger.warning("Skipping unreadable rule file %s", yaml_file, exc_info=True)
+                continue
+            if not isinstance(rule, dict):
+                logger.warning("Skipping non-mapping rule file %s", yaml_file)
+                continue
+            rules.append(rule)
         return rules
 
     def match_rules(self, task: dict) -> RuleMatch:

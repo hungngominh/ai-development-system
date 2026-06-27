@@ -87,6 +87,46 @@ def _config() -> Config:
     return Config.from_env()
 
 
+_RULES_DEFS_DIR = Path(__file__).parent / "rules" / "definitions"
+
+
+def _learn_from_rejection(spec_id: str, run_id: str, task_obj: dict, reason: str, rules_dir=None):
+    """Best-effort: turn a human reject reason into a corrective rule.
+
+    Returns the learned rule name (so the UI can confirm), or None if nothing was
+    learned (no reason, unscopable task, or an error). Never raises.
+    """
+    if not reason or not run_id:
+        return None
+    try:
+        from ai_dev_system.rules.learning import learn_from_failure
+
+        cfg = _config()
+        conn = get_connection(cfg.database_url)
+        try:
+            row = conn.execute(
+                "SELECT task_run_id FROM task_runs WHERE run_id = ? "
+                "ORDER BY started_at DESC LIMIT 1",
+                (run_id,),
+            ).fetchone()
+            scope_task = {
+                "task_run_id": row["task_run_id"] if row else None,
+                "task_type": (task_obj.get("type") or "").strip(),
+                "tags": list(task_obj.get("tags") or []),
+            }
+            result = learn_from_failure(
+                conn, run_id, scope_task,
+                rules_dir=rules_dir or _RULES_DEFS_DIR, source="gate", rejection_reason=reason,
+            )
+            conn.commit()  # we own this connection — persist the RULE_LEARNED event
+            return result.rule_name if result else None
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - learning must never break reject
+        print(f"[webui] learn_from_rejection failed for {spec_id}", file=sys.stderr)
+        return None
+
+
 def _list_runs():
     cfg = _config()
     conn = get_connection(cfg.database_url)
@@ -730,6 +770,74 @@ def _task_exec_diff(spec_id: str, run_id: str, cfg) -> str:
         return f"(lỗi đọc diff: {exc})"
 
 
+def _task_exec_review(run_id: str, cfg) -> dict | None:
+    """Read review.json from the EXECUTION_LOG artifact, if the review gate ran."""
+    conn = get_connection(cfg.database_url)
+    try:
+        row = conn.execute(
+            """
+            SELECT a.content_ref FROM artifacts a
+            JOIN task_runs tr ON tr.output_artifact_id = a.artifact_id
+            WHERE tr.run_id = ? AND a.artifact_type = 'EXECUTION_LOG'
+            ORDER BY a.created_at DESC LIMIT 1
+            """,
+            (run_id,),
+        ).fetchone()
+    except Exception:  # noqa: BLE001
+        row = None
+    finally:
+        conn.close()
+    if not row:
+        return None
+    review_file = Path(row["content_ref"]) / "review.json"
+    if not review_file.exists():
+        return None
+    try:
+        return json.loads(review_file.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return None
+
+
+def _render_review_card(review: dict) -> str:
+    """Render the review-gate result as a card. Returns '' if no review."""
+    if not review:
+        return ""
+    status = review.get("review_status", "")
+    tests_ran = review.get("tests_ran")
+    tests_passed = review.get("tests_passed")
+    findings = review.get("findings") or []
+    rounds = review.get("rounds_fixed", 0)
+
+    if status == "clean":
+        head = "<h2>Kết quả review — ✓ sạch</h2>"
+    else:
+        head = (
+            f"<h2>Kết quả review — ⚠ còn {len(findings)} vấn đề chưa giải quyết</h2>"
+        )
+    if not tests_ran:
+        test_line = "<p class='muted'>Test: không tìm thấy/không chạy.</p>"
+    elif tests_passed:
+        test_line = "<p>Test: <b style='color:#1a6b2a'>PASS ✓</b></p>"
+    else:
+        test_line = "<p>Test: <b style='color:#6b1a1a'>FAIL ✗</b></p>"
+
+    items = ""
+    if findings:
+        rows = []
+        for f in findings:
+            loc = html.escape(str(f.get("file") or ""))
+            if f.get("line"):
+                loc += f":{html.escape(str(f.get('line')))}"
+            sev = html.escape(str(f.get("severity") or "").upper())
+            issue = html.escape(str(f.get("issue") or ""))
+            rows.append(f"<li><b>[{sev}]</b> {loc} — {issue}</li>")
+        items = "<ul>" + "".join(rows) + "</ul>"
+    fixed_line = (
+        f"<p class='muted'>Đã tự sửa {rounds} vòng trước khi báo.</p>" if rounds else ""
+    )
+    return f"<div class='card'>{head}{test_line}{fixed_line}{items}</div>"
+
+
 def _accept_branch_create_pr(
     branch: str, base: str, repo: str, title: str, body_text: str = ""
 ) -> dict:
@@ -938,23 +1046,36 @@ def _task_exec_page(spec_id: str) -> bytes:
         f"<div class='card'><h2>Git diff — {exec_status_badge}</h2>"
         f"{gh_link}{_render_diff(diff_text)}</div>"
     )
+    review = _task_exec_review(run_id, cfg)
+    review_card = _render_review_card(review)
+    flagged = bool(review) and review.get("review_status") != "clean"
+    accept_warning = (
+        "<p class='caveat' style='margin:0 0 8px'>⚠ Review còn vấn đề chưa giải "
+        "quyết — xem card 'Kết quả review' trước khi Accept.</p>"
+        if flagged else ""
+    )
     sid_escaped = html.escape(spec_id)
     action_card = (
         "<div class='card'><h2>Hành động</h2>"
+        f"{accept_warning}"
         "<form method='post' action='/task-exec' style='display:inline;margin-right:12px'>"
         f"<input type='hidden' name='id' value='{sid_escaped}'>"
         "<input type='hidden' name='action' value='accept'>"
         "<button type='submit' style='background:#1a6b2a'>✓ Accept &amp; tạo PR</button>"
         "</form>"
-        "<form method='post' action='/task-exec' style='display:inline'>"
+        "<form method='post' action='/task-exec' style='display:block;margin-top:10px'>"
         f"<input type='hidden' name='id' value='{sid_escaped}'>"
         "<input type='hidden' name='action' value='reject'>"
+        "<textarea name='reason' rows='2' placeholder='Lý do reject (tùy chọn) — "
+        "nếu nhập, hệ thống học thành rule để task cùng loại sau tránh lỗi này' "
+        "style='width:100%;max-width:560px;display:block;margin-bottom:8px'></textarea>"
         "<button type='submit' style='background:#6b1a1a'>✗ Reject &amp; xóa branch</button>"
         "</form>"
         f"<p class='muted' style='margin-top:10px'>Accept: push branch <b>{branch}</b> "
         f"+ mở pull request. Reject: xóa branch (local + remote), quay lại <b>{base}</b>.</p></div>"
     )
-    return _page("Task execution", nav + branch_card + diff_card + action_card + log_card)
+    return _page("Task execution",
+                 nav + branch_card + diff_card + review_card + action_card + log_card)
 
 
 def _render_report(run_id: str) -> str:
@@ -1416,6 +1537,7 @@ class Handler(BaseHTTPRequestHandler):
                 form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
                 spec_id = (form.get("id") or [""])[0].strip()
                 action = (form.get("action") or [""])[0].strip()
+                reason = (form.get("reason") or [""])[0].strip()
                 if not spec_id:
                     self._send(
                         _page("error", "<div class='card muted'>Thiếu spec id.</div>"), 400
@@ -1426,13 +1548,15 @@ class Handler(BaseHTTPRequestHandler):
                 base = exec_st.get("base_branch") or ""
                 repo = ""
                 title = ""
+                task_obj: dict = {}
                 try:
                     _s = json.loads(
                         (Path(_config().storage_root) / "task_specs" / f"{spec_id}.json")
                         .read_text(encoding="utf-8")
                     )
                     repo = _s.get("repo") or ""
-                    title = str((_s.get("task") or {}).get("title") or _s.get("idea") or "")
+                    task_obj = _s.get("task") or {}
+                    title = str(task_obj.get("title") or _s.get("idea") or "")
                 except Exception:  # noqa: BLE001
                     pass
                 if action == "accept":
@@ -1493,8 +1617,21 @@ class Handler(BaseHTTPRequestHandler):
                             )
                         except Exception as exc:  # noqa: BLE001
                             msg = f"Lỗi xóa branch: {html.escape(str(exc))}"
+                    # Failure-learning: a human rejection with a reason is a
+                    # genuine "built wrong" signal. Best-effort — never block reject.
+                    learned_note = ""
+                    if reason:
+                        learned = _learn_from_rejection(
+                            spec_id, exec_st.get("run_id") or "", task_obj, reason
+                        )
+                        if learned:
+                            learned_note = (
+                                "<p class='muted'>📚 Đã học thành rule "
+                                f"<code>{html.escape(learned)}</code> cho task cùng loại sau.</p>"
+                            )
                     body = (
                         f"<div class='card'><h2>Branch rejected ✗</h2><p>{msg}</p>"
+                        f"{learned_note}"
                         "<p><a href='/'>← trang chủ</a></p></div>"
                     )
                     self._send(_page("rejected", body))

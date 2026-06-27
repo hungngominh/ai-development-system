@@ -1,0 +1,26 @@
+-- v6-failure-learning.sql (SQLite)
+--
+-- Failure-learning loop: allow the 'RULE_LEARNED' event_type on the events table.
+--
+-- 'RULE_LEARNED' is already present in the events CHECK in control-layer-schema.sql,
+-- so a FRESH DB needs nothing here. An OLD DB (events created before this value was
+-- added) keeps its old CHECK; SQLite cannot ALTER a CHECK in place, so the events
+-- table must be rebuilt (12-step: create new → copy → drop → rename → reindex).
+--
+-- The rebuild is performed in the migration RUNNER (db/migrator.py:_apply_v6_events_check),
+-- mirroring the v5 ADD COLUMN handling, because it must be CONDITIONAL: it runs only
+-- when the live events CHECK does NOT already permit 'RULE_LEARNED'. This keeps fresh
+-- DBs untouched (no frozen event-type list can clobber values added later) and brings
+-- old DBs forward exactly once. The reference SQL below is documentation only.
+--
+-- Safe to rebuild: no other table has a FOREIGN KEY that REFERENCES events.
+--
+-- CREATE TABLE events_new ( ... same columns ...,
+--     CHECK (event_type IN ( ...all existing values..., 'RULE_LEARNED' )) );
+-- INSERT INTO events_new SELECT * FROM events;
+-- DROP TABLE events;
+-- ALTER TABLE events_new RENAME TO events;
+-- CREATE INDEX IF NOT EXISTS idx_events_run_occurred       ON events(run_id, occurred_at DESC);
+-- CREATE INDEX IF NOT EXISTS idx_events_task_run_occurred  ON events(task_run_id, occurred_at DESC) WHERE task_run_id IS NOT NULL;
+-- CREATE INDEX IF NOT EXISTS idx_events_correlation        ON events(correlation_id) WHERE correlation_id IS NOT NULL;
+-- CREATE INDEX IF NOT EXISTS idx_events_type_occurred      ON events(event_type, occurred_at DESC);

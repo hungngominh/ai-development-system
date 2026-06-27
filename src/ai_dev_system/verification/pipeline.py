@@ -132,7 +132,61 @@ def run_verification(
         temp_path,
     )
 
+    # Failure-learning loop: a HAS_FAIL report is a genuine "built wrong" signal.
+    # Mint a corrective rule scoped to the run's implementation task(s). Best-effort:
+    # learning must never sink the verification pipeline.
+    try:
+        _learn_from_verification(run_id, report, conn)
+    except Exception:  # pragma: no cover - defensive
+        logger.exception("Failure-learning hook failed for run %s", run_id)
+
     return report
+
+
+_RULES_DEFS_DIR = Path(__file__).parent.parent / "rules" / "definitions"
+
+
+def _learn_from_verification(run_id: str, report: VerificationReport, conn, rules_dir=None) -> None:
+    """Turn a HAS_FAIL verification report into corrective rule(s).
+
+    Scopes the lesson to the run's implementation task(s) — the work that was
+    judged wrong — by reading task_type/tags from each SUCCESS impl task's
+    context_snapshot. Idempotent via learn_from_failure's own dedup.
+    """
+    if getattr(report, "overall", None) != "HAS_FAIL":
+        return
+
+    rules_dir = rules_dir or _RULES_DEFS_DIR
+    from ai_dev_system.rules.learning import learn_from_failure, scope_task_from_context
+
+    rows = conn.execute(
+        "SELECT task_run_id, context_snapshot FROM task_runs "
+        "WHERE run_id = ? AND status = 'SUCCESS'",
+        (run_id,),
+    ).fetchall()
+
+    seen_scopes: set[tuple] = set()
+    for row in rows:
+        raw = row["context_snapshot"]
+        if isinstance(raw, str):
+            ctx = json.loads(raw) if raw.strip() else {}
+        else:
+            ctx = raw or {}
+        if ctx.get("phase") != "implementation":
+            continue
+        scope_task = scope_task_from_context(dict(row), ctx)
+        if not (scope_task["task_type"] or scope_task["tags"]):
+            continue
+        # Skip identical scopes within this report (learn_from_failure would dedup
+        # anyway, but this avoids redundant file writes).
+        scope_key = (scope_task["task_type"], tuple(sorted(scope_task["tags"])))
+        if scope_key in seen_scopes:
+            continue
+        seen_scopes.add(scope_key)
+        learn_from_failure(
+            conn, run_id, scope_task,
+            rules_dir=rules_dir, source="verification", report=report,
+        )
 
 
 def _parse_acceptance_criteria(spec_bundle_path: str) -> list[tuple[str, str]]:
