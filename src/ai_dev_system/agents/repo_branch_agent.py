@@ -100,8 +100,8 @@ def _build_execution_prompt(context: dict) -> str:
     return (
         "You are implementing a coding task in THIS repository. "
         "Read existing code to understand patterns and conventions before writing anything. "
-        "Implement the task completely, write tests, and commit your changes with a "
-        "meaningful commit message.\n\n"
+        "Tests already exist on this branch and are currently FAILING — implement the "
+        "feature until they pass, then commit.\n\n"
         f"## Task\n"
         f"**Objective:** {context.get('objective', '')}\n"
         f"**Description:** {context.get('description', '')}\n"
@@ -109,8 +109,11 @@ def _build_execution_prompt(context: dict) -> str:
         f"## Technical Specification\n{spec_section}\n\n"
         "## Rules\n"
         "- Follow existing code style and patterns in this repo\n"
-        "- Write or update tests for every behaviour you add or change\n"
-        "- Run existing tests before committing — fix failures if they relate to your change\n"
+        "- Tests already exist and are RED — make them pass; do NOT delete or weaken "
+        "tests to make them pass\n"
+        "- You MAY edit a test ONLY if it is genuinely wrong; if so, explain why in the "
+        "commit message\n"
+        "- Run the full test suite before committing\n"
         "- Commit with: `git add -A && git commit -m '<type>: <summary>'`\n"
         "- Do NOT push to remote\n"
     )
@@ -352,15 +355,17 @@ class RepoBranchAgent:
         failure degrades to an inconclusive (non-blocking) verdict.
         """
         from ai_dev_system.agents.review_agent import ReviewAgent
+        from ai_dev_system.agents.test_author_agent import build_test_source
 
         max_rounds = _review_max_rounds()
         reviewer = ReviewAgent(self.repo_path, self.base_branch, live_log_path=self.live_log_path)
         objective = str(context.get("objective", ""))
+        test_spec = build_test_source(context)
         verdict = None
         rounds_fixed = 0
 
         for attempt in range(max_rounds + 1):
-            verdict = reviewer.review(objective=objective, timeout_s=timeout_s)
+            verdict = reviewer.review(objective=objective, test_spec=test_spec, timeout_s=timeout_s)
             if self.live_log_path:
                 _append_log(
                     self.live_log_path,

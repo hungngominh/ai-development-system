@@ -46,6 +46,15 @@ def test_prompt_contains_objective():
     assert "Add login" in prompt
 
 
+def test_impl_prompt_does_not_ask_to_write_tests():
+    from ai_dev_system.agents.repo_branch_agent import _build_execution_prompt
+    p = _build_execution_prompt(_ctx())
+    low = p.lower()
+    assert "write tests" not in low
+    assert "tests already exist" in low
+    assert "weaken" in low  # must forbid weakening tests
+
+
 def test_prompt_includes_filled_facets():
     ctx = _ctx(
         facets={

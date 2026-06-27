@@ -61,7 +61,18 @@ class ReviewVerdict:
         return self.verdict == "fail"
 
 
-def _build_review_prompt(base_branch: str, objective: str) -> str:
+def _build_review_prompt(base_branch: str, objective: str, test_spec: str = "") -> str:
+    weakening_block = ""
+    if test_spec:
+        weakening_block = (
+            "\n## Test integrity (tests were authored BEFORE the implementation)\n"
+            "The tests on this branch encode this acceptance source:\n"
+            f"{test_spec}\n"
+            f"Inspect whether the implementer changed any test: `git log {base_branch}..HEAD` "
+            f"and `git diff {base_branch}..HEAD -- '*test*'`. Any test that was deleted, "
+            "skipped, or weakened so it no longer enforces the acceptance source above is a "
+            "HIGH-severity finding.\n"
+        )
     return (
         "You are an independent REVIEWER of a code change just committed to THIS "
         "git branch. Do NOT make changes — only review.\n\n"
@@ -76,8 +87,9 @@ def _build_review_prompt(base_branch: str, objective: str) -> str:
         "the real runtime data shapes, not just what the tests fabricate? Also check "
         "correctness: wrong/inverted conditions, missing error handling, off-by-one.\n"
         "3. Only report findings you have VERIFIED are real (prefer fewer, certain "
-        "findings over noise). Severity is one of: low, medium, high, critical.\n\n"
-        "## Output\n"
+        "findings over noise). Severity is one of: low, medium, high, critical.\n"
+        f"{weakening_block}"
+        "\n## Output\n"
         "Your FINAL message must be ONLY a single JSON object, no prose, no code "
         "fences, exactly this shape:\n"
         '{"verdict": "pass" | "fail", "tests_ran": true|false, '
@@ -128,7 +140,7 @@ class ReviewAgent:
         self.base_branch = base_branch
         self.live_log_path = live_log_path
 
-    def review(self, objective: str = "", timeout_s: float = 1800.0) -> ReviewVerdict:
+    def review(self, objective: str = "", test_spec: str = "", timeout_s: float = 1800.0) -> ReviewVerdict:
         """Run the reviewer; never raises — failures degrade to inconclusive."""
         try:
             claude = ClaudeCodeLLMClient._resolve_claude_cmd()
@@ -139,7 +151,7 @@ class ReviewAgent:
             _append_log(self.live_log_path, "Reviewer bắt đầu kiểm tra (test + diff)…")
 
         run = _invoke_claude(
-            claude, self.repo_path, _build_review_prompt(self.base_branch, objective),
+            claude, self.repo_path, _build_review_prompt(self.base_branch, objective, test_spec),
             _review_max_turns(), timeout_s, self.live_log_path,
         )
         if run.timed_out or run.returncode != 0:
