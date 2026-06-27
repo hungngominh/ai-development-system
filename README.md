@@ -69,7 +69,7 @@ src/ai_dev_system/
 | `/review-verification` | Gate 3 — duyệt verification report, đóng run |
 
 ---
-```
+```mermaid
 sequenceDiagram
     actor U as User
     participant W as webui
