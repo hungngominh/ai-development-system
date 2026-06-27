@@ -415,3 +415,44 @@ Xác nhận để tiếp tục? (hoặc "sửa Q4" nếu muốn thay đổi)
 | Tạo task thủ công | 1-click approve task graph từ `task_graph.generator` |
 | Thiết lập dependency thủ công | `task_graph.generator` phân tích → User approve |
 | Tổng thời gian: 30-60 phút | Tổng thời gian: 5-10 phút |
+
+---
+
+## TDD-first single-task execution
+
+After a task spec is approved in the webui, the executor runs two ordered phases
+on one git branch instead of one combined phase — so tests are authored from the
+acceptance source before any implementation exists.
+
+```mermaid
+sequenceDiagram
+    actor U as User
+    participant W as webui
+    participant E as Engine
+    participant R as Router
+    participant TA as TestAuthor
+    participant TR as TestReviewer
+    participant IM as Implementer
+    participant RV as Reviewer
+    participant C as claude
+
+    U->>W: Approve task spec
+    W->>E: run_execution (TASK-TEST -> TASK-IMPL)
+    E->>R: run TASK-TEST phase=test
+    R->>TA: delegate
+    loop test-review-repair
+        TA->>C: write failing tests from AC
+        TA->>TR: review tests vs AC (red check)
+        TR-->>TA: pass / fix
+    end
+    TA-->>E: success (deps satisfied)
+    E->>R: run TASK-IMPL phase=implementation
+    R->>IM: delegate
+    IM->>C: make RED tests pass, do not weaken
+    loop review-repair
+        IM->>RV: review diff + tests vs AC
+        RV-->>IM: pass / fix
+    end
+    IM-->>E: success
+    E-->>W: COMPLETED (diff ready for Accept)
+```
