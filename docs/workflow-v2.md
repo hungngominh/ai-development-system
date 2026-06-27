@@ -16,7 +16,7 @@
 Con người nhập ý tưởng thô
     |
     v
-[Skill: Normalize idea → initial brief]
+[Intake wizard: front door — normalize ý tưởng thô → initial brief]
     problem, target users, success criteria, constraints, unknowns
     |
     v
