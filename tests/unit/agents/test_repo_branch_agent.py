@@ -32,6 +32,13 @@ def _ctx(
     }
 
 
+@pytest.fixture(autouse=True)
+def _disable_review_gate(monkeypatch):
+    """These tests exercise the implementer in isolation. The review gate (ON by
+    default) is covered separately in test_repo_branch_review_gate.py."""
+    monkeypatch.setenv("EXEC_REVIEW_GATE", "0")
+
+
 # ── _build_execution_prompt ────────────────────────────────────────────────────
 
 def test_prompt_contains_objective():
