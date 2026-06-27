@@ -150,6 +150,7 @@ def _build_context(task: dict) -> dict:
         "task_id": task["id"],
         "phase": task.get("phase", ""),
         "type": task.get("type", ""),
+        "tags": list(task.get("tags", [])),
         "agent_type": task.get("agent_type", ""),
         "objective": task.get("objective", ""),
         "description": task.get("description", ""),

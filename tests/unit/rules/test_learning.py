@@ -9,6 +9,7 @@ from ai_dev_system.rules.learning import (
     learn_from_failure,
     lessons_from_verification,
     lesson_from_rejection,
+    scope_task_from_context,
 )
 from ai_dev_system.rules.registry import RuleRegistry
 from ai_dev_system.verification.report import CriterionResult, VerificationReport
@@ -191,6 +192,41 @@ def test_empty_lesson_is_skipped(tmp_path):
         source="verification", report=_report("HAS_FAIL", [blank]),
     )
     assert result is None
+
+
+# ── scope adapter (engine task_runs row → scope task) ────────────────────────
+
+def test_scope_task_from_context_reads_type_and_tags():
+    # context_snapshot uses key "type" (not "task_type") and a "tags" list.
+    ctx = {"type": "code", "tags": ["auth", "api"], "phase": "implementation"}
+    scope = scope_task_from_context({"task_run_id": "tr-9"}, ctx)
+    assert scope["task_run_id"] == "tr-9"
+    assert scope["task_type"] == "code"
+    assert scope["tags"] == ["auth", "api"]
+
+
+def test_scope_task_from_context_handles_missing_keys():
+    scope = scope_task_from_context({}, {})
+    assert scope == {"task_run_id": None, "task_type": "", "tags": []}
+
+
+# ── #6: corrupt/hand-edited applies_to must not crash ─────────────────────────
+
+def test_existing_rule_with_null_applies_to_does_not_crash(tmp_path):
+    task = {"task_run_id": "tr-1", "task_type": "code", "tags": ["auth"]}
+    # Simulate a hand-edited learned file whose applies_to was blanked to null.
+    rule_path = tmp_path / "learned-code.yaml"
+    rule_path.write_text(
+        "name: learned-code\napplies_to: null\nfile_rules: []\nskill_rules: []\n",
+        encoding="utf-8",
+    )
+    # Must coerce applies_to to a dict instead of raising TypeError.
+    result = learn_from_failure(
+        conn=None, run_id="run-1", task=task, rules_dir=tmp_path,
+        source="verification", report=_report("HAS_FAIL", [_fail_criterion()]),
+    )
+    assert result is not None
+    assert "code" in result.applies_to["task_types"]
 
 
 def test_written_rule_is_schema_valid(tmp_path):

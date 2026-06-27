@@ -106,6 +106,23 @@ def _slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-") or "task"
 
 
+def scope_task_from_context(task_run_row: dict, ctx: dict) -> dict:
+    """Build the minimal task dict ``learn_from_failure`` needs from a task_runs
+    row plus its parsed ``context_snapshot``.
+
+    The engine's task_runs table has no ``task_type``/``tags`` columns — the
+    task-graph node's type/tags live inside ``context_snapshot`` (see
+    ``materializer._build_context``). This adapter bridges that gap so callers
+    pass the shape ``_compute_scope`` expects.
+    """
+    ctx = ctx or {}
+    return {
+        "task_run_id": task_run_row.get("task_run_id"),
+        "task_type": (ctx.get("type") or "").strip(),
+        "tags": list(ctx.get("tags") or []),
+    }
+
+
 def _compute_scope(task: dict) -> Optional[tuple[dict, str]]:
     """Build ``applies_to`` and a deterministic scope key for the failed task.
 
@@ -259,7 +276,12 @@ def learn_from_failure(
             logger.exception("Learning loop: could not read %s — skipping", rule_path)
             return None
         rule.setdefault("name", rule_name)
-        rule.setdefault("applies_to", {"task_types": [], "tags": []})
+        # A hand-edited/corrupt learned file may carry `applies_to: null` (or a
+        # non-mapping). setdefault won't replace an existing None, so coerce it
+        # before the subscript assignments below — otherwise None["task_types"]
+        # raises TypeError.
+        if not isinstance(rule.get("applies_to"), dict):
+            rule["applies_to"] = {"task_types": [], "tags": []}
         rule.setdefault("file_rules", [])
         rule.setdefault("skill_rules", [])
 
