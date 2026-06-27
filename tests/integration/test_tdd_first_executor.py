@@ -121,7 +121,7 @@ def test_two_task_run_orders_test_before_impl(temp_repo, tmp_path):
             # TestReviewAgent: tests are RED, verdict pass
             return _ClaudeRun(
                 0,
-                '{"type":"result","result":"{\\"verdict\\":\\"pass\\",\\"tests_red\\":true,\\"findings\\":[]}"}',
+                "done",
                 "",
                 {
                     "type": "result",
@@ -133,7 +133,7 @@ def test_two_task_run_orders_test_before_impl(temp_repo, tmp_path):
             # ReviewAgent: tests ran + passed, verdict pass
             return _ClaudeRun(
                 0,
-                '{"type":"result","result":"{\\"verdict\\":\\"pass\\",\\"tests_ran\\":true,\\"tests_passed\\":true,\\"findings\\":[]}"}',
+                "done",
                 "",
                 {
                     "type": "result",
@@ -173,6 +173,7 @@ def test_two_task_run_orders_test_before_impl(temp_repo, tmp_path):
     assert calls.index("test") < calls.index("impl"), (
         f"Expected test before impl, got order: {calls}"
     )
+    assert calls == ["test", "impl"], "clean run: each phase ran exactly once, test before impl"
 
     log = _git(["log", "--oneline"], temp_repo).stdout
     assert "test: add failing tests" in log, f"Test commit missing from log:\n{log}"
