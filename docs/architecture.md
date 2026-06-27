@@ -52,7 +52,7 @@ Module thực thi task graph.
 `runner.py` + `worker.py` — tối đa 4 parallel workers.
 `failure.py` — retry policy (max 2 lần / task).
 `escalation.py` — escalate to human khi retry hết.
-**⚠️ Lưu ý:** single-task execution đã hoạt động. Multi-task graph execution với required_inputs/promoted_outputs resolution chưa hoàn chỉnh.
+**⚠️ Lưu ý:** single-task execution đã hoạt động (TDD-first: test phase → impl phase). Multi-task graph execution với required_inputs/promoted_outputs resolution chưa hoàn chỉnh.
 
 ### 7. `ai_dev_system.db` — SQLite persistence
 
@@ -71,6 +71,16 @@ CLI: `ai-dev eval run / compare / list / show`.
 ### 9. `ai_dev_system.agents` — LLM providers
 
 `ClaudeMaxAgent` — dùng `claude` CLI (Claude Max subscription, không cần API key).
+
+- **TDD-first single-task split** (`EXEC_TDD_GATE`, default on): the executor emits
+  two tasks — `TASK-TEST` (`TestAuthorAgent`) then `TASK-IMPL` (`RepoBranchAgent`),
+  routed by `PhaseRoutingAgent`. `TestAuthorAgent` writes FAILING tests from the
+  acceptance source (the `test_cases` facet / acceptance criteria) in its own
+  context, gated by `TestReviewAgent` (red check + tests↔AC; turn budget:
+  `EXEC_TEST_REVIEW_MAX_TURNS`, default 40) before implementation.
+  The post-impl `ReviewAgent` additionally flags any test the implementer weakened
+  relative to the acceptance source. See
+  [specs/2026-06-27-tdd-first-test-split-design.md](superpowers/specs/2026-06-27-tdd-first-test-split-design.md).
 
 ### 10. `ai_dev_system.rules` — Rule registry
 
