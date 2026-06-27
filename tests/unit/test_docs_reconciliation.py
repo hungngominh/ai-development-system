@@ -85,6 +85,24 @@ def _relative_md_links(text: str) -> list[str]:
     return [h for h in out if h]
 
 
+def _strip_fenced_blocks(text: str) -> str:
+    """Drop ```...``` fenced blocks so prose can be inspected on its own.
+
+    Fenced blocks hold illustrative examples (the forum task graph, the setup
+    wizard transcript) where a project-level "PostgreSQL" mention is legitimate;
+    they are not claims about the system's own persistence layer.
+    """
+    return re.sub(r"```.*?```", "", text, flags=re.S)
+
+
+# A line that *explains the removal/migration* of PostgreSQL is historical
+# context, not a live claim that the system still runs on Postgres.
+_PG_REMOVAL_MARKERS = re.compile(
+    r"bị bỏ|đã bỏ|loại bỏ|thay bằng|removed|dropped|migrat|M0\.5|không cần\s*post",
+    re.I,
+)
+
+
 # --------------------------------------------------------------------------- #
 # sanity: the canonical package list matches reality (catches my own drift)
 # --------------------------------------------------------------------------- #
@@ -130,6 +148,37 @@ def test_setup_does_not_carry_stale_406_count():
 
 
 # --------------------------------------------------------------------------- #
+# format / preservation: the rewrite must keep the diagrams intact
+# (validation_rules: "the mermaid block intact (fenced code blocks closed)";
+#  deliverable: preserve the ASCII pipeline diagram + mermaid sequence diagram)
+# --------------------------------------------------------------------------- #
+def test_readme_preserves_diagrams_and_closes_all_fences():
+    readme = _read("README.md")
+
+    # Every ``` fence must be paired — an odd count means a code block (most
+    # likely the mermaid diagram) was left unclosed by the rewrite.
+    assert readme.count("```") % 2 == 0, (
+        "README has an unbalanced number of ``` fences; a fenced code block "
+        "(likely the mermaid diagram) was left unclosed"
+    )
+
+    # The ASCII pipeline diagram in "Mô hình hoạt động" must survive intact.
+    flow = _section(readme, "## Mô hình hoạt động")
+    pipeline = _first_fenced_block(flow)
+    for stage in ("Gate 1", "Gate 2", "Gate 3", "COMPLETED"):
+        assert stage in pipeline, (
+            f"README ASCII pipeline diagram lost the {stage!r} stage"
+        )
+
+    # The mermaid sequence diagram must survive as a closed ```mermaid block.
+    m = re.search(r"```mermaid\n(.*?)\n```", readme, re.S)
+    assert m, "README lost its ```mermaid sequence diagram block"
+    assert "sequenceDiagram" in m.group(1), (
+        "README mermaid block is no longer a sequenceDiagram"
+    )
+
+
+# --------------------------------------------------------------------------- #
 # (2) persistence layer is SQLite, not PostgreSQL — no live PG claims in README
 # --------------------------------------------------------------------------- #
 def test_readme_has_no_postgres_claims():
@@ -137,6 +186,28 @@ def test_readme_has_no_postgres_claims():
     assert not re.search(r"postgres|psycopg", readme, re.I), (
         "README still references PostgreSQL/psycopg as a live claim"
     )
+
+
+@pytest.mark.parametrize("rel", ["SETUP.md", "docs/workflow-v2.md"])
+def test_docs_have_no_live_postgres_claims(rel):
+    """Acceptance (2): grep *the docs* (not just README) for live PG claims.
+
+    `psycopg` (the driver dropped in M0.5) must not appear anywhere. A prose
+    `PostgreSQL` mention is only allowed when the line documents its removal /
+    migration; fenced examples (forum task graph, wizard transcript) are
+    project-level illustrations, not persistence-layer claims.
+    """
+    text = _read(rel)
+    assert not re.search(r"psycopg", text, re.I), (
+        f"{rel} references psycopg, the driver dropped in M0.5"
+    )
+    prose = _strip_fenced_blocks(text)
+    live = [
+        ln.strip()
+        for ln in prose.splitlines()
+        if re.search(r"postgre", ln, re.I) and not _PG_REMOVAL_MARKERS.search(ln)
+    ]
+    assert not live, f"{rel} has live PostgreSQL claim(s): {live}"
 
 
 def test_readme_states_sqlite_persistence():
@@ -215,6 +286,24 @@ def test_setup_does_not_instruct_entering_db_and_apikey():
     )
 
 
+def test_setup_describes_sqlite_and_claudemax_reality():
+    """Positive counterpart to the negative checks: SETUP must actually state the
+    correct setup — SQLite persistence and the no-API-key Claude Max (`claude`
+    CLI) execution path — not merely drop the stale strings."""
+    setup = _read("SETUP.md")
+    assert re.search(r"sqlite", setup, re.I), (
+        "SETUP.md must describe the SQLite (stdlib sqlite3, no driver) default"
+    )
+    assert re.search(
+        r"claude\s*max|claude\s*code\s*max|no[\s-]?api[\s-]?key|không cần\s*api",
+        setup,
+        re.I,
+    ), (
+        "SETUP.md must describe the no-API-key Claude Max (`claude` CLI) "
+        "execution path"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # (e) skills documented in README match the files in skills/ and .claude/commands/
 # --------------------------------------------------------------------------- #
@@ -230,11 +319,21 @@ def test_skill_files_exist_in_both_locations():
 
 def test_readme_skills_table_matches_skill_files():
     readme = _read("README.md")
-    documented = set(re.findall(r"/([a-z][a-z-]+)`", readme))
-    documented &= EXPECTED_SKILLS | {"x"}  # restrict to plausible skill names
-    assert EXPECTED_SKILLS <= documented, (
-        f"README skills table must document all skills; missing "
-        f"{sorted(EXPECTED_SKILLS - documented)}"
+    # Scope to the skills table so unrelated inline `/...` code elsewhere in the
+    # README is not counted as a documented skill.
+    idx = readme.find("Skills (Claude Code slash commands)")
+    assert idx != -1, "README must contain the skills table"
+    table = readme[idx:]
+    end = re.search(r"\n---", table)
+    if end:
+        table = table[: end.start()]
+
+    documented = set(re.findall(r"`/([a-z][a-z0-9-]+)`", table))
+    # Exact match (not subset): catches an extra/renamed/wrong skill name in the
+    # table as well as a missing one.
+    assert documented == EXPECTED_SKILLS, (
+        f"README skills table must document exactly the shipped skills "
+        f"{sorted(EXPECTED_SKILLS)}; got {sorted(documented)}"
     )
 
 
