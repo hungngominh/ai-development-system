@@ -18,16 +18,16 @@ from ai_dev_system.agents.review_agent import (
 # ── _build_review_prompt ──────────────────────────────────────────────────────
 
 def test_review_prompt_includes_weakening_check_when_test_spec_given():
-    from ai_dev_system.agents.review_agent import _build_review_prompt
     p = _build_review_prompt("main", "Add login", test_spec="AC-1: returns 401")
     assert "AC-1: returns 401" in p
     assert "weaken" in p.lower()
 
 
 def test_review_prompt_omits_weakening_block_without_test_spec():
-    from ai_dev_system.agents.review_agent import _build_review_prompt
     p = _build_review_prompt("main", "Add login", test_spec="")
     assert "AC-1" not in p
+    assert "Test integrity" not in p
+    assert "weaken" not in p.lower()
 
 
 # ── _parse_verdict ──────────────────────────────────────────────────────────────
