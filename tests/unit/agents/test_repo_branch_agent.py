@@ -8,7 +8,14 @@ from unittest.mock import patch
 
 import pytest
 
-from ai_dev_system.agents.repo_branch_agent import _build_execution_prompt, RepoBranchAgent
+from ai_dev_system.agents.repo_branch_agent import (
+    _build_execution_prompt,
+    _DEFAULT_MAX_TURNS,
+    _extract_result_event,
+    _extract_summary,
+    _max_turns,
+    RepoBranchAgent,
+)
 
 
 def _ctx(
@@ -151,6 +158,112 @@ def test_agent_writes_diff_even_on_claude_failure(tmp_path):
     assert not result.success
     assert "auth error" in (result.error or "")
     assert (Path(out) / "diff.txt").exists()
+
+
+# ── _max_turns / turn budget ───────────────────────────────────────────────────
+
+def test_max_turns_defaults_to_100(monkeypatch):
+    monkeypatch.delenv("EXEC_MAX_TURNS", raising=False)
+    assert _max_turns() == _DEFAULT_MAX_TURNS == 100
+
+
+def test_max_turns_reads_env(monkeypatch):
+    monkeypatch.setenv("EXEC_MAX_TURNS", "250")
+    assert _max_turns() == 250
+
+
+@pytest.mark.parametrize("bad", ["", "abc", "0", "-5"])
+def test_max_turns_falls_back_on_invalid_env(monkeypatch, bad):
+    monkeypatch.setenv("EXEC_MAX_TURNS", bad)
+    assert _max_turns() == _DEFAULT_MAX_TURNS
+
+
+def test_run_passes_configured_max_turns_to_cli(tmp_path, monkeypatch):
+    monkeypatch.setenv("EXEC_MAX_TURNS", "77")
+    agent = RepoBranchAgent(str(tmp_path), "ai-dev/task-abc", "main")
+    out = str(tmp_path / "out")
+    captured: dict = {}
+
+    def _fake_run(cmd, **kw):
+        return _diff_proc()
+
+    def _fake_popen(cmd, **kw):
+        captured["cmd"] = cmd
+
+        class FakePopen:
+            returncode = 0
+            stdout = iter([json.dumps({"type": "result", "result": "Done."}) + "\n"])
+            stderr = iter([])
+
+            def wait(self, timeout=None):
+                self.returncode = 0
+
+        return FakePopen()
+
+    with patch("ai_dev_system.agents.repo_branch_agent.ClaudeCodeLLMClient._resolve_claude_cmd",
+               return_value="claude"), \
+         patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", side_effect=_fake_popen), \
+         patch("ai_dev_system.agents.repo_branch_agent.subprocess.run", side_effect=_fake_run):
+        agent.run("TASK-ADHOC", out, context=_ctx())
+
+    cmd = captured["cmd"]
+    assert "--max-turns" in cmd
+    assert cmd[cmd.index("--max-turns") + 1] == "77"
+
+
+# ── error_max_turns handling ─────────────────────────────────────────────────────
+
+def test_max_turns_subtype_yields_clear_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("EXEC_MAX_TURNS", "30")
+    agent = RepoBranchAgent(str(tmp_path), "ai-dev/task-abc", "main")
+    out = str(tmp_path / "out")
+
+    def _fake_run(cmd, **kw):
+        return _diff_proc()
+
+    def _fake_popen(cmd, **kw):
+        class FakePopen:
+            returncode = 1
+            # error_max_turns result event has empty result text
+            stdout = iter([json.dumps({"type": "result", "subtype": "error_max_turns",
+                                       "result": ""}) + "\n"])
+            stderr = iter([])
+
+            def wait(self, timeout=None):
+                self.returncode = 1
+
+        return FakePopen()
+
+    with patch("ai_dev_system.agents.repo_branch_agent.ClaudeCodeLLMClient._resolve_claude_cmd",
+               return_value="claude"), \
+         patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", side_effect=_fake_popen), \
+         patch("ai_dev_system.agents.repo_branch_agent.subprocess.run", side_effect=_fake_run):
+        result = agent.run("TASK-ADHOC", out, context=_ctx())
+
+    assert not result.success
+    assert "30-turn limit" in (result.error or "")
+    assert "EXEC_MAX_TURNS" in (result.error or "")
+    # summary is diagnosable, not a bare "claude exit=1"
+    summary = (Path(out) / "summary.txt").read_text(encoding="utf-8")
+    assert "error_max_turns" in summary
+
+
+def test_extract_result_event_picks_last_result():
+    stdout = "\n".join([
+        json.dumps({"type": "tool_use", "name": "Read"}),
+        json.dumps({"type": "result", "subtype": "success", "result": "ok"}),
+    ])
+    ev = _extract_result_event(stdout)
+    assert ev is not None and ev["subtype"] == "success"
+
+
+def test_extract_summary_falls_back_to_subtype():
+    ev = {"type": "result", "subtype": "error_max_turns", "result": ""}
+    assert "error_max_turns" in _extract_summary(ev, 1, 0)
+
+
+def test_extract_summary_no_event():
+    assert _extract_summary(None, 1, 123) == "claude exit=1, stdout=123B"
 
 
 def test_agent_creates_output_dir_if_missing(tmp_path):

@@ -6,6 +6,7 @@ The agent's output_path is the directory the engine will promote as EXECUTION_LO
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
@@ -16,11 +17,29 @@ from ai_dev_system.agents.base import AgentResult
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
 from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS
 
+# Static claude CLI flags. --max-turns is appended at run() time so it can be
+# tuned per-environment (see _max_turns).
 _EXEC_FLAGS = [
     "--output-format", "json",
     "--permission-mode", "bypassPermissions",
-    "--max-turns", "30",
 ]
+
+# Default turn budget. A multi-file task (new module + tests + schema + commit)
+# routinely needs well over 30 tool turns; 30 was the original value and caused
+# attempts to hit error_max_turns before committing. Override with EXEC_MAX_TURNS.
+_DEFAULT_MAX_TURNS = 100
+
+
+def _max_turns() -> int:
+    """Resolve the claude --max-turns budget from EXEC_MAX_TURNS (fallback 100)."""
+    raw = os.environ.get("EXEC_MAX_TURNS")
+    if not raw:
+        return _DEFAULT_MAX_TURNS
+    try:
+        val = int(raw)
+    except (TypeError, ValueError):
+        return _DEFAULT_MAX_TURNS
+    return val if val > 0 else _DEFAULT_MAX_TURNS
 
 
 def _parse_ndjson_event(line: str) -> Optional[str]:
@@ -103,20 +122,35 @@ def _git(args: list[str], cwd: str) -> subprocess.CompletedProcess:
     )
 
 
-def _extract_summary(stdout: str, returncode: int) -> str:
-    """Pull the result text from NDJSON output."""
+def _extract_result_event(stdout: str) -> Optional[dict]:
+    """Return the last NDJSON ``result`` event object, or None if absent."""
     for line in reversed(stdout.splitlines()):
         line = line.strip()
         if not line:
             continue
         try:
             obj = json.loads(line)
-            if isinstance(obj, dict) and obj.get("type") == "result":
-                result_text = obj.get("result") or ""
-                return result_text[:500] if result_text else f"claude exit={returncode}"
         except json.JSONDecodeError:
             continue
-    return f"claude exit={returncode}, stdout={len(stdout)}B"
+        if isinstance(obj, dict) and obj.get("type") == "result":
+            return obj
+    return None
+
+
+def _extract_summary(result_event: Optional[dict], returncode: int, stdout_len: int) -> str:
+    """Human-readable summary from the result event.
+
+    Falls back to the result subtype (e.g. ``error_max_turns``) when there is no
+    result text, so a failed attempt's summary is diagnosable instead of a bare
+    ``claude exit=1``.
+    """
+    if result_event is None:
+        return f"claude exit={returncode}, stdout={stdout_len}B"
+    result_text = result_event.get("result") or ""
+    if result_text:
+        return result_text[:500]
+    subtype = result_event.get("subtype") or ""
+    return f"claude ended without output: {subtype or f'exit={returncode}'}"
 
 
 class RepoBranchAgent:
@@ -152,7 +186,8 @@ class RepoBranchAgent:
             return AgentResult(output_path=output_path, error=f"claude CLI not found: {exc}")
 
         prompt = _build_execution_prompt(context)
-        cmd = [claude, "-p", prompt, *_EXEC_FLAGS]
+        max_turns = _max_turns()
+        cmd = [claude, "-p", prompt, *_EXEC_FLAGS, "--max-turns", str(max_turns)]
 
         if self.live_log_path:
             _append_log(self.live_log_path, f"Claude bắt đầu task {task_id}…")
@@ -207,16 +242,23 @@ class RepoBranchAgent:
         diff_proc = _git(["diff", f"{self.base_branch}..HEAD"], self.repo_path)
         diff_text = diff_proc.stdout or "(no diff)"
 
-        summary = _extract_summary(full_stdout, proc.returncode)
+        result_event = _extract_result_event(full_stdout)
+        subtype = (result_event or {}).get("subtype") or ""
+        summary = _extract_summary(result_event, proc.returncode, len(full_stdout))
 
         Path(output_path, "diff.txt").write_text(diff_text, encoding="utf-8")
         Path(output_path, "summary.txt").write_text(summary, encoding="utf-8")
         Path(output_path, "claude_stderr.txt").write_text(full_stderr, encoding="utf-8")
 
         if proc.returncode != 0:
-            return AgentResult(
-                output_path=output_path,
-                error=f"claude CLI exited {proc.returncode}. stderr: {full_stderr[:300]}",
-            )
+            if subtype == "error_max_turns":
+                error = (
+                    f"claude reached the {max_turns}-turn limit without finishing "
+                    f"the task (no commit produced). Raise EXEC_MAX_TURNS or split "
+                    f"the task into smaller pieces."
+                )
+            else:
+                error = f"claude CLI exited {proc.returncode}. stderr: {full_stderr[:300]}"
+            return AgentResult(output_path=output_path, error=error)
 
         return AgentResult(output_path=output_path)
