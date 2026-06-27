@@ -289,7 +289,9 @@ CREATE TABLE IF NOT EXISTS events (
         'BRIEF_EDIT_APPLIED',
         -- G8 brief edit re-trigger events
         'G8_RETRIGGER_STARTED', 'G8_NOOP', 'G8_RETRIGGER_COMPLETED',
-        'BRIEF_EDIT_THRESHOLD_EXCEEDED'
+        'BRIEF_EDIT_THRESHOLD_EXCEEDED',
+        -- Failure-learning loop
+        'RULE_LEARNED'
     ))
 );
 
