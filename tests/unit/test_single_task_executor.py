@@ -298,3 +298,20 @@ def test_gate_off_builds_single_task():
     assert len(g["tasks"]) == 1
     assert g["tasks"][0]["phase"] == "implementation"
     assert g["tasks"][0]["id"] == "TASK-1"
+
+
+def test_tdd_gate_sets_tdd_tests_authored_true_on_impl_task():
+    """With TDD gate ON, the IMPL task carries tdd_tests_authored=True."""
+    from ai_dev_system.task_graph.single_task_executor import _build_task_graph
+    with patch.dict(os.environ, {"EXEC_TDD_GATE": "1"}):
+        g = _build_task_graph(_task(), {}, "ai-dev/task-abc", "main")
+    impl_t = next(t for t in g["tasks"] if t["id"].endswith("-IMPL"))
+    assert impl_t.get("tdd_tests_authored") is True
+
+
+def test_gate_off_tdd_tests_authored_is_false_on_task():
+    """With TDD gate OFF, the single impl task carries tdd_tests_authored=False."""
+    from ai_dev_system.task_graph.single_task_executor import _build_task_graph
+    with patch.dict(os.environ, {"EXEC_TDD_GATE": "0"}):
+        g = _build_task_graph(_task(), {}, "ai-dev/task-abc", "main")
+    assert g["tasks"][0].get("tdd_tests_authored") is False

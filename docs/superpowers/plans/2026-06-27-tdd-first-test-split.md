@@ -16,7 +16,7 @@
 - Agent protocol (from `agents/base.py`): `run(task_id, output_path, promoted_outputs=(), context=None, timeout_s=3600.0, file_rules=()) -> AgentResult`. `AgentResult(output_path, promoted_outputs=[], error=None)`; `.success == (error is None)`.
 - Task context (`context_snapshot`) carries `phase`, `objective`, `description`, `done_definition`, `facets`. Facet shape: `{status: "filled"|"needs_human"|"na", content, reason}`; spec facet keys in `task_graph/facets.py::SPEC_FACET_KEYS`.
 - Each task may declare at most ONE promoted output (`engine/worker.py` Phase-1 limit). Both new tasks use `required_inputs: []` (tests travel on the branch, not via artifacts).
-- Env flags follow the existing pattern (`EXEC_REVIEW_GATE`, `EXEC_REVIEW_MAX_ROUNDS`): `EXEC_TDD_GATE` (default ON), `EXEC_TEST_REVIEW_MAX_ROUNDS` (default 2).
+- Env flags follow the existing pattern (`EXEC_REVIEW_GATE`, `EXEC_REVIEW_MAX_ROUNDS`): `EXEC_TDD_GATE` (default ON), `EXEC_TEST_REVIEW_MAX_ROUNDS` (default 2), `EXEC_TEST_REVIEW_MAX_TURNS` (turn budget for the test reviewer, default 40).
 - Run the full suite before each commit: `python -m pytest tests/ -q`.
 - Spec: `docs/superpowers/specs/2026-06-27-tdd-first-test-split-design.md`.
 

@@ -47,8 +47,9 @@ def _build_task_graph(task: dict, facets: dict, branch_name: str, base_branch: s
     description = task.get("description") or ""
     impl_done = task.get("done_definition") or f"Code committed to branch {branch_name}"
 
+    _gate = _tdd_gate_enabled()
     impl_task = {
-        "id": f"{base_id}-IMPL" if _tdd_gate_enabled() else base_id,
+        "id": f"{base_id}-IMPL" if _gate else base_id,
         "execution_type": "atomic",
         "agent_type": "RepoBranchAgent",
         "phase": "implementation",
@@ -61,8 +62,9 @@ def _build_task_graph(task: dict, facets: dict, branch_name: str, base_branch: s
         "expected_outputs": ["implementation_diff"],
         "deps": [],
         "facets": facets,
+        "tdd_tests_authored": _gate,
     }
-    if not _tdd_gate_enabled():
+    if not _gate:
         return {"tasks": [impl_task]}
 
     test_task = {

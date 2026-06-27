@@ -76,7 +76,8 @@ CLI: `ai-dev eval run / compare / list / show`.
   two tasks — `TASK-TEST` (`TestAuthorAgent`) then `TASK-IMPL` (`RepoBranchAgent`),
   routed by `PhaseRoutingAgent`. `TestAuthorAgent` writes FAILING tests from the
   acceptance source (the `test_cases` facet / acceptance criteria) in its own
-  context, gated by `TestReviewAgent` (red check + tests↔AC) before implementation.
+  context, gated by `TestReviewAgent` (red check + tests↔AC; turn budget:
+  `EXEC_TEST_REVIEW_MAX_TURNS`, default 40) before implementation.
   The post-impl `ReviewAgent` additionally flags any test the implementer weakened
   relative to the acceptance source. See
   [specs/2026-06-27-tdd-first-test-split-design.md](superpowers/specs/2026-06-27-tdd-first-test-split-design.md).

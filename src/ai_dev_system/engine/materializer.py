@@ -159,6 +159,7 @@ def _build_context(task: dict) -> dict:
         "required_inputs": list(task.get("required_inputs", [])),
         "expected_outputs": list(task.get("expected_outputs", [])),
         "facets": dict(task.get("facets") or {}),
+        "tdd_tests_authored": task.get("tdd_tests_authored", False),
     }
 
 

@@ -21,7 +21,7 @@ _DEFAULT_TEST_REVIEW_MAX_TURNS = 40
 
 
 def _test_review_max_turns() -> int:
-    raw = os.environ.get("TEST_REVIEW_MAX_TURNS")
+    raw = os.environ.get("EXEC_TEST_REVIEW_MAX_TURNS")
     if not raw:
         return _DEFAULT_TEST_REVIEW_MAX_TURNS
     try:

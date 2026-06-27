@@ -16,6 +16,7 @@ from ai_dev_system.agents.repo_branch_agent import (
     _max_turns,
     RepoBranchAgent,
 )
+from ai_dev_system.agents.review_agent import _build_review_prompt
 
 
 def _ctx(
@@ -307,3 +308,20 @@ def test_agent_creates_output_dir_if_missing(tmp_path):
         result = agent.run("TASK-ADHOC", deep_out, context=_ctx())
 
     assert Path(deep_out).exists()
+
+
+# ── tdd_tests_authored flag scopes the weakening block ─────────────────────────
+
+def test_review_prompt_no_weakening_block_without_tdd_flag():
+    """When tdd_tests_authored is False/absent, reviewer prompt has NO weakening block."""
+    p = _build_review_prompt("main", "Add login", test_spec="")
+    assert "Test integrity" not in p
+    assert "weaken" not in p.lower()
+
+
+def test_review_prompt_weakening_block_present_with_tdd_flag():
+    """When tdd_tests_authored True and a real test_spec exists, weakening block appears."""
+    p = _build_review_prompt("main", "Add login", test_spec="AC-1: returns 401 on bad creds")
+    assert "Test integrity" in p
+    assert "AC-1: returns 401 on bad creds" in p
+    assert "weaken" in p.lower()

@@ -360,7 +360,7 @@ class RepoBranchAgent:
         max_rounds = _review_max_rounds()
         reviewer = ReviewAgent(self.repo_path, self.base_branch, live_log_path=self.live_log_path)
         objective = str(context.get("objective", ""))
-        test_spec = build_test_source(context)
+        test_spec = build_test_source(context) if context.get("tdd_tests_authored") else ""
         verdict = None
         rounds_fixed = 0
 
