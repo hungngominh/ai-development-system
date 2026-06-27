@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -265,3 +266,34 @@ def test_run_executor_writes_error_if_no_repo(tmp_path):
     status = json.loads((spec_dir / f"{spec_id}-exec.json").read_text())
     assert status["status"] == "error"
     assert "repo" in status["error"]
+
+
+# ── _build_task_graph ──────────────────────────────────────────────────────────
+
+def _task():
+    return {"id": "TASK-1", "type": "coding", "objective": "Add login",
+            "description": "d", "done_definition": ""}
+
+
+def test_tdd_gate_builds_two_tasks_with_dep():
+    from ai_dev_system.task_graph.single_task_executor import _build_task_graph
+    with patch.dict(os.environ, {"EXEC_TDD_GATE": "1"}):
+        g = _build_task_graph(_task(), {"test_cases": {"status": "filled", "content": "x", "reason": ""}},
+                              "ai-dev/task-abc", "main")
+    ids = [t["id"] for t in g["tasks"]]
+    assert ids == ["TASK-1-TEST", "TASK-1-IMPL"]
+    test_t, impl_t = g["tasks"]
+    assert test_t["phase"] == "test" and test_t["agent_type"] == "TestAuthorAgent"
+    assert test_t["deps"] == []
+    assert impl_t["phase"] == "implementation" and impl_t["agent_type"] == "RepoBranchAgent"
+    assert impl_t["deps"] == ["TASK-1-TEST"]
+    # each task at most one promoted output
+    assert len(test_t["expected_outputs"]) == 1 and len(impl_t["expected_outputs"]) == 1
+
+
+def test_gate_off_builds_single_task():
+    from ai_dev_system.task_graph.single_task_executor import _build_task_graph
+    with patch.dict(os.environ, {"EXEC_TDD_GATE": "0"}):
+        g = _build_task_graph(_task(), {}, "ai-dev/task-abc", "main")
+    assert len(g["tasks"]) == 1
+    assert g["tasks"][0]["phase"] == "implementation"
