@@ -297,3 +297,4 @@ def test_gate_off_builds_single_task():
         g = _build_task_graph(_task(), {}, "ai-dev/task-abc", "main")
     assert len(g["tasks"]) == 1
     assert g["tasks"][0]["phase"] == "implementation"
+    assert g["tasks"][0]["id"] == "TASK-1"

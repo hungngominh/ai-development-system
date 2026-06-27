@@ -20,7 +20,6 @@ import time
 import uuid
 from pathlib import Path
 
-from ai_dev_system.agents.repo_branch_agent import RepoBranchAgent
 from ai_dev_system.config import Config
 from ai_dev_system.db.connection import get_connection
 from ai_dev_system.engine.runner import run_execution
