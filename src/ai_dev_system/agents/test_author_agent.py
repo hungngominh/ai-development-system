@@ -15,7 +15,6 @@ from typing import Optional
 
 from ai_dev_system.agents.base import AgentResult
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
-from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS
 from ai_dev_system.agents.repo_branch_agent import (
     _invoke_claude, _append_log, _max_turns, _git, _extract_summary,
 )
