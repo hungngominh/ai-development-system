@@ -34,6 +34,7 @@ def _test_review_max_turns() -> int:
 @dataclass
 class TestReviewVerdict:
     """Result of one test-phase review pass."""
+    __test__ = False
     verdict: str = "inconclusive"        # "pass" | "fail" | "inconclusive"
     tests_red: bool = False              # do the NEW tests currently fail (expected)?
     findings: list[dict] = field(default_factory=list)  # [{severity,file,line,issue}]
@@ -113,6 +114,7 @@ def _parse_test_verdict(raw_text: str) -> TestReviewVerdict:
 
 class TestReviewAgent:
     """Runs an independent `claude -p` review of the test-authoring phase."""
+    __test__ = False
 
     def __init__(self, repo_path: str, base_branch: str, live_log_path: Optional[Path] = None) -> None:
         self.repo_path = repo_path
