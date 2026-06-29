@@ -34,6 +34,8 @@ def test_build_task_graph_tdd_on_two_tasks_with_dep(monkeypatch):
     assert impl["deps"] == ["TASK-ADHOC-TEST"]
     assert g["tasks"][0]["agent_type"] == "TestAuthorAgent"
     assert impl["agent_type"] == "RepoBranchAgent"
+    # tdd_tests_authored drives the TDD-first split in TestAuthorAgent (gate on → True on IMPL)
+    assert impl["tdd_tests_authored"] is True
 
 
 def test_build_task_graph_tdd_off_single_task(monkeypatch):
@@ -41,6 +43,8 @@ def test_build_task_graph_tdd_off_single_task(monkeypatch):
     g = build_task_graph(_task(), {"x": 1}, "ai-dev/task-abc")
     assert [t["id"] for t in g["tasks"]] == ["TASK-ADHOC"]
     assert g["tasks"][0]["agent_type"] == "RepoBranchAgent"
+    # gate off → no TDD tests authored
+    assert g["tasks"][0]["tdd_tests_authored"] is False
 
 
 def test_plan_single_task_persists_unapproved_with_graph(tmp_path, monkeypatch):
