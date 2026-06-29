@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 from ai_dev_system.rules.learning import learn_from_failure
@@ -61,4 +60,5 @@ def test_lesson_learned_then_applied(tmp_path, monkeypatch):
          patch("ai_dev_system.agents.repo_branch_agent.subprocess.run", side_effect=_fake_run):
         agent.run("TASK-XYZ", str(tmp_path / "out"), context=_ctx(), file_rules=[])
 
+    assert "cmd" in captured, "Popen was never called — agent.run did not reach subprocess"
     assert "input validation" in captured["cmd"][2]
