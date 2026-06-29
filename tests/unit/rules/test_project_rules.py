@@ -21,8 +21,12 @@ def _write_rule(repo: Path, name: str, task_types, file_rules):
     )
 
 
-def test_project_rules_dir():
-    assert project_rules_dir("/repo") == Path("/repo", ".ai-dev", "rules")
+def test_project_rules_dir_str_and_path(tmp_path):
+    p1 = project_rules_dir("/some/repo")
+    assert p1.parts[-2:] == (".ai-dev", "rules")
+    # accepts a Path object too
+    p2 = project_rules_dir(tmp_path)
+    assert p2 == tmp_path / ".ai-dev" / "rules"
 
 
 def test_no_dir_returns_empty(tmp_path):
@@ -47,3 +51,14 @@ def test_disabled_env_returns_empty(tmp_path, monkeypatch):
 
 def test_empty_repo_path_returns_empty():
     assert load_project_file_rules("", {"type": "coding"}) == []
+
+
+def test_none_repo_path_returns_empty():
+    assert load_project_file_rules(None, {"type": "coding"}) == []
+
+
+def test_accumulates_across_multiple_rule_files(tmp_path):
+    _write_rule(tmp_path, "learned-coding", ["coding"], ["Lesson A"])
+    _write_rule(tmp_path, "learned-extra", ["coding"], ["Lesson B"])
+    got = load_project_file_rules(str(tmp_path), {"type": "coding"})
+    assert "Lesson A" in got and "Lesson B" in got
