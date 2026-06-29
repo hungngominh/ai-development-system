@@ -8,7 +8,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Protocol
 
-from claude_agent_sdk import ClaudeAgentOptions, query as _sdk_query
+from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
 from ai_dev_system.harness.tools.registry import ToolRegistry, SERVER_NAME
 
@@ -19,7 +19,7 @@ class TurnEvent:
     data: dict[str, Any]
 
 
-@dataclass
+@dataclass(frozen=True)
 class TurnResult:
     final_text: str
     events: list[TurnEvent]
@@ -81,16 +81,19 @@ class SdkAgentRuntime:
         permission_callback,
         model: str | None = None,
         max_turns: int = 20,
-        query_fn=None,
+        client_factory=None,
     ) -> None:
         self._registry = registry
         self._permission_callback = permission_callback
         self._model = model
         self._max_turns = max_turns
-        self._query_fn = query_fn or _sdk_query
+        # client_factory(options) -> an async-context-manager client with .query()/.receive_response()
+        self._client_factory = client_factory or (lambda options: ClaudeSDKClient(options=options))
 
     def run_turn(self, system_prompt: str, user_text: str) -> TurnResult:
-        """Run one turn synchronously. Must be called from a synchronous context — uses asyncio.run(...) internally and must NOT be called from within a running event loop."""
+        """Run one turn synchronously. Must be called from a synchronous context — uses
+        asyncio.run(...) and must NOT be called from within a running event loop.
+        Opens a fresh client per turn; cross-turn conversation persistence is Plan 2."""
         return asyncio.run(self._run_async(system_prompt, user_text))
 
     async def _run_async(self, system_prompt: str, user_text: str) -> TurnResult:
@@ -102,5 +105,8 @@ class SdkAgentRuntime:
             model=self._model,
             max_turns=self._max_turns,
         )
-        messages = [m async for m in self._query_fn(prompt=user_text, options=options)]
+        client = self._client_factory(options)
+        async with client:
+            await client.query(user_text)
+            messages = [m async for m in client.receive_response()]
         return reduce_messages(messages)
