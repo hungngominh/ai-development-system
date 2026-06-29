@@ -1591,7 +1591,7 @@ class Handler(BaseHTTPRequestHandler):
                         redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}"
                 else:
                     redirect = "/"
-                self._send(_page("saved", "<div class='card'><h2>Đã lưu &amp; duyệt ✓</h2></div>",
+                self._send(_page("saved", "<div class='card'><h2>Đã lưu ✓ — xem &amp; duyệt plan</h2></div>",
                                  head_extra=f"<meta http-equiv='refresh' content='1;url={html.escape(redirect)}'>"))
             elif path == "/task-plan":
                 length = int(self.headers.get("Content-Length", "0"))
