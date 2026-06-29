@@ -62,3 +62,46 @@ class FakeAgentRuntime:
     def run_turn(self, system_prompt: str, user_text: str) -> TurnResult:
         self.calls.append((system_prompt, user_text))
         return self.scripted
+
+
+import asyncio
+
+from claude_agent_sdk import ClaudeAgentOptions, query as _sdk_query
+
+from ai_dev_system.harness.tools.registry import ToolRegistry, SERVER_NAME
+
+
+class SdkAgentRuntime:
+    """Owns the loop via the Claude Agent SDK. The SDK orchestrates the per-turn
+    tool-use loop and invokes our in-process tools; we own the tools, the
+    permission gate, the system prompt, and the result reduction."""
+
+    def __init__(
+        self,
+        *,
+        registry: ToolRegistry,
+        permission_callback,
+        model: str | None = None,
+        max_turns: int = 20,
+        query_fn=None,
+    ) -> None:
+        self._registry = registry
+        self._permission_callback = permission_callback
+        self._model = model
+        self._max_turns = max_turns
+        self._query_fn = query_fn or _sdk_query
+
+    def run_turn(self, system_prompt: str, user_text: str) -> TurnResult:
+        return asyncio.run(self._run_async(system_prompt, user_text))
+
+    async def _run_async(self, system_prompt: str, user_text: str) -> TurnResult:
+        options = ClaudeAgentOptions(
+            system_prompt=system_prompt,
+            mcp_servers={SERVER_NAME: self._registry.build_server()},
+            allowed_tools=self._registry.allowed_tool_names(),
+            can_use_tool=self._permission_callback,
+            model=self._model,
+            max_turns=self._max_turns,
+        )
+        messages = [m async for m in self._query_fn(prompt=user_text, options=options)]
+        return reduce_messages(messages)
