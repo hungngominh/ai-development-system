@@ -20,9 +20,10 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
     if not registry.enabled():
         return None
     factory = build_assistant_factory(model=None)
+    gw_conn = get_connection(cfg.database_url)
     return GatewayDaemon(
         factory=factory, platforms=registry.adapters(), home=assistant_home(),
-        session_store=SessionStore(lambda: get_connection(cfg.database_url)),
+        session_store=SessionStore(lambda: gw_conn),
         poll_timeout=poll_timeout,
     )
 

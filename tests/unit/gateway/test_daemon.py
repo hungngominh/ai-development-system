@@ -67,3 +67,35 @@ def test_stop_event_ends_loop(tmp_path):
     p = _FakePlatform([[Inbound("telegram", 111, "hi")]])
     _daemon(p, tmp_path, stop_event=ev).run(max_iterations=None)
     assert p.sent == []   # stopped before polling
+
+
+def test_idle_iteration_sleeps_with_backoff(tmp_path):
+    """When a poll returns no messages (idle), daemon must sleep with idle_backoff (> 0).
+    Two iterations: first is idle (sleep fires), second hits max_iterations break."""
+    sleep_calls = []
+    p = _FakePlatform([[], []])  # two iterations, both zero messages
+    d = GatewayDaemon(
+        factory=_FakeFactory(), platforms=[p], home=tmp_path,
+        session_store=SimpleNamespace(mark_recent_resume_pending=lambda **k: 0),
+        sleep_fn=lambda s: sleep_calls.append(s),
+        idle_backoff=2.5,
+    )
+    d.run(max_iterations=2)
+    # sleep fires after iteration 1 (idle), not after iteration 2 (break before sleep)
+    assert sleep_calls == [2.5], f"expected sleep(2.5) on idle iteration, got {sleep_calls}"
+
+
+def test_busy_iteration_sleeps_zero(tmp_path):
+    """When a poll returns at least one message, daemon must sleep with 0 (immediate).
+    Two iterations: first is busy (sleep fires with 0), second hits max_iterations break."""
+    sleep_calls = []
+    p = _FakePlatform([[Inbound("telegram", 111, "hi")], []])  # iteration 1 has message
+    d = GatewayDaemon(
+        factory=_FakeFactory(), platforms=[p], home=tmp_path,
+        session_store=SimpleNamespace(mark_recent_resume_pending=lambda **k: 0),
+        sleep_fn=lambda s: sleep_calls.append(s),
+        idle_backoff=2.5,
+    )
+    d.run(max_iterations=2)
+    # sleep fires after iteration 1 (busy=0), not after iteration 2 (break before sleep)
+    assert sleep_calls == [0], f"expected sleep(0) on busy iteration, got {sleep_calls}"

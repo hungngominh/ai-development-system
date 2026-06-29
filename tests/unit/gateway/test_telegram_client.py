@@ -56,3 +56,23 @@ def test_call_returns_none_on_urlerror():
         raise urllib.error.URLError("connection refused")
 
     assert tc._call("TOK", "getUpdates", {}, transport=_t) is None
+
+
+def test_call_returns_none_on_non_json_body():
+    """A non-JSON (e.g. HTML 5xx) body must be treated as transient — return None, no exception."""
+    def _t(url, data, timeout):
+        return b"<html>502 Bad Gateway</html>"
+
+    result = tc._call("TOK", "getUpdates", {}, transport=_t)
+    assert result is None
+
+
+def test_call_still_raises_telegram_error_on_ok_false_json():
+    """A valid ok:false JSON body must still raise TelegramError (guard must not over-swallow)."""
+    import pytest
+
+    def _t(url, data, timeout):
+        return json.dumps({"ok": False, "description": "Bad Token"}).encode()
+
+    with pytest.raises(tc.TelegramError, match="Bad Token"):
+        tc._call("TOK", "getUpdates", {}, transport=_t)

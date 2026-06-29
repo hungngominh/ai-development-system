@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 class GatewayDaemon:
     def __init__(self, *, factory, platforms, home, poll_timeout: int = 30,
-                 sleep_fn=None, stop_event=None, session_store=None) -> None:
+                 sleep_fn=None, stop_event=None, session_store=None,
+                 idle_backoff: float = 1.0) -> None:
         self._factory = factory
         self._platforms = list(platforms)
         self._home = home
@@ -23,6 +24,7 @@ class GatewayDaemon:
         self._stop = stop_event or threading.Event()
         self._cache: dict[tuple[str, int], object] = {}
         self._session_store = session_store
+        self._idle_backoff = idle_backoff
 
     def _handle(self, platform, inbound) -> None:
         key = (inbound.surface, inbound.chat_id)
@@ -41,12 +43,15 @@ class GatewayDaemon:
         try:
             i = 0
             while not self._stop.is_set():
+                got_any = False
                 for platform in self._platforms:
                     try:
                         batch = platform.poll(self._poll_timeout)
                     except Exception:  # noqa: BLE001 - a poll error must not kill the daemon
                         logger.exception("gateway: poll failed for %s", getattr(platform, "name", "?"))
                         batch = []
+                    if batch:
+                        got_any = True
                     for inbound in batch:
                         try:
                             self._handle(platform, inbound)
@@ -56,7 +61,9 @@ class GatewayDaemon:
                 if max_iterations is not None and i >= max_iterations:
                     break
                 if not self._stop.is_set():
-                    self._sleep(0)  # long-poll already blocks; no extra wait by default
+                    # long-poll already blocks when idle; back off only when nothing arrived
+                    # so a fast-failing upstream (5xx/timeout) can't spin the loop hot.
+                    self._sleep(0 if got_any else self._idle_backoff)
             graceful = True            # normal loop exit (break / stop_event)
         except KeyboardInterrupt:
             self._stop.set()

@@ -37,7 +37,10 @@ def _call(token, method, params, *, transport=None, poll_timeout: float = 0) -> 
         raw = exc.read()
     except urllib.error.URLError:  # DNS failure, connection refused, SSL error — treat as transient
         return None
-    payload = json.loads(raw.decode("utf-8"))
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except ValueError:  # non-JSON body (e.g. HTML 5xx from a proxy/CDN) — treat as transient
+        return None
     if not payload.get("ok"):
         raise TelegramError(payload.get("description", "telegram error"))
     return payload.get("result")

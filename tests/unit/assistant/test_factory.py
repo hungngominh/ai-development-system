@@ -36,3 +36,39 @@ def test_build_assistant_factory_returns_factory(tmp_path, monkeypatch):
     assert isinstance(f, AssistantFactory)
     asst = f.for_chat("local", "cli")
     assert asst._runtime._registry.allowed_tool_names() == ["mcp__ai_dev__now", "mcp__ai_dev__memory"]
+
+
+def test_build_assistant_factory_shares_one_connection(tmp_path, monkeypatch):
+    """build_assistant_factory must open exactly one shared DB connection.
+    Store ops (session load_or_create, budget record) must NOT open additional connections.
+    Patch get_connection at the source module so every call via local import is counted."""
+    import ai_dev_system.db.connection as _connmod
+    from ai_dev_system.db.connection import get_connection as _real_get_connection
+    monkeypatch.setenv("AI_DEV_ASSISTANT_HOME", str(tmp_path / "home"))
+    db_path = tmp_path / "ctl.db"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path}")
+
+    opened = []
+
+    def counting_get_connection(url):
+        conn = _real_get_connection(url)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(_connmod, "get_connection", counting_get_connection)
+
+    from ai_dev_system.assistant.factory import build_assistant_factory
+    f = build_assistant_factory(model=None)
+    connections_after_build = len(opened)
+
+    # calling for_chat exercises session_store.load_or_create + budget — must not open more
+    f.for_chat("telegram", "100")
+    f.for_chat("telegram", "200")
+
+    assert len(opened) == connections_after_build, (
+        f"store ops opened {len(opened) - connections_after_build} extra connections "
+        f"(total opened={len(opened)}, after_build={connections_after_build})"
+    )
+    assert connections_after_build == 1, (
+        f"build_assistant_factory opened {connections_after_build} connections, expected 1"
+    )

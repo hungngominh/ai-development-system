@@ -48,14 +48,11 @@ def build_assistant_factory(model: str | None) -> AssistantFactory:
     from ai_dev_system.assistant.budget import BudgetTracker
 
     cfg = Config.from_env()
-    _init = get_connection(cfg.database_url)
-    try:
-        apply_schema(_init)
-    finally:
-        _init.close()
+    shared_conn = get_connection(cfg.database_url)
+    apply_schema(shared_conn)
 
     def conn_factory():
-        return get_connection(cfg.database_url)
+        return shared_conn
 
     store = MemoryStore(assistant_home())
     registry = ToolRegistry()
