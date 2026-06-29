@@ -1151,8 +1151,8 @@ def _spec_task(idea: str, mode: str) -> bytes:
             from ai_dev_system.debate.llm import StubDebateLLMClient
             llm = StubDebateLLMClient()
         else:
-            from ai_dev_system.llm_factory import make_real_llm_client
-            llm = make_real_llm_client()
+            from ai_dev_system.llm_factory import make_llm_client
+            llm = make_llm_client("spec")
     except RuntimeError as exc:
         return _page("task spec", f"<div class='card muted'>LLM chưa cấu hình: "
                      f"{html.escape(str(exc))}</div>")

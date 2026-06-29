@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS as _SPEC_KEYS
 from ai_dev_system.task_graph.single_task import spec_single_task, _TITLE_MAX
-from ai_dev_system.llm_factory import make_real_llm_client
+from ai_dev_system.llm_factory import make_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
         else:
             _spec_log(log_path, "Chế độ: text spec via LLM")
             _spec_log(log_path, "Đang khởi tạo LLM client…")
-            llm = make_real_llm_client()
+            llm = make_llm_client("spec")
             _spec_log(log_path, f"Đang gọi LLM sinh {len(_SPEC_KEYS)} spec facets…")
 
         result = spec_single_task(idea, llm, repo_path=repo,

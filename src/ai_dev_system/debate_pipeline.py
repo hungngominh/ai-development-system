@@ -175,6 +175,7 @@ def run_debate_pipeline(
     brief_v2: dict | None = None,
     flags: FeatureFlags | None = None,
     progress=None,
+    llm_for=None,
 ) -> DebatePipelineResult:
     """Phase A: normalize → question gen → debate → DEBATE_REPORT artifact → PAUSED_AT_GATE_1.
 
@@ -193,6 +194,11 @@ def run_debate_pipeline(
     task_run_repo = TaskRunRepo(conn)
     event_repo = EventRepo(conn)
 
+    # Per-step client resolver: questions/profile on a light tier, debate on the
+    # high tier. When `llm_for` is omitted every step uses the single client
+    # (preserves the stub/test path).
+    pick = (lambda step: llm_for(step)) if llm_for else (lambda step: llm_client)
+
     # Snapshot flags once at entry.
     active_flags = flags or FeatureFlags.from_env()
 
@@ -207,7 +213,7 @@ def run_debate_pipeline(
     # Infer the vertical lens once; use the pre-flags brief on the legacy path
     # so internal _-prefixed keys are never serialized into the profile prompt.
     # brief_v2 (intake wizard path) takes precedence as before.
-    profile = infer_project_profile(brief_v2 or brief, llm_client)
+    profile = infer_project_profile(brief_v2 or brief, pick("questions"))
 
     # Stamp the flag snapshot and profile onto the brief so they travel with
     # the DebateReport artifact (eval/audit can read which path ran).
@@ -223,7 +229,7 @@ def run_debate_pipeline(
     # held for the whole multi-minute debate, locking the DB for every other writer.
     conn.commit()
     questions, decisions, digest = _question_path(
-        active_flags, brief, brief_v2, llm_client, profile=profile,
+        active_flags, brief, brief_v2, pick("questions"), profile=profile,
     )
 
     # Step 3: Run debate (flag-dispatched)
@@ -234,7 +240,7 @@ def run_debate_pipeline(
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run["task_run_id"])
     conn.commit()  # release the write lock during the (slow, DB-free) debate
     debate_report = _debate_path(
-        active_flags, questions, llm_client,
+        active_flags, questions, pick("debate"),
         run_id=run_id, brief=brief, decisions=decisions, digest=digest,
         progress=progress,
     )
@@ -280,12 +286,18 @@ def run_phase_b_pipeline(
     gate2_io,
     llm_client,
     agent=None,
+    llm_for=None,
 ) -> PhaseBResult:
     """Phase B: approved_answers → finalize_spec → task_graph → Gate 2 → beads_sync → execution.
 
     Accepts conn_factory (not a live conn) because Phase B is invoked in a new process
     after the Gate 1 pause. In tests, pass `lambda: db_conn`.
+
+    `llm_for(step)` (optional) resolves a per-step client so spec/task-graph and
+    the verification judge can run on different model tiers. When omitted, every
+    step uses the single `llm_client` (preserves the stub/test path unchanged).
     """
+    pick = (lambda step: llm_for(step)) if llm_for else (lambda step: llm_client)
     conn = conn_factory()
     task_run_repo = TaskRunRepo(conn)
     event_repo = EventRepo(conn)
@@ -327,7 +339,7 @@ def run_phase_b_pipeline(
         config.storage_root, run_id, task_run["task_id"], task_run["attempt_number"]
     )
     bundle = finalize_spec(
-        approved_answers, run_id, llm_client,
+        approved_answers, run_id, pick("spec"),
         output_dir=Path(temp_path), brief_v2=brief_v2,
     )
 
@@ -351,9 +363,9 @@ def run_phase_b_pipeline(
     task_run_tg["input_artifact_ids"] = [spec_artifact_id]
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run_tg["task_run_id"])
 
-    envelope = generate_task_graph(spec_content, approved_answers, spec_artifact_id, llm_client)
+    envelope = generate_task_graph(spec_content, approved_answers, spec_artifact_id, pick("task_graph"))
     profile_dict = _load_project_profile_dict(conn, current_artifacts)
-    generate_task_facets_for_graph(envelope["tasks"], spec_content, profile_dict, llm_client)
+    generate_task_facets_for_graph(envelope["tasks"], spec_content, profile_dict, pick("spec"))
     temp_tg = _write_json_to_temp_debate(config, task_run_tg, envelope)
     promote_output(conn, config, task_run_tg,
                    PromotedOutput("task_graph", "TASK_GRAPH_GENERATED", "Generated task graph"),
@@ -418,7 +430,7 @@ def run_phase_b_pipeline(
                     (run_id,),
                 )
                 from ai_dev_system.verification.pipeline import run_phase_v_pipeline
-                run_phase_v_pipeline(run_id, spec_artifact_id, config, conn, llm_client)
+                run_phase_v_pipeline(run_id, spec_artifact_id, config, conn, pick("judge"))
 
     # Persist Phase B's own writes (spec/graph promotion, Phase V status) so they
     # survive when the caller's connection is closed — worker-thread writes were

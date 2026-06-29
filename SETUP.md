@@ -8,7 +8,7 @@
 # 1. Cài đặt (cần Python 3.12 hoặc 3.13 — Python 3.14 chưa hỗ trợ)
 pip install -e ".[dev]"
 
-# 2. Setup tương tác — nhập DB, API key, tự chạy migration và cài skills
+# 2. Setup tương tác — chọn DB (SQLite mặc định) + LLM provider, tự chạy migration và cài skills
 ai-dev setup
 ```
 
@@ -96,6 +96,19 @@ ai-dev run --run-id <run_id>
 
 ## LLM Providers
 
+### Claude Max qua `claude` CLI (mặc định, **không cần API key**)
+
+Phase B execution chạy qua `ClaudeMaxAgent` — gọi thẳng `claude` CLI bằng Claude Max
+subscription, **không cần API key**. Chỉ cần đã cài và đăng nhập Claude Code:
+
+```
+LLM_PROVIDER=claude_code     # hoặc LLM_AGENT_BACKEND=claude_max
+```
+
+Đây là đường thực thi đã được verify trên Windows. Không cần `ANTHROPIC_API_KEY`.
+
+### Các API provider (tùy chọn)
+
 | Provider | Env vars cần thiết |
 |---|---|
 | `anthropic` | `ANTHROPIC_API_KEY` |
@@ -115,7 +128,7 @@ Khi setup, chọn "Dung stub LLM? y" — toàn bộ pipeline chạy với LLM gi
 ## Chạy tests
 
 ```bash
-python -m pytest tests/ -q   # 406 passed, 9 xfailed — SQLite in-memory, không cần DB ngoài
+python -m pytest tests/ -q   # 1583 tests, tất cả pass — SQLite in-memory, không cần DB ngoài
 ```
 
 ---

@@ -115,7 +115,8 @@ def test_two_task_run_orders_test_before_impl(temp_repo, tmp_path):
     # RepoBranchAgent._build_execution_prompt → "you are implementing a coding task …"
     calls = []
 
-    def fake_invoke(claude, cwd, prompt, max_turns, timeout_s, live_log_path=None):
+    def fake_invoke(claude, cwd, prompt, max_turns, timeout_s, live_log_path=None,
+                    model=None, effort=None):
         low = prompt.lower()
         if "reviewer of tests" in low:
             # TestReviewAgent: tests are RED, verdict pass

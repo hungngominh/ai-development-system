@@ -7,7 +7,7 @@ from ai_dev_system.db.connection import get_connection
 def test_run_worker_writes_done_file_no_repo(tmp_path, monkeypatch, file_db_url):
     # Force the text path with a stub LLM so no real claude/LLM is called.
     from ai_dev_system.debate.llm import StubDebateLLMClient
-    monkeypatch.setattr(w, "make_real_llm_client", lambda: StubDebateLLMClient())
+    monkeypatch.setattr(w, "make_llm_client", lambda step="default": StubDebateLLMClient())
     path = w.run_worker("abc123", "add CSV import", None,
                         storage_root=str(tmp_path), database_url=file_db_url)
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -26,10 +26,10 @@ def test_run_worker_writes_error_on_failure(tmp_path, monkeypatch, file_db_url):
 
 
 def test_run_worker_writes_error_when_make_client_fails(tmp_path, monkeypatch, file_db_url):
-    def _boom():
+    def _boom(step="default"):
         raise RuntimeError("no LLM config")
-    monkeypatch.setattr(w, "make_real_llm_client", _boom)
-    # no repo → worker calls make_real_llm_client(), which raises
+    monkeypatch.setattr(w, "make_llm_client", _boom)
+    # no repo → worker calls make_llm_client("spec"), which raises
     path = w.run_worker("idX", "some idea", None,
                         storage_root=str(tmp_path), database_url=file_db_url)
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -40,7 +40,7 @@ def test_run_worker_writes_error_when_make_client_fails(tmp_path, monkeypatch, f
 def test_run_worker_upserts_completed_run_row(tmp_path, monkeypatch, file_db_url):
     """A successful spec writes a terminal COMPLETED run row marked as a task_spec."""
     from ai_dev_system.debate.llm import StubDebateLLMClient
-    monkeypatch.setattr(w, "make_real_llm_client", lambda: StubDebateLLMClient())
+    monkeypatch.setattr(w, "make_llm_client", lambda step="default": StubDebateLLMClient())
     w.run_worker("spec0001", "add CSV import", None,
                  storage_root=str(tmp_path), database_url=file_db_url)
     conn = get_connection(file_db_url)
@@ -74,7 +74,7 @@ def test_run_worker_upserts_failed_run_row(tmp_path, monkeypatch, file_db_url):
 def test_run_worker_db_failure_still_writes_file(tmp_path, monkeypatch):
     """DB recording is best-effort: a bad database_url must not lose the JSON artifact."""
     from ai_dev_system.debate.llm import StubDebateLLMClient
-    monkeypatch.setattr(w, "make_real_llm_client", lambda: StubDebateLLMClient())
+    monkeypatch.setattr(w, "make_llm_client", lambda step="default": StubDebateLLMClient())
     path = w.run_worker("spec0003", "idea", None,
                         storage_root=str(tmp_path), database_url="not-a-sqlite-url")
     data = json.loads(path.read_text(encoding="utf-8"))

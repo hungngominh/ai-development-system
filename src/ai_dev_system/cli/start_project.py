@@ -139,6 +139,13 @@ def main(argv=None) -> int:
         print(f"LLM configuration error: {exc}", file=sys.stderr)
         return 1
 
+    # Per-step resolver (real mode only): questions on a light tier, debate on
+    # the high tier. Stub mode keeps the single deterministic client.
+    llm_for = None
+    if os.environ.get("AI_DEV_STUB_LLM") != "1":
+        from ai_dev_system.llm_factory import make_llm_client
+        llm_for = make_llm_client
+
     # Progress
     print("[Phase 1a/1b] Running debate pipeline (normalize -> questions -> debate)...", file=sys.stderr)
     print("             This may take 2-5 minutes.", file=sys.stderr)
@@ -151,6 +158,7 @@ def main(argv=None) -> int:
             project_id=project_id,
             llm_client=llm_client,
             progress=_StderrProgress(),
+            llm_for=llm_for,
         )
         # get_connection() opens with autocommit OFF, and the pipeline never
         # commits — without this the run + artifact rows are rolled back on

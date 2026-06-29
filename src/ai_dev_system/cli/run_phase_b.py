@@ -96,7 +96,9 @@ def _make_agent():
     backend = os.environ.get("LLM_AGENT_BACKEND", "").strip().lower()
     if backend == "claude_max" or (not backend and os.environ.get("LLM_PROVIDER") == "claude_code"):
         from ai_dev_system.agents.claude_max_agent import make_claude_max_agent
-        return make_claude_max_agent(model=os.environ.get("LLM_MODEL", "sonnet"))
+        from ai_dev_system.llm_factory import resolve_step_model_effort
+        model, effort = resolve_step_model_effort("executor")
+        return make_claude_max_agent(model=model, effort=effort)
 
     from ai_dev_system.agents.crewai_agent import make_crewai_agent
     return make_crewai_agent()
@@ -120,6 +122,13 @@ def main(argv=None) -> int:
     except RuntimeError as exc:
         print(f"LLM configuration error: {exc}", file=sys.stderr)
         return 1
+
+    # Per-step client resolver (real mode only): lets spec/task-graph/judge run
+    # on different model tiers. Stub mode keeps the single deterministic client.
+    llm_for = None
+    if os.environ.get("AI_DEV_STUB_LLM") != "1":
+        from ai_dev_system.llm_factory import make_llm_client
+        llm_for = make_llm_client
 
     # Create agent
     try:
@@ -147,6 +156,7 @@ def main(argv=None) -> int:
             gate2_io=gate2_io,
             llm_client=llm_client,
             agent=agent,
+            llm_for=llm_for,
         )
     except Exception as exc:
         print(f"Pipeline error: {exc}", file=sys.stderr)

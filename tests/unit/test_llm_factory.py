@@ -14,6 +14,9 @@ from ai_dev_system.llm_factory import (
     LLMConfig,
     RealLLMClient,
     make_real_llm_client,
+    make_llm_client,
+    resolve_step_model_effort,
+    STEP_PROFILES,
 )
 
 
@@ -375,6 +378,100 @@ class TestMakeRealLLMClient:
         client = make_real_llm_client()
 
         assert isinstance(client, ClaudeCodeLLMClient)
+        # Default step must stay effort-free (historical behaviour).
+        assert client._effort is None
+        assert client._model == "sonnet"
+
+
+# ---------------------------------------------------------------------------
+# Per-step effort on the CLI client
+# ---------------------------------------------------------------------------
+
+_EXTRA_STEP_ENV = (
+    "AI_DEV_MODEL_DEBATE", "AI_DEV_EFFORT_DEBATE",
+    "AI_DEV_MODEL_INTAKE", "AI_DEV_EFFORT_INTAKE",
+)
+
+
+def _clear_step_env(monkeypatch):
+    for var in _EXTRA_STEP_ENV:
+        monkeypatch.delenv(var, raising=False)
+
+
+class TestClaudeCodeEffortCmd:
+    def test_effort_flag_added_when_set(self):
+        client = ClaudeCodeLLMClient(model="opus", effort="high")
+        with patch.object(ClaudeCodeLLMClient, "_resolve_claude_cmd", return_value="claude"):
+            cmd = client._build_cmd("SYS", "USER")
+        assert "--effort" in cmd and cmd[cmd.index("--effort") + 1] == "high"
+        assert cmd[cmd.index("--model") + 1] == "opus"
+        # prompt + system still passed
+        assert "--system-prompt" in cmd and cmd[-1] == "USER"
+
+    def test_no_effort_flag_when_unset(self):
+        client = ClaudeCodeLLMClient(model="sonnet")
+        with patch.object(ClaudeCodeLLMClient, "_resolve_claude_cmd", return_value="claude"):
+            cmd = client._build_cmd("SYS", "USER")
+        assert "--effort" not in cmd
+
+
+class TestResolveStepModelEffort:
+    def test_profile_values(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        _clear_step_env(monkeypatch)
+        assert resolve_step_model_effort("debate") == STEP_PROFILES["debate"]
+        assert resolve_step_model_effort("executor") == ("opus", "xhigh")
+        # Haiku step carries no effort (CLI rejects --effort on Haiku).
+        assert resolve_step_model_effort("intake") == ("haiku", None)
+
+    def test_env_override_wins(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        _clear_step_env(monkeypatch)
+        monkeypatch.setenv("AI_DEV_MODEL_DEBATE", "fable")
+        monkeypatch.setenv("AI_DEV_EFFORT_DEBATE", "max")
+        assert resolve_step_model_effort("debate") == ("fable", "max")
+
+    def test_env_effort_none_disables(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        _clear_step_env(monkeypatch)
+        monkeypatch.setenv("AI_DEV_EFFORT_DEBATE", "none")
+        model, effort = resolve_step_model_effort("debate")
+        assert model == "opus" and effort is None
+
+    def test_unknown_step_falls_back_to_env_model(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        _clear_step_env(monkeypatch)
+        monkeypatch.setenv("LLM_MODEL", "sonnet")
+        assert resolve_step_model_effort("default") == ("sonnet", None)
+
+
+class TestMakeLLMClientPerStep:
+    def test_claude_code_step_applies_profile(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        _clear_step_env(monkeypatch)
+        monkeypatch.setenv("LLM_PROVIDER", "claude_code")
+        client = make_llm_client("debate")
+        assert isinstance(client, ClaudeCodeLLMClient)
+        assert (client._model, client._effort) == STEP_PROFILES["debate"]
+
+    def test_claude_code_default_step_no_effort(self, monkeypatch):
+        _clear_llm_env(monkeypatch)
+        _clear_step_env(monkeypatch)
+        monkeypatch.setenv("LLM_PROVIDER", "claude_code")
+        monkeypatch.setenv("LLM_MODEL", "sonnet")
+        client = make_llm_client("default")
+        assert isinstance(client, ClaudeCodeLLMClient)
+        assert client._effort is None
+
+    def test_api_provider_ignores_step(self, monkeypatch, mocker):
+        _clear_llm_env(monkeypatch)
+        _clear_step_env(monkeypatch)
+        monkeypatch.setenv("LLM_PROVIDER", "anthropic")
+        monkeypatch.setenv("LLM_MODEL", "claude-opus-4-8")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        mocker.patch("ai_dev_system.llm_factory.anthropic.Anthropic")
+        client = make_llm_client("debate")
+        assert isinstance(client, RealLLMClient)
 
 
 # ---------------------------------------------------------------------------

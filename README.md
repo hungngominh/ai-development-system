@@ -44,21 +44,25 @@ COMPLETED
 
 ```
 src/ai_dev_system/
-├── normalize.py          # Normalize ý tưởng thô → initial brief
+├── intake/               # Intake wizard — front door: normalize brief + sinh câu hỏi
 ├── debate/               # AI debate engine (agents, rounds, moderator)
-├── gate/                 # Gate 1, 2, 3 — approval logic + bridges
-├── spec_bundle.py        # Build 5-artifact spec bundle
-├── finalize_spec.py      # Finalize spec sau Gate 1
-├── task_graph/           # Sinh + validate task graph
+├── gate/                 # Gate 1 review — approval logic + bridges
+├── spec/                 # Build 5-artifact spec bundle (planner + grounding + repair + tracer)
+├── task_graph/           # Sinh + validate task graph (+ single-task executor)
 ├── rules/                # Rule Registry — inject rules vào agent
-├── engine/               # Execution engine (worker loop, retry, escalation)
-├── agents/               # CrewAI agent wrapper
+├── engine/               # Execution runner (worker loop, retry, escalation) — ⚠️ multi-task partial
+├── agents/               # LLM provider wrapper — ClaudeMaxAgent qua `claude` CLI
 ├── verification/         # LLM judge acceptance criteria
+├── eval/                 # Eval harness — golden dataset + 18 metrics
 ├── beads/                # Beads audit trail sync
 ├── storage/              # Artifact storage trên disk
-├── db/                   # PostgreSQL repos
+├── migration/            # Schema migration helpers
+├── db/                   # SQLite repos (stdlib sqlite3, không cần driver)
 └── cli/                  # CLI entry points
 ```
+
+> Các module top-level đi kèm: `normalize.py`, `spec_bundle.py`, `finalize_spec.py`,
+> `pipeline.py`, `webui.py`, `feature_flags.py`, `config.py`.
 
 **Skills (Claude Code slash commands):**
 
@@ -70,9 +74,11 @@ src/ai_dev_system/
 
 ## Trạng thái
 
-- **262 tests** (204 unit + 60 integration) — tất cả pass
-- Đầy đủ pipeline từ normalize → verification
-- PostgreSQL-backed với full audit trail
+- **1592 tests** — tất cả pass (SQLite in-memory, không cần DB ngoài)
+- Đầy đủ pipeline từ **intake wizard** → debate → spec → task graph → verification
+- Persistence: **SQLite** (stdlib `sqlite3`, không cần driver) với full audit trail
+- Execution: **single-task** đã hoạt động (TDD-first: test phase → impl phase); ⚠️ **multi-task** graph execution (required_inputs/promoted_outputs) chưa hoàn chỉnh
+- LLM provider: `ClaudeMaxAgent` qua `claude` CLI — không cần API key
 
 ---
 

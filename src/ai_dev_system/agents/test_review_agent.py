@@ -129,10 +129,12 @@ class TestReviewAgent:
             return TestReviewVerdict()  # inconclusive — no reviewer available
         if self.live_log_path:
             _append_log(self.live_log_path, "Test reviewer bắt đầu (red check + tests↔AC)…")
+        from ai_dev_system.llm_factory import resolve_step_model_effort
+        model, effort = resolve_step_model_effort("judge")
         run = _invoke_claude(
             claude, self.repo_path,
             _build_test_review_prompt(self.base_branch, objective, test_spec),
-            _test_review_max_turns(), timeout_s, self.live_log_path,
+            _test_review_max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
         )
         if run.timed_out or run.returncode != 0:
             return TestReviewVerdict(raw=(run.result_event or {}).get("result") or "")

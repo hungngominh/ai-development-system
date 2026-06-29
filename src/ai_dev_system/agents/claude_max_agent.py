@@ -44,15 +44,19 @@ def _is_within(base: str, dest: str) -> bool:
 
 
 class ClaudeMaxAgent:
-    def __init__(self, llm=None, model: str = "sonnet", timeout_s: float = 3600.0) -> None:
+    def __init__(self, llm=None, model: str = "sonnet", timeout_s: float = 3600.0,
+                 effort: str | None = None) -> None:
         self._model = model
         self._timeout_s = timeout_s
+        self._effort = effort
         self._llm = llm  # injected for tests; built lazily otherwise
 
     def _client(self):
         if self._llm is None:
             from ai_dev_system.llm_factory import ClaudeCodeLLMClient
-            self._llm = ClaudeCodeLLMClient(model=self._model, timeout=int(self._timeout_s))
+            self._llm = ClaudeCodeLLMClient(
+                model=self._model, timeout=int(self._timeout_s), effort=self._effort
+            )
         return self._llm
 
     # --- Agent protocol ---
@@ -212,6 +216,7 @@ class ClaudeMaxAgent:
                 f.write(content)
 
 
-def make_claude_max_agent(model: str = "sonnet", timeout_s: float = 3600.0) -> ClaudeMaxAgent:
+def make_claude_max_agent(model: str = "sonnet", timeout_s: float = 3600.0,
+                          effort: str | None = None) -> ClaudeMaxAgent:
     """Factory: a Max-backed execution agent (no API key needed)."""
-    return ClaudeMaxAgent(model=model, timeout_s=timeout_s)
+    return ClaudeMaxAgent(model=model, timeout_s=timeout_s, effort=effort)

@@ -121,9 +121,10 @@ class ClaudeCodeLLMClient:
     instead of a direct API key. No ANTHROPIC_API_KEY required.
     """
 
-    def __init__(self, model: str = "sonnet", timeout: int = 120) -> None:
+    def __init__(self, model: str = "sonnet", timeout: int = 120, effort: str | None = None) -> None:
         self._model = model
         self._timeout = timeout
+        self._effort = effort
 
     @staticmethod
     def _resolve_claude_cmd() -> str:
@@ -203,9 +204,23 @@ class ClaudeCodeLLMClient:
             return body[: body.rfind("```")].strip()
         return s
 
-    def _call(self, system: str, user: str) -> str:
+    def _build_cmd(self, system: str, user: str) -> list[str]:
+        """Assemble the `claude` CLI argv for one call.
+
+        Effort (``--effort low|medium|high|xhigh|max``) is injected only when
+        configured. Thinking is adaptive on Opus 4.7+/4.8 — it is driven by the
+        effort level, so there is no separate thinking flag here. Haiku does not
+        support ``--effort``; profiles leave effort unset for Haiku steps.
+        """
         claude = self._resolve_claude_cmd()
-        cmd = [claude, "-p", "--model", self._model, "--system-prompt", system, user]
+        cmd = [claude, "-p", "--model", self._model]
+        if self._effort:
+            cmd += ["--effort", self._effort]
+        cmd += ["--system-prompt", system, user]
+        return cmd
+
+    def _call(self, system: str, user: str) -> str:
+        cmd = self._build_cmd(system, user)
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -347,15 +362,83 @@ class RealLLMClient:
 
 
 # ---------------------------------------------------------------------------
+# Per-step model + effort profiles (claude_code / CLI path only)
+# ---------------------------------------------------------------------------
+#
+# Each pipeline step has different intelligence needs. On the claude_code (Max
+# CLI) path token cost is flat, so the real constraints are latency and the
+# 5-hour rate-limit window — cheap steps run a light model to conserve quota for
+# the steps that decide quality (debate, executor, judge).
+#
+# (model_alias, effort). effort=None means "don't pass --effort" (also required
+# for Haiku, which doesn't accept the flag). Override any cell at runtime with
+# env vars AI_DEV_MODEL_<STEP> / AI_DEV_EFFORT_<STEP> (STEP upper-cased).
+#
+# Only the claude_code provider honors these — API providers need full model IDs
+# (e.g. claude-opus-4-8), not aliases, so they keep using env LLM_MODEL.
+
+STEP_PROFILES: dict[str, tuple[str, str | None]] = {
+    "intake":     ("haiku",  None),       # classification / short suggestions
+    "gate":       ("sonnet", "medium"),   # gate review
+    "questions":  ("sonnet", "medium"),   # decision inventory / question gen
+    "debate":     ("opus",   "high"),     # ★ argument quality — core value
+    "spec":       ("sonnet", "medium"),   # spec section generation / facets
+    "task_graph": ("sonnet", "low"),      # structured enrichment
+    "executor":   ("opus",   "xhigh"),    # ★ agentic code/test authoring
+    "judge":      ("opus",   "high"),     # ★ verification — avoid false PASS
+}
+
+
+def resolve_step_model_effort(step: str) -> tuple[str, str | None]:
+    """Resolve (model_alias, effort) for a pipeline step on the CLI path.
+
+    Precedence: env override (AI_DEV_MODEL_<STEP> / AI_DEV_EFFORT_<STEP>) →
+    STEP_PROFILES entry → env LLM_MODEL (or "sonnet") with no effort for an
+    unknown/"default" step. An env effort of "" / "none" disables effort.
+    """
+    key = step.upper()
+    profile_model, profile_effort = STEP_PROFILES.get(step, (None, None))
+
+    model = os.environ.get(f"AI_DEV_MODEL_{key}") or profile_model \
+        or os.environ.get("LLM_MODEL", "sonnet")
+
+    effort_env = os.environ.get(f"AI_DEV_EFFORT_{key}")
+    if effort_env is not None:
+        effort = effort_env.strip() or None
+        if effort and effort.lower() == "none":
+            effort = None
+    else:
+        effort = profile_effort
+    return model, effort
+
+
+# ---------------------------------------------------------------------------
 # Factory
 # ---------------------------------------------------------------------------
 
-def make_real_llm_client() -> "RealLLMClient | ClaudeCodeLLMClient":
+def make_llm_client(step: str = "default") -> "RealLLMClient | ClaudeCodeLLMClient":
+    """Build the LLM client for a pipeline step.
+
+    On the claude_code (Max CLI) path the step selects model + effort via
+    `resolve_step_model_effort`. On API providers the step is ignored (aliases
+    aren't valid model IDs there) — they use env LLM_MODEL as before.
+
+    `step="default"` reproduces the historical `make_real_llm_client()`
+    behaviour exactly (env model, no effort), so existing callers are unaffected.
+    """
     try:
         config = LLMConfig.from_env()
     except ValueError as exc:
         raise RuntimeError(str(exc)) from exc
     if config.provider == "claude_code":
         timeout = int(os.environ.get("CLAUDE_CODE_LLM_TIMEOUT", "120"))
-        return ClaudeCodeLLMClient(model=config.model, timeout=timeout)
+        if step == "default":
+            return ClaudeCodeLLMClient(model=config.model, timeout=timeout)
+        model, effort = resolve_step_model_effort(step)
+        return ClaudeCodeLLMClient(model=model, timeout=timeout, effort=effort)
     return RealLLMClient(config)
+
+
+def make_real_llm_client() -> "RealLLMClient | ClaudeCodeLLMClient":
+    """Backwards-compatible alias: the default-step client (no per-step tuning)."""
+    return make_llm_client("default")

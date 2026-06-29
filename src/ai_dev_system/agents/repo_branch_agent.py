@@ -168,6 +168,17 @@ class _ClaudeRun:
     timed_out: bool = False
 
 
+def _step_model_effort(step: str) -> tuple[Optional[str], Optional[str]]:
+    """Resolve (model, effort) for an agentic step via the shared profile table.
+
+    Shared by the CLI-agentic agents (implement/fix → "executor",
+    review/test-review → "judge"). Returns the configured alias + effort so the
+    agent runs on the right tier instead of the CLI session default.
+    """
+    from ai_dev_system.llm_factory import resolve_step_model_effort
+    return resolve_step_model_effort(step)
+
+
 def _invoke_claude(
     claude: str,
     cwd: str,
@@ -175,10 +186,19 @@ def _invoke_claude(
     max_turns: int,
     timeout_s: float,
     live_log_path: Optional[Path] = None,
+    model: Optional[str] = None,
+    effort: Optional[str] = None,
 ) -> _ClaudeRun:
     """Run `claude -p` once, streaming NDJSON events to the live log. Shared by
-    RepoBranchAgent (implement/fix) and ReviewAgent (review)."""
+    RepoBranchAgent (implement/fix) and ReviewAgent (review).
+
+    `model`/`effort` (when set) pin the tier per step via `--model`/`--effort`;
+    left unset, the call inherits the CLI session default (legacy behaviour)."""
     cmd = [claude, "-p", prompt, *_EXEC_FLAGS, "--max-turns", str(max_turns)]
+    if model:
+        cmd += ["--model", model]
+    if effort:
+        cmd += ["--effort", effort]
     proc = subprocess.Popen(
         cmd, cwd=cwd,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -310,12 +330,13 @@ class RepoBranchAgent:
             return AgentResult(output_path=output_path, error=f"claude CLI not found: {exc}")
 
         max_turns = _max_turns()
+        model, effort = _step_model_effort("executor")
         if self.live_log_path:
             _append_log(self.live_log_path, f"Claude bắt đầu task {task_id}…")
 
         run1 = _invoke_claude(
             claude, self.repo_path, _build_execution_prompt(context),
-            max_turns, timeout_s, self.live_log_path,
+            max_turns, timeout_s, self.live_log_path, model=model, effort=effort,
         )
 
         if run1.timed_out:
@@ -358,6 +379,7 @@ class RepoBranchAgent:
         from ai_dev_system.agents.test_author_agent import build_test_source
 
         max_rounds = _review_max_rounds()
+        model, effort = _step_model_effort("executor")  # fixes are implementation work
         reviewer = ReviewAgent(self.repo_path, self.base_branch, live_log_path=self.live_log_path)
         objective = str(context.get("objective", ""))
         test_spec = build_test_source(context) if context.get("tdd_tests_authored") else ""
@@ -379,7 +401,7 @@ class RepoBranchAgent:
             fix_run = _invoke_claude(
                 claude, self.repo_path,
                 _build_fix_prompt(objective, verdict.findings, verdict.tests_passed),
-                _max_turns(), timeout_s, self.live_log_path,
+                _max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
             )
             rounds_fixed += 1
             if fix_run.timed_out or fix_run.returncode != 0:

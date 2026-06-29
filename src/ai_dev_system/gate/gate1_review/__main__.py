@@ -96,8 +96,8 @@ def cmd_parse(args) -> None:
     llm = None
     if getattr(args, "llm", False):
         try:
-            from ai_dev_system.llm_factory import make_real_llm_client
-            llm = make_real_llm_client()
+            from ai_dev_system.llm_factory import make_llm_client
+            llm = make_llm_client("gate")
         except Exception:
             pass  # LLM unavailable — regex-only parse
 
@@ -170,8 +170,8 @@ def cmd_finalize(args) -> None:
             if _os.environ.get("AI_DEV_STUB_LLM") == "1":
                 llm_client = StubDebateLLMClient()
             else:
-                from ai_dev_system.llm_factory import make_real_llm_client
-                llm_client = make_real_llm_client()
+                from ai_dev_system.llm_factory import make_llm_client
+                llm_client = make_llm_client("gate")
             g8_result = run_g8_retrigger(args.run_id, brief_edits_raw, brief, conn, llm_client)
         except Exception as exc:
             import logging

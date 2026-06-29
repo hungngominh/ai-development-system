@@ -55,8 +55,8 @@ def intake_start(
     llm = None
     if not no_llm:
         try:
-            from ai_dev_system.llm_factory import make_real_llm_client
-            llm = make_real_llm_client()
+            from ai_dev_system.llm_factory import make_llm_client
+            llm = make_llm_client("intake")
         except Exception as exc:
             out.warn(f"LLM client unavailable ({exc}). `?` suggest disabled.")
 
@@ -115,8 +115,8 @@ def intake_resume(
     llm = None
     if not no_llm:
         try:
-            from ai_dev_system.llm_factory import make_real_llm_client
-            llm = make_real_llm_client()
+            from ai_dev_system.llm_factory import make_llm_client
+            llm = make_llm_client("intake")
         except Exception as exc:
             out.warn(f"LLM client unavailable ({exc}). `?` suggest disabled.")
 

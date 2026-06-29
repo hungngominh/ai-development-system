@@ -134,12 +134,14 @@ class TestAuthorAgent:
         except Exception as exc:
             return AgentResult(output_path=output_path, error=f"claude CLI not found: {exc}")
 
+        from ai_dev_system.llm_factory import resolve_step_model_effort
+        model, effort = resolve_step_model_effort("executor")
         if self.live_log_path:
             _append_log(self.live_log_path, f"Test author bắt đầu task {task_id}…")
 
         run1 = _invoke_claude(
             claude, self.repo_path, _build_test_prompt(context),
-            _max_turns(), timeout_s, self.live_log_path,
+            _max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
         )
         if run1.timed_out:
             self._write_outputs(output_path, run1, review=None)
@@ -190,7 +192,7 @@ class TestAuthorAgent:
             fix_run = _invoke_claude(
                 claude, self.repo_path,
                 _build_test_fix_prompt(objective, verdict.findings, verdict.tests_red),
-                _max_turns(), timeout_s, self.live_log_path,
+                _max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
             )
             rounds_fixed += 1
             if fix_run.timed_out or fix_run.returncode != 0:
