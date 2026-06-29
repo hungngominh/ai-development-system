@@ -21,6 +21,7 @@ def test_get_updates_passes_offset_and_returns_result():
     url, data, _ = calls[0]
     assert url.endswith("/botTOK/getUpdates")
     assert b"offset=5" in data and b"timeout=10" in data
+    assert b"allowed_updates" in data
 
 
 def test_send_message_splits_at_4096():
@@ -46,3 +47,12 @@ def test_call_raises_on_not_ok():
 
     with pytest.raises(tc.TelegramError):
         tc._call("TOK", "getUpdates", {}, transport=_t)
+
+
+def test_call_returns_none_on_urlerror():
+    import urllib.error
+
+    def _t(url, data, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    assert tc._call("TOK", "getUpdates", {}, transport=_t) is None
