@@ -74,3 +74,25 @@ def test_mark_resume_sets_status(conn, tmp_path):
     asst, sid, sessions = _assistant(conn, tmp_path, runtime)
     asst.mark_resume()
     assert sessions.get_status(sid) == "resume_pending"
+
+
+def test_respond_persists_user_turn_even_when_run_turn_raises(conn, tmp_path):
+    class _Boom:
+        def run_turn(self, system_prompt, user_text):
+            raise RuntimeError("sdk down")
+    asst, sid, sessions = _assistant(conn, tmp_path, _Boom())
+    out = asst.respond("keep me")
+    assert "failed" in out.final_text.lower()
+    turns = sessions.recent(sid, 10)
+    # user turn durably persisted; assistant turn is the error placeholder
+    assert turns[0].role == "user" and turns[0].content == "keep me"
+    assert turns[1].role == "assistant" and "failed" in turns[1].content.lower()
+
+
+def test_respond_resets_resume_pending_to_active(conn, tmp_path):
+    runtime = _RecordingRuntime(TurnResult("ok", [], {}, None, None))
+    asst, sid, sessions = _assistant(conn, tmp_path, runtime)
+    asst.mark_resume()
+    assert sessions.get_status(sid) == "resume_pending"
+    asst.respond("hi")
+    assert sessions.get_status(sid) == "active"
