@@ -2,7 +2,11 @@
 open learning loop where RepoBranchAgent/TestAuthorAgent dropped file_rules)."""
 from __future__ import annotations
 
+import json
+from unittest.mock import patch
+
 from ai_dev_system.agents.repo_branch_agent import (
+    RepoBranchAgent,
     _format_lessons,
     _build_execution_prompt,
 )
@@ -28,6 +32,7 @@ def test_format_lessons_renders_block():
     block = _format_lessons(["Run migrations before integration tests"])
     assert "LESSONS FROM PAST FAILURES" in block
     assert "Run migrations before integration tests" in block
+    assert "- Run migrations before integration tests" in block
 
 
 def test_execution_prompt_includes_lessons():
@@ -45,11 +50,6 @@ def test_test_prompt_includes_lessons():
     p = _build_test_prompt(_ctx(), ["Cover the 401 path"])
     assert "LESSONS FROM PAST FAILURES" in p
     assert "Cover the 401 path" in p
-
-
-import json
-from unittest.mock import patch
-from ai_dev_system.agents.repo_branch_agent import RepoBranchAgent
 
 
 def _capture_prompt_run(agent, monkeypatch, file_rules):
