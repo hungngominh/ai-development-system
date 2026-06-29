@@ -176,6 +176,8 @@ class TestAuthorAgent:
         from ai_dev_system.agents.test_review_agent import TestReviewAgent
 
         max_rounds = _test_review_max_rounds()
+        from ai_dev_system.llm_factory import resolve_step_model_effort
+        model, effort = resolve_step_model_effort("executor")  # fixes are test-authoring work
         reviewer = TestReviewAgent(self.repo_path, self.base_branch, live_log_path=self.live_log_path)
         objective = str(context.get("objective", ""))
         test_spec = build_test_source(context)

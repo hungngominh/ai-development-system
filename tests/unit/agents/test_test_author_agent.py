@@ -92,3 +92,42 @@ def test_run_returns_error_when_review_stays_blocking_after_budget(tmp_path, mon
     assert result.success is False
     assert result.error is not None
     assert "flagged" in result.error.lower() or "review" in result.error.lower()
+
+
+def test_review_repair_fix_round_resolves_model_effort(tmp_path, monkeypatch):
+    """Regression: _review_and_repair referenced model/effort that were only
+    defined in run(), so a fix round (max_rounds>=1 + blocking review) raised
+    NameError. The fix round must actually run and forward model/effort to
+    _invoke_claude — never raise."""
+    from ai_dev_system.agents.repo_branch_agent import _ClaudeRun
+    from ai_dev_system.agents.test_review_agent import TestReviewVerdict
+
+    monkeypatch.setenv("EXEC_TEST_REVIEW_MAX_ROUNDS", "1")
+
+    ok_run = _ClaudeRun(
+        returncode=0, stdout='{"type":"result","result":"ok"}', stderr="",
+        result_event={"type": "result", "result": "ok"}, subtype="success",
+    )
+    blocking = TestReviewVerdict(verdict="fail", tests_red=False, findings=[])
+    calls = []
+
+    def _capture(*args, **kwargs):
+        calls.append(kwargs)
+        return ok_run
+
+    with patch("ai_dev_system.agents.test_author_agent._invoke_claude", side_effect=_capture), \
+         patch("ai_dev_system.agents.test_review_agent.TestReviewAgent.review",
+               return_value=blocking), \
+         patch("ai_dev_system.agents.test_author_agent._git") as mock_git, \
+         patch("ai_dev_system.llm_factory.ClaudeCodeLLMClient._resolve_claude_cmd",
+               return_value="claude"):
+        mock_git.return_value = type("P", (), {"stdout": "(no diff)", "returncode": 0})()
+        agent = TestAuthorAgent(str(tmp_path), "ai-dev/task-x", "main")
+        result = agent.run("TASK-TEST", str(tmp_path / "out"), context=_ctx())
+
+    # Initial run + exactly one fix round both reached _invoke_claude (no NameError).
+    assert len(calls) == 2
+    # The fix round forwarded model/effort (the bug: these were undefined here).
+    assert "model" in calls[1] and "effort" in calls[1]
+    # Review stayed blocking after the single repair round → flagged.
+    assert result.success is False
