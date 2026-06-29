@@ -46,21 +46,24 @@ LEARNED_PREFIX = "learned"
 # file_rules are injected verbatim into the agent backstory; keep them short.
 MAX_LESSON_LEN = 280
 
-# Markers of a transient/environment-dependent failure or a negative "tool is
-# broken" claim. These must NOT harden into a permanent rule (they "harden into
-# self-citing refusals"). Borrowed from Hermes' background-review DO-NOT-SAVE
-# guardrail. Conservative on purpose; every drop is logged (no silent loss).
+# Markers of a transient/environment-dependent failure. These must NOT harden
+# into a permanent rule (they "harden into self-citing refusals"). Borrowed from
+# Hermes' background-review DO-NOT-SAVE guardrail — but Hermes applies it as an
+# LLM reviewer that judges INTENT, so it never mis-fires. This keyword filter
+# cannot judge intent, so it is deliberately scoped to UNAMBIGUOUS infra/transient
+# signatures only. Vague negatives ("is broken", "doesn't work", "permission
+# denied", "out of memory") were intentionally removed: they also match
+# legitimate engineering lessons (e.g. "the retry logic is broken when upstream
+# returns 500"). The intent-aware version is the deferred LLM "librarian" follow-up.
+# Do NOT use bare "rate limit"/"timeout" — they collide with "rate limiting" and
+# legitimate timeout lessons (existing test_learning.py rate-limiting test must stay green).
 _DO_NOT_SAVE_MARKERS = (
     "timed out", "connection refused", "connection reset", "econnreset",
-    "rate limit exceeded", "429 ", "flaky", "transient",
+    "rate limit exceeded", "429 ", "flaky", "transient failure",
     " 502 ", " 503 ", " 504 ", "command not found", "no such file",
-    "permission denied", "module not found", "modulenotfounderror",
-    "disk full", "out of memory", "is broken", "doesn't work", "does not work",
+    "module not found", "modulenotfounderror", "disk full",
+    "tool is broken",
 )
-# NOTE (false-positive guard): markers are specific on purpose. Do NOT use bare
-# "rate limit" / "timeout" — they collide with legitimate domain lessons like
-# "output ignores rate limiting" (an existing test at test_learning.py:154 mints
-# exactly that rule and MUST stay green). Prefer "rate limit exceeded" / "429".
 
 
 def _is_transient_lesson(text: str) -> bool:

@@ -283,3 +283,14 @@ def test_rejection_drops_transient():
 
 def test_rejection_keeps_real():
     assert lesson_from_rejection("missing input validation on the email field")
+
+
+def test_guardrail_keeps_real_lessons_that_mention_broken_etc():
+    # These contain words that used to be over-broad markers but describe REAL bugs.
+    assert lesson_from_rejection("the retry logic is broken when upstream returns 500")
+    assert lesson_from_rejection("returns 403 permission denied when the caller lacks admin scope")
+    assert lesson_from_rejection("crashes out of memory when the result set exceeds 1 GB")
+
+
+def test_guardrail_still_drops_tool_broken_claim():
+    assert lesson_from_rejection("the tool is broken, just retry") == []
