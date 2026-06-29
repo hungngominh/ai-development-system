@@ -39,6 +39,7 @@ def test_poll_drops_disallowed_chat_and_nontext():
     a, _ = _adapter(_transport_seq([upd]))
     out = a.poll(timeout_s=0)
     assert out == [Inbound(surface="telegram", chat_id=111, text="ok")]
+    assert a._offset == 4  # offset advanced past ALL updates incl. the dropped ones (no wedge)
 
 
 def test_offset_advances_no_replay():
