@@ -33,6 +33,12 @@ EXPECTED_PACKAGES = {
     "task_graph", "verification",
 }
 
+# Sub-packages (dotted) tracked explicitly — only new ones need to be listed here;
+# the source tree is not scanned exhaustively for sub-packages.
+EXPECTED_SUB_PACKAGES = {
+    "gateway.platforms",
+}
+
 # The three skills shipped in skills/ and .claude/commands/.
 EXPECTED_SKILLS = {"start-project", "review-debate", "review-verification"}
 
@@ -73,6 +79,18 @@ def _actual_packages() -> set[str]:
     }
 
 
+def _actual_sub_packages() -> set[str]:
+    """Return dotted sub-package paths (one level deep) under src/ai_dev_system/."""
+    result: set[str] = set()
+    for top in SRC_PKG.iterdir():
+        if not (top.is_dir() and (top / "__init__.py").exists()):
+            continue
+        for sub in top.iterdir():
+            if sub.is_dir() and (sub / "__init__.py").exists():
+                result.add(f"{top.name}.{sub.name}")
+    return result
+
+
 def _relative_md_links(text: str) -> list[str]:
     """Markdown link targets that are local (not http/anchor/mailto)."""
     links = re.findall(r"\]\(([^)]+)\)", text)
@@ -104,10 +122,17 @@ _PG_REMOVAL_MARKERS = re.compile(
 
 
 # --------------------------------------------------------------------------- #
-# sanity: the canonical package list matches reality (catches my own drift)
+# sanity: the canonical package lists match reality (catches my own drift)
 # --------------------------------------------------------------------------- #
 def test_expected_packages_match_source_tree():
     assert _actual_packages() == EXPECTED_PACKAGES
+
+
+def test_expected_sub_packages_exist_in_source_tree():
+    """Every dotted entry in EXPECTED_SUB_PACKAGES must have an __init__.py."""
+    actual = _actual_sub_packages()
+    missing = EXPECTED_SUB_PACKAGES - actual
+    assert not missing, f"EXPECTED_SUB_PACKAGES not found in source tree: {sorted(missing)}"
 
 
 # --------------------------------------------------------------------------- #
@@ -246,6 +271,12 @@ def test_readme_module_tree_lists_every_package():
     listed_tokens = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", tree))
     missing = EXPECTED_PACKAGES - listed_tokens
     assert not missing, f"README module tree omits packages: {sorted(missing)}"
+    # Each segment of every dotted sub-package must also appear in the tree.
+    sub_missing = {
+        pkg for pkg in EXPECTED_SUB_PACKAGES
+        if not all(seg in listed_tokens for seg in pkg.split("."))
+    }
+    assert not sub_missing, f"README module tree omits sub-package segments: {sorted(sub_missing)}"
 
 
 def test_readme_module_tree_has_no_nonexistent_packages():
@@ -256,7 +287,10 @@ def test_readme_module_tree_has_no_nonexistent_packages():
     # `src/ai_dev_system/` root header.
     dir_entries = set(re.findall(r"──\s*([A-Za-z_][A-Za-z0-9_]*)/", tree))
     actual = _actual_packages()
-    bogus = {d for d in dir_entries if d not in actual}
+    # A dir entry is valid if it matches a top-level package name OR the leaf
+    # segment of a tracked sub-package (e.g. "platforms" from "gateway.platforms").
+    sub_leaves = {pkg.split(".")[-1] for pkg in EXPECTED_SUB_PACKAGES}
+    bogus = {d for d in dir_entries if d not in actual and d not in sub_leaves}
     assert not bogus, f"README module tree lists nonexistent packages: {sorted(bogus)}"
 
 

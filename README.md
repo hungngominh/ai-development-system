@@ -59,6 +59,7 @@ src/ai_dev_system/
 ├── migration/            # Schema migration helpers
 ├── db/                   # SQLite repos (stdlib sqlite3, không cần driver)
 ├── gateway/              # Surfaces the assistant can be reached on (local REPL now; chat platforms later)
+│   └── platforms/        # Concrete platform adapters (Telegram; Discord fast-follow)
 └── cli/                  # CLI entry points
 ```
 
@@ -75,7 +76,7 @@ src/ai_dev_system/
 
 ## Trạng thái
 
-- **1678 tests** — tất cả pass (SQLite in-memory, không cần DB ngoài)
+- **1684 tests** — tất cả pass (SQLite in-memory, không cần DB ngoài)
 - Đầy đủ pipeline từ **intake wizard** → debate → spec → task graph → verification
 - Persistence: **SQLite** (stdlib `sqlite3`, không cần driver) với full audit trail
 - Execution: **single-task** đã hoạt động (TDD-first: test phase → impl phase); ⚠️ **multi-task** graph execution (required_inputs/promoted_outputs) chưa hoàn chỉnh
