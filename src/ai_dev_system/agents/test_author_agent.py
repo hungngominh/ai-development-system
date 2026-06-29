@@ -16,8 +16,10 @@ from typing import Optional
 from ai_dev_system.agents.base import AgentResult
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
 from ai_dev_system.agents.repo_branch_agent import (
-    _invoke_claude, _append_log, _max_turns, _git, _extract_summary, _format_lessons,
+    _invoke_claude, _append_log, _max_turns, _git, _extract_summary,
+    _format_lessons, _merge_rules,
 )
+from ai_dev_system.rules.project_rules import load_project_file_rules
 
 # Facets that describe WHAT to test (the acceptance source for this task).
 _TEST_SOURCE_FACETS = ("test_cases", "input", "response", "error_cases", "validation_rules")
@@ -129,6 +131,8 @@ class TestAuthorAgent:
     ) -> AgentResult:
         Path(output_path).mkdir(parents=True, exist_ok=True)
         context = context or {}
+        project_rules = load_project_file_rules(self.repo_path, context)
+        effective_rules = _merge_rules(file_rules, project_rules)
 
         try:
             claude = ClaudeCodeLLMClient._resolve_claude_cmd()
@@ -141,7 +145,7 @@ class TestAuthorAgent:
             _append_log(self.live_log_path, f"Test author bắt đầu task {task_id}…")
 
         run1 = _invoke_claude(
-            claude, self.repo_path, _build_test_prompt(context, file_rules),
+            claude, self.repo_path, _build_test_prompt(context, effective_rules),
             _max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
         )
         if run1.timed_out:

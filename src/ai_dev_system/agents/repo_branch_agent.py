@@ -16,6 +16,7 @@ from typing import Optional
 
 from ai_dev_system.agents.base import AgentResult
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
+from ai_dev_system.rules.project_rules import load_project_file_rules
 from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS
 
 # Static claude CLI flags. --max-turns is appended at run() time so it can be
@@ -104,6 +105,16 @@ def _format_lessons(file_rules) -> str:
         "Honour every one:\n"
         f"{bullets}\n"
     )
+
+
+def _merge_rules(global_rules, project_rules) -> list[str]:
+    """Order-preserving union of global + project lessons (global first)."""
+    merged: list[str] = []
+    for r in list(global_rules or []) + list(project_rules or []):
+        s = str(r).strip()
+        if s and s not in merged:
+            merged.append(s)
+    return merged
 
 
 def _build_execution_prompt(context: dict, file_rules=()) -> str:
@@ -343,6 +354,8 @@ class RepoBranchAgent:
     ) -> AgentResult:
         Path(output_path).mkdir(parents=True, exist_ok=True)
         context = context or {}
+        project_rules = load_project_file_rules(self.repo_path, context)
+        effective_rules = _merge_rules(file_rules, project_rules)
 
         try:
             claude = ClaudeCodeLLMClient._resolve_claude_cmd()
@@ -355,7 +368,7 @@ class RepoBranchAgent:
             _append_log(self.live_log_path, f"Claude bắt đầu task {task_id}…")
 
         run1 = _invoke_claude(
-            claude, self.repo_path, _build_execution_prompt(context, file_rules),
+            claude, self.repo_path, _build_execution_prompt(context, effective_rules),
             max_turns, timeout_s, self.live_log_path, model=model, effort=effort,
         )
 
