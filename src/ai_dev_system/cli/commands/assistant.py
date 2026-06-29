@@ -34,7 +34,11 @@ def build_assistant(model: str | None) -> "Assistant":
     from ai_dev_system.assistant.agent import Assistant
 
     cfg = Config.from_env()
-    apply_schema(get_connection(cfg.database_url))  # ensure tables exist
+    _init_conn = get_connection(cfg.database_url)
+    try:
+        apply_schema(_init_conn)
+    finally:
+        _init_conn.close()
 
     def conn_factory():
         return get_connection(cfg.database_url)
@@ -76,10 +80,10 @@ def assistant_cmd(
     home = assistant_home()
     asst = build_assistant(model=model)
     if not consume_clean_shutdown(home):
-        asst._session_store.set_status(asst._session_id, "resume_pending")
+        asst.mark_resume()
         typer.echo("(resumed previous session)")
     try:
         run_repl(asst)
+        raise typer.Exit(0)
     finally:
         mark_clean_shutdown(home)
-    raise typer.Exit(0)

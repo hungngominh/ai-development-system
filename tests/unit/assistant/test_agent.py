@@ -67,3 +67,10 @@ def test_respond_blocks_when_over_cap(conn, tmp_path):
     out = asst.respond("hi")
     assert runtime.calls == []                       # model NOT called
     assert "budget" in out.final_text.lower()
+
+
+def test_mark_resume_sets_status(conn, tmp_path):
+    runtime = _RecordingRuntime(TurnResult("x", [], {}, None, None))
+    asst, sid, sessions = _assistant(conn, tmp_path, runtime)
+    asst.mark_resume()
+    assert sessions.get_status(sid) == "resume_pending"

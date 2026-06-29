@@ -21,6 +21,10 @@ class Assistant:
         self._window = window
         self._cap_usd = cap_usd
 
+    def mark_resume(self) -> None:
+        """Mark this session as resumed after a non-clean shutdown."""
+        self._session_store.set_status(self._session_id, "resume_pending")
+
     def respond(self, user_text: str) -> TurnResult:
         if self._budget.over_cap(self._session_id, self._cap_usd):
             total = self._budget.session_total(self._session_id)
