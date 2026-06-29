@@ -16,7 +16,7 @@ from typing import Optional
 from ai_dev_system.agents.base import AgentResult
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
 from ai_dev_system.agents.repo_branch_agent import (
-    _invoke_claude, _append_log, _max_turns, _git, _extract_summary,
+    _invoke_claude, _append_log, _max_turns, _git, _extract_summary, _format_lessons,
 )
 
 # Facets that describe WHAT to test (the acceptance source for this task).
@@ -52,8 +52,8 @@ def build_test_source(context: dict) -> str:
     return "\n\n".join(blocks)
 
 
-def _build_test_prompt(context: dict) -> str:
-    return (
+def _build_test_prompt(context: dict, file_rules=()) -> str:
+    base = (
         "You are writing TESTS for a coding task in THIS repository, BEFORE any "
         "implementation exists (test-driven development). Read existing test files "
         "to match the project's test framework and conventions first.\n\n"
@@ -73,6 +73,7 @@ def _build_test_prompt(context: dict) -> str:
         "- Commit with: `git add -A && git commit -m 'test: <summary>'`\n"
         "- Do NOT push to remote.\n"
     )
+    return base + _format_lessons(file_rules)
 
 
 def _build_test_fix_prompt(objective: str, findings: list[dict], tests_red: bool) -> str:
@@ -140,7 +141,7 @@ class TestAuthorAgent:
             _append_log(self.live_log_path, f"Test author bắt đầu task {task_id}…")
 
         run1 = _invoke_claude(
-            claude, self.repo_path, _build_test_prompt(context),
+            claude, self.repo_path, _build_test_prompt(context, file_rules),
             _max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
         )
         if run1.timed_out:

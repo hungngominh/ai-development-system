@@ -87,7 +87,26 @@ def _append_log(log_path: Path, msg: str) -> None:
         f.flush()
 
 
-def _build_execution_prompt(context: dict) -> str:
+def _format_lessons(file_rules) -> str:
+    """Render learned lessons (file_rules) as a prompt block.
+
+    Returns "" when there are no lessons, so callers can unconditionally append
+    it. Lessons are corrective rules mined from earlier failed attempts — the
+    agent MUST honour them (this is the seam that closes the learning loop).
+    """
+    rules = [str(r).strip() for r in (file_rules or []) if str(r).strip()]
+    if not rules:
+        return ""
+    bullets = "\n".join(f"- {r}" for r in rules)
+    return (
+        "\n## LESSONS FROM PAST FAILURES (apply these)\n"
+        "Corrective rules learned from earlier failed attempts on this work. "
+        "Honour every one:\n"
+        f"{bullets}\n"
+    )
+
+
+def _build_execution_prompt(context: dict, file_rules=()) -> str:
     facets = context.get("facets") or {}
     filled_lines: list[str] = []
     for key in SPEC_FACET_KEYS:
@@ -97,7 +116,7 @@ def _build_execution_prompt(context: dict) -> str:
 
     spec_section = "\n\n".join(filled_lines) if filled_lines else "(no spec facets filled)"
 
-    return (
+    base = (
         "You are implementing a coding task in THIS repository. "
         "Read existing code to understand patterns and conventions before writing anything. "
         "Tests already exist on this branch and are currently FAILING — implement the "
@@ -117,6 +136,7 @@ def _build_execution_prompt(context: dict) -> str:
         "- Commit with: `git add -A && git commit -m '<type>: <summary>'`\n"
         "- Do NOT push to remote\n"
     )
+    return base + _format_lessons(file_rules)
 
 
 def _git(args: list[str], cwd: str) -> subprocess.CompletedProcess:
@@ -335,7 +355,7 @@ class RepoBranchAgent:
             _append_log(self.live_log_path, f"Claude bắt đầu task {task_id}…")
 
         run1 = _invoke_claude(
-            claude, self.repo_path, _build_execution_prompt(context),
+            claude, self.repo_path, _build_execution_prompt(context, file_rules),
             max_turns, timeout_s, self.live_log_path, model=model, effort=effort,
         )
 
