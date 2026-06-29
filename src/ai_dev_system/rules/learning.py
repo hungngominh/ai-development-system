@@ -46,6 +46,27 @@ LEARNED_PREFIX = "learned"
 # file_rules are injected verbatim into the agent backstory; keep them short.
 MAX_LESSON_LEN = 280
 
+# Markers of a transient/environment-dependent failure or a negative "tool is
+# broken" claim. These must NOT harden into a permanent rule (they "harden into
+# self-citing refusals"). Borrowed from Hermes' background-review DO-NOT-SAVE
+# guardrail. Conservative on purpose; every drop is logged (no silent loss).
+_DO_NOT_SAVE_MARKERS = (
+    "timed out", "connection refused", "connection reset", "econnreset",
+    "rate limit exceeded", "429 ", "flaky", "transient",
+    " 502 ", " 503 ", " 504 ", "command not found", "no such file",
+    "permission denied", "module not found", "modulenotfounderror",
+    "disk full", "out of memory", "is broken", "doesn't work", "does not work",
+)
+# NOTE (false-positive guard): markers are specific on purpose. Do NOT use bare
+# "rate limit" / "timeout" — they collide with legitimate domain lessons like
+# "output ignores rate limiting" (an existing test at test_learning.py:154 mints
+# exactly that rule and MUST stay green). Prefer "rate limit exceeded" / "429".
+
+
+def _is_transient_lesson(text: str) -> bool:
+    low = (text or "").lower()
+    return any(marker in low for marker in _DO_NOT_SAVE_MARKERS)
+
 
 @dataclass
 class LearnedRule:
@@ -86,6 +107,9 @@ def lessons_from_verification(report) -> list[str]:
             or (getattr(crit, "criterion_text", "") or "").strip()
         if not basis:
             continue
+        if _is_transient_lesson(basis):
+            logger.info("Learning loop: dropping transient verification lesson: %s", basis[:80])
+            continue
         lesson = _clean(f"Avoid repeating this failure: {basis}")
         if lesson not in lessons:
             lessons.append(lesson)
@@ -96,6 +120,9 @@ def lesson_from_rejection(reason: str) -> list[str]:
     """Derive a lesson from a human gate / webui-Accept rejection reason."""
     cleaned = _clean(reason or "")
     if not cleaned:
+        return []
+    if _is_transient_lesson(cleaned):
+        logger.info("Learning loop: dropping transient rejection lesson: %s", cleaned[:80])
         return []
     return [_clean(f"Reviewer rejected prior output: {cleaned}")]
 

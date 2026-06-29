@@ -10,6 +10,7 @@ from ai_dev_system.rules.learning import (
     lessons_from_verification,
     lesson_from_rejection,
     scope_task_from_context,
+    _is_transient_lesson,
 )
 from ai_dev_system.rules.registry import RuleRegistry
 from ai_dev_system.verification.report import CriterionResult, VerificationReport
@@ -242,3 +243,43 @@ def test_written_rule_is_schema_valid(tmp_path):
     assert rule["file_rules"] or rule["skill_rules"]
     # No leftover temp file from the atomic write.
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+# ── DO-NOT-SAVE guardrail (transient/infra lesson filter) ────────────────────
+
+class _Crit:
+    def __init__(self, verdict, reasoning):
+        self.verdict = verdict
+        self.reasoning = reasoning
+        self.criterion_text = reasoning
+
+
+class _Report:
+    overall = "HAS_FAIL"
+
+    def __init__(self, criteria):
+        self.criteria = criteria
+
+
+def test_is_transient_lesson_flags_infra():
+    assert _is_transient_lesson("connection timed out to localhost:5432")
+    assert _is_transient_lesson("npm: command not found")
+    assert not _is_transient_lesson("returns None instead of the computed total")
+
+
+def test_verification_drops_transient_keeps_real():
+    report = _Report([
+        _Crit("FAIL", "connection timed out to the database"),
+        _Crit("FAIL", "the function returns None instead of the computed total"),
+    ])
+    lessons = lessons_from_verification(report)
+    assert any("computed total" in l for l in lessons)
+    assert not any("timed out" in l for l in lessons)
+
+
+def test_rejection_drops_transient():
+    assert lesson_from_rejection("the build is flaky, just rerun it") == []
+
+
+def test_rejection_keeps_real():
+    assert lesson_from_rejection("missing input validation on the email field")
