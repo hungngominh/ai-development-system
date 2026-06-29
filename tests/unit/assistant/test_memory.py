@@ -43,3 +43,13 @@ def test_invalid_target_raises(tmp_path):
     except ValueError:
         raised = True
     assert raised
+
+
+def test_invalid_action_raises(tmp_path):
+    store = MemoryStore(tmp_path)
+    try:
+        store.write("MEMORY", "BAD_ACTION", "x")
+        raised = False
+    except ValueError:
+        raised = True
+    assert raised
