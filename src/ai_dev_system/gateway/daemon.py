@@ -37,6 +37,7 @@ class GatewayDaemon:
         self._install_signal_handlers()
         if not consume_clean_shutdown(self._home) and self._session_store is not None:
             self._session_store.mark_recent_resume_pending()
+        graceful = False
         try:
             i = 0
             while not self._stop.is_set():
@@ -56,10 +57,13 @@ class GatewayDaemon:
                     break
                 if not self._stop.is_set():
                     self._sleep(0)  # long-poll already blocks; no extra wait by default
+            graceful = True            # normal loop exit (break / stop_event)
         except KeyboardInterrupt:
             self._stop.set()
+            graceful = True            # operator-initiated stop is graceful
         finally:
-            mark_clean_shutdown(self._home)
+            if graceful:
+                mark_clean_shutdown(self._home)
 
     def _install_signal_handlers(self) -> None:
         def _stop(_signum, _frame):

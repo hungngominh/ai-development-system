@@ -1,3 +1,4 @@
+import pytest
 from types import SimpleNamespace
 from ai_dev_system.assistant.session import mark_clean_shutdown, clean_shutdown_path
 from ai_dev_system.gateway.daemon import GatewayDaemon
@@ -28,3 +29,15 @@ def test_skips_resume_when_clean_marker_present(tmp_path):
     rec = []
     _daemon(tmp_path, rec).run(max_iterations=1)
     assert rec == []                            # clean prior shutdown -> no resume flagging
+
+
+def test_crash_does_not_write_clean_marker(tmp_path):
+    # sleep_fn raises -> unexpected exception escapes the loop (a crash)
+    def _boom(_s):
+        raise RuntimeError("crash")
+    rec = []
+    d = _daemon(tmp_path, rec)          # reuse the file's existing _daemon helper
+    d._sleep = _boom                    # force a crash on the inter-poll sleep
+    with pytest.raises(RuntimeError):
+        d.run(max_iterations=None)      # iteration 1 polls empty, then sleep -> crash
+    assert not clean_shutdown_path(tmp_path).exists()   # crash => NO clean marker => resume next start
