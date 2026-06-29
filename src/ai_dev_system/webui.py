@@ -25,6 +25,7 @@ from pathlib import Path
 from ai_dev_system.config import Config
 from ai_dev_system.db.connection import get_connection
 from ai_dev_system.task_graph.facets import FACET_KEYS, SPEC_FACET_KEYS, EXEC_FACET_KEYS
+from ai_dev_system.task_graph.single_task_plan import plan_single_task, load_plan, approve_plan
 
 PORT = int(os.environ.get("AIDEV_UI_PORT", "8765"))
 # A run that's RUNNING but whose progress log hasn't advanced in this many
@@ -736,6 +737,50 @@ def _spawn_task_executor(spec_id: str) -> None:
         cwd=str(Path(__file__).resolve().parents[2]),
         **popen_kwargs,
     )
+
+
+def _task_plan_page(spec_id: str) -> bytes:
+    plan = load_plan(str(_config().storage_root), spec_id)
+    if plan is None:
+        return _page("plan", "<div class='card muted'>Không tìm thấy plan. "
+                     "<a href='/'>← trang chủ</a></div>")
+    branch = html.escape(str(plan.get("branch") or ""))
+    rows = ""
+    for t in plan.get("graph", {}).get("tasks", []):
+        rows += (
+            "<tr>"
+            f"<td class='muted'>{html.escape(str(t.get('id') or ''))}</td>"
+            f"<td>{html.escape(str(t.get('phase') or ''))}</td>"
+            f"<td>{html.escape(str(t.get('agent_type') or ''))}</td>"
+            f"<td>{html.escape(str(t.get('objective') or ''))}</td>"
+            "</tr>"
+        )
+    facets = plan.get("graph", {}).get("tasks", [{}])[0].get("facets", {}) or {}
+    filled = [k for k, f in facets.items() if isinstance(f, dict) and f.get("status") == "filled"]
+    approved_badge = ("<span class='badge b-done'>Đã duyệt ✓</span>"
+                      if plan.get("approved") else "")
+    body = (
+        f"<div class='card'><h2>Plan · {branch} {approved_badge}</h2>"
+        "<table><tr><th>Task</th><th>Phase</th><th>Agent</th><th>Objective</th></tr>"
+        f"{rows}</table>"
+        f"<p class='muted'>Facets đã điền: {html.escape(', '.join(filled)) or '(none)'}</p>"
+        "<form method='POST' action='/task-plan' style='display:inline;margin-right:8px'>"
+        f"<input type='hidden' name='id' value='{html.escape(spec_id)}'>"
+        "<input type='hidden' name='action' value='approve'>"
+        "<button type='submit'>Duyệt &amp; Chạy</button></form>"
+        "<form method='POST' action='/task-plan' style='display:inline'>"
+        f"<input type='hidden' name='id' value='{html.escape(spec_id)}'>"
+        "<input type='hidden' name='action' value='revise'>"
+        "<button type='submit' class='secondary'>Sửa spec</button></form>"
+        "</div>"
+    )
+    return _page("Plan", body)
+
+
+def _approve_task_plan_and_exec(spec_id: str) -> None:
+    """Mark the plan approved and spawn the executor (the gate → exec)."""
+    approve_plan(str(_config().storage_root), spec_id)
+    _spawn_task_executor(spec_id)
 
 
 def _task_exec_status(spec_id: str) -> dict:
@@ -1500,6 +1545,9 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/task-exec":
                 qs = urllib.parse.parse_qs(parsed.query)
                 self._send(_task_exec_page((qs.get("id") or [""])[0]))
+            elif parsed.path == "/task-plan":
+                qs = urllib.parse.parse_qs(parsed.query)
+                self._send(_task_plan_page((qs.get("id") or [""])[0]))
             else:
                 self._send(_page("404", "<div class='card'>Not found. <a href='/'>home</a></div>"), 404)
         except Exception as exc:  # noqa: BLE001
@@ -1528,18 +1576,15 @@ class Handler(BaseHTTPRequestHandler):
                 if spec_id:
                     edits = {key: (form.get(f"facet_{key}") or [""])[0] for key in FACET_KEYS}
                     _save_task_spec_edits(spec_id, edits, storage_root=str(_config().storage_root))
-                    # Spawn executor when repo is available; redirect to exec progress page
                     try:
                         _spec_data = json.loads(
                             (Path(_config().storage_root) / "task_specs" / f"{spec_id}.json")
                             .read_text(encoding="utf-8")
                         )
                         if _spec_data.get("repo"):
-                            # Only spawn if not already running or done
-                            _exec_st = _task_exec_status(spec_id)
-                            if _exec_st.get("status") not in ("running", "done"):
-                                _spawn_task_executor(spec_id)
-                            redirect = f"/task-exec?id={urllib.parse.quote(spec_id)}"
+                            plan_single_task(_spec_data, spec_id,
+                                             storage_root=str(_config().storage_root))
+                            redirect = f"/task-plan?id={urllib.parse.quote(spec_id)}"
                         else:
                             redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}"
                     except Exception:  # noqa: BLE001
@@ -1547,6 +1592,20 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     redirect = "/"
                 self._send(_page("saved", "<div class='card'><h2>Đã lưu &amp; duyệt ✓</h2></div>",
+                                 head_extra=f"<meta http-equiv='refresh' content='1;url={html.escape(redirect)}'>"))
+            elif path == "/task-plan":
+                length = int(self.headers.get("Content-Length", "0"))
+                form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8"))
+                spec_id = (form.get("id") or [""])[0].strip()
+                action = (form.get("action") or [""])[0].strip()
+                if spec_id and action == "approve":
+                    _approve_task_plan_and_exec(spec_id)
+                    redirect = f"/task-exec?id={urllib.parse.quote(spec_id)}"
+                elif spec_id:  # revise
+                    redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}"
+                else:
+                    redirect = "/"
+                self._send(_page("plan", "<div class='card'><h2>OK ✓</h2></div>",
                                  head_extra=f"<meta http-equiv='refresh' content='1;url={html.escape(redirect)}'>"))
             elif path == "/task-exec":
                 length = int(self.headers.get("Content-Length", "0"))
