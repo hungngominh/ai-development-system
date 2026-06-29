@@ -1,8 +1,6 @@
 import json
-from types import SimpleNamespace
 
 from ai_dev_system.db.connection import get_connection
-from ai_dev_system.db.migrator import apply_schema
 from ai_dev_system.harness.runtime import TurnResult
 from ai_dev_system.assistant.memory import MemoryStore
 from ai_dev_system.assistant.session import SessionStore
