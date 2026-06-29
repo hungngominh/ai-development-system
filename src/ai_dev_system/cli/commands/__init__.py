@@ -11,3 +11,4 @@ from ai_dev_system.cli.commands import golden  # noqa: F401
 from ai_dev_system.cli.commands import gate  # noqa: F401
 from ai_dev_system.cli.commands import info  # noqa: F401
 from ai_dev_system.cli.commands import assistant  # noqa: F401
+from ai_dev_system.cli.commands import gateway  # noqa: F401
