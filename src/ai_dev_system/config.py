@@ -1,4 +1,5 @@
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,8 @@ class Config:
     task_timeout_s: float = 3600.0
     max_parallel_workers: int = 4
     retry_policy: dict = field(default_factory=_default_retry_policy)
+    telegram_token: str | None = None
+    telegram_allowed_chat_ids: tuple[int, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -49,4 +52,12 @@ class Config:
         """
         storage_root = os.environ.get("STORAGE_ROOT") or DEFAULT_STORAGE_ROOT
         database_url = os.environ.get("DATABASE_URL") or DEFAULT_DATABASE_URL
-        return cls(storage_root=storage_root, database_url=database_url)
+        _tg_token = os.environ.get("AI_DEV_TELEGRAM_TOKEN") or None
+        _tg_ids_raw = os.environ.get("AI_DEV_TELEGRAM_ALLOWED_CHAT_IDS", "")
+        _tg_ids = tuple(int(x) for x in re.split(r"[,\s]+", _tg_ids_raw.strip()) if x)
+        return cls(
+            storage_root=storage_root,
+            database_url=database_url,
+            telegram_token=_tg_token,
+            telegram_allowed_chat_ids=_tg_ids,
+        )

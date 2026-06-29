@@ -75,7 +75,7 @@ src/ai_dev_system/
 
 ## Trạng thái
 
-- **1671 tests** — tất cả pass (SQLite in-memory, không cần DB ngoài)
+- **1673 tests** — tất cả pass (SQLite in-memory, không cần DB ngoài)
 - Đầy đủ pipeline từ **intake wizard** → debate → spec → task graph → verification
 - Persistence: **SQLite** (stdlib `sqlite3`, không cần driver) với full audit trail
 - Execution: **single-task** đã hoạt động (TDD-first: test phase → impl phase); ⚠️ **multi-task** graph execution (required_inputs/promoted_outputs) chưa hoàn chỉnh
