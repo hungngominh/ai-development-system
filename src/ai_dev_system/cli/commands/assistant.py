@@ -71,11 +71,20 @@ def build_assistant(model: str | None) -> "Assistant":
 def assistant_cmd(
     model: str = typer.Option(None, "--model", help="Model alias (default: account default)."),
 ) -> None:
+    import sys
+
     from ai_dev_system.gateway.local_cli import run_repl
     from ai_dev_system.assistant.memory import assistant_home
     from ai_dev_system.assistant.session import (
         consume_clean_shutdown, mark_clean_shutdown,
     )
+
+    # The assistant may reply in any language (e.g. Vietnamese); force UTF-8 stdout
+    # so a non-ASCII reply never crashes the REPL on a Windows cp1252 console.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001 - stdout may not support reconfigure
+        pass
 
     home = assistant_home()
     asst = build_assistant(model=model)
