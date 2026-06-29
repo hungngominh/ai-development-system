@@ -29,8 +29,8 @@ SRC_PKG = REPO_ROOT / "src" / "ai_dev_system"
 # Canonical package list — src/ai_dev_system/<name>/__init__.py
 EXPECTED_PACKAGES = {
     "agents", "beads", "cli", "db", "debate", "engine", "eval", "gate",
-    "harness", "intake", "migration", "rules", "spec", "storage", "task_graph",
-    "verification",
+    "gateway", "harness", "intake", "migration", "rules", "spec", "storage",
+    "task_graph", "verification",
 }
 
 # The three skills shipped in skills/ and .claude/commands/.
