@@ -4,9 +4,14 @@ Plan 1 scope: a single-turn REPL over the owned harness with the `now` proof too
 Memory, persistent sessions, budget, and chat surfaces arrive in later plans."""
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import typer
 
 from ai_dev_system.cli.core.registry import command
+
+if TYPE_CHECKING:
+    from ai_dev_system.harness.runtime import SdkAgentRuntime
 
 _SYSTEM_PROMPT = (
     "You are ai-dev's internal assistant. You own your tool-use loop. "
@@ -14,7 +19,7 @@ _SYSTEM_PROMPT = (
 )
 
 
-def build_assistant(model: str | None):
+def build_assistant(model: str | None) -> tuple[SdkAgentRuntime, str]:
     from ai_dev_system.harness.tools.registry import ToolRegistry
     from ai_dev_system.harness.tools.builtin import now_tool
     from ai_dev_system.harness.permissions import make_permission_callback
