@@ -35,3 +35,12 @@ def test_clean_shutdown_marker(tmp_path):
     assert clean_shutdown_path(tmp_path).exists()
     assert consume_clean_shutdown(tmp_path) is True   # existed → True, now deleted
     assert consume_clean_shutdown(tmp_path) is False  # gone
+
+
+def test_append_visible_on_fresh_connection(file_db_url):
+    from ai_dev_system.db.connection import get_connection
+    store = SessionStore(lambda: get_connection(file_db_url))  # fresh connection each call
+    sid = store.load_or_create("local", "cli")
+    store.append(sid, "user", "persisted?")
+    turns = store.recent(sid, 10)   # opens a DIFFERENT connection
+    assert [t.content for t in turns] == ["persisted?"]
