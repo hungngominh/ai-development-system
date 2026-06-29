@@ -44,3 +44,22 @@ def test_append_visible_on_fresh_connection(file_db_url):
     store.append(sid, "user", "persisted?")
     turns = store.recent(sid, 10)   # opens a DIFFERENT connection
     assert [t.content for t in turns] == ["persisted?"]
+
+
+def test_mark_recent_resume_pending_flags_only_recent_active(conn):
+    store = SessionStore(lambda: conn)
+    # recent active -> flagged
+    conn.execute("INSERT INTO assistant_sessions (session_id, surface, chat_id, status, updated_at) "
+                 "VALUES ('a','telegram','1','active', datetime('now'))")
+    # stale active -> NOT flagged (2h old)
+    conn.execute("INSERT INTO assistant_sessions (session_id, surface, chat_id, status, updated_at) "
+                 "VALUES ('b','telegram','2','active', datetime('now','-120 minutes'))")
+    # recent suspended -> NOT flagged
+    conn.execute("INSERT INTO assistant_sessions (session_id, surface, chat_id, status, updated_at) "
+                 "VALUES ('c','telegram','3','suspended', datetime('now'))")
+    conn.commit()
+    n = store.mark_recent_resume_pending(window_minutes=60)
+    assert n == 1
+    assert store.get_status("a") == "resume_pending"
+    assert store.get_status("b") == "active"
+    assert store.get_status("c") == "suspended"

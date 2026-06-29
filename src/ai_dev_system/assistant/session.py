@@ -72,6 +72,18 @@ class SessionStore:
         ).fetchone()
         return row["status"] if row else ""
 
+    def mark_recent_resume_pending(self, window_minutes: int = 60) -> int:
+        """Flag recently-active sessions as resume_pending (crash recovery on startup).
+        Only status='active' rows updated within the window; leaves suspended/stale alone."""
+        conn = self._conn_factory()
+        cur = conn.execute(
+            "UPDATE assistant_sessions SET status='resume_pending' "
+            "WHERE status='active' AND updated_at >= datetime('now', ?)",
+            (f"-{int(window_minutes)} minutes",),
+        )
+        conn.commit()
+        return cur.rowcount
+
 
 # --- crash-shutdown marker ---------------------------------------------------
 
