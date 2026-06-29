@@ -1,4 +1,5 @@
 import threading
+from types import SimpleNamespace
 from ai_dev_system.harness.runtime import TurnResult
 from ai_dev_system.gateway.base import Inbound
 from ai_dev_system.gateway.daemon import GatewayDaemon
@@ -32,7 +33,9 @@ class _FakePlatform:
 
 def _daemon(platform, tmp_path, **kw):
     return GatewayDaemon(factory=_FakeFactory(), platforms=[platform],
-                         home=tmp_path, sleep_fn=lambda s: None, **kw)
+                         home=tmp_path,
+                         session_store=SimpleNamespace(mark_recent_resume_pending=lambda **k: 0),
+                         sleep_fn=lambda s: None, **kw)
 
 
 def test_dispatches_and_replies(tmp_path):
