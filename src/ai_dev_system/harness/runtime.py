@@ -4,8 +4,13 @@
 the loop's output handling is unit-testable without the SDK or network."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Protocol
+
+from claude_agent_sdk import ClaudeAgentOptions, query as _sdk_query
+
+from ai_dev_system.harness.tools.registry import ToolRegistry, SERVER_NAME
 
 
 @dataclass(frozen=True)
@@ -64,13 +69,6 @@ class FakeAgentRuntime:
         return self.scripted
 
 
-import asyncio
-
-from claude_agent_sdk import ClaudeAgentOptions, query as _sdk_query
-
-from ai_dev_system.harness.tools.registry import ToolRegistry, SERVER_NAME
-
-
 class SdkAgentRuntime:
     """Owns the loop via the Claude Agent SDK. The SDK orchestrates the per-turn
     tool-use loop and invokes our in-process tools; we own the tools, the
@@ -92,6 +90,7 @@ class SdkAgentRuntime:
         self._query_fn = query_fn or _sdk_query
 
     def run_turn(self, system_prompt: str, user_text: str) -> TurnResult:
+        """Run one turn synchronously. Must be called from a synchronous context — uses asyncio.run(...) internally and must NOT be called from within a running event loop."""
         return asyncio.run(self._run_async(system_prompt, user_text))
 
     async def _run_async(self, system_prompt: str, user_text: str) -> TurnResult:
