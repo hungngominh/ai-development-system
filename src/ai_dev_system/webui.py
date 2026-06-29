@@ -759,28 +759,61 @@ def _task_plan_page(spec_id: str) -> bytes:
     filled = [k for k, f in facets.items() if isinstance(f, dict) and f.get("status") == "filled"]
     approved_badge = ("<span class='badge b-done'>Đã duyệt ✓</span>"
                       if plan.get("approved") else "")
+    sid_esc = html.escape(spec_id)
+    sid_quoted = urllib.parse.quote(spec_id)
+    if plan.get("approved"):
+        action_buttons = (
+            f"<p class='muted'>Đã duyệt — đang chạy · "
+            f"<a href='/task-exec?id={sid_quoted}'>Xem tiến trình →</a></p>"
+            "<form method='POST' action='/task-plan' style='display:inline'>"
+            f"<input type='hidden' name='id' value='{sid_esc}'>"
+            "<input type='hidden' name='action' value='revise'>"
+            "<button type='submit' class='secondary'>Sửa spec</button></form>"
+        )
+    else:
+        action_buttons = (
+            "<form method='POST' action='/task-plan' style='display:inline;margin-right:8px'>"
+            f"<input type='hidden' name='id' value='{sid_esc}'>"
+            "<input type='hidden' name='action' value='approve'>"
+            "<button type='submit'>Duyệt &amp; Chạy</button></form>"
+            "<form method='POST' action='/task-plan' style='display:inline'>"
+            f"<input type='hidden' name='id' value='{sid_esc}'>"
+            "<input type='hidden' name='action' value='revise'>"
+            "<button type='submit' class='secondary'>Sửa spec</button></form>"
+        )
     body = (
         f"<div class='card'><h2>Plan · {branch} {approved_badge}</h2>"
         "<table><tr><th>Task</th><th>Phase</th><th>Agent</th><th>Objective</th></tr>"
         f"{rows}</table>"
         f"<p class='muted'>Facets đã điền: {html.escape(', '.join(filled)) or '(none)'}</p>"
-        "<form method='POST' action='/task-plan' style='display:inline;margin-right:8px'>"
-        f"<input type='hidden' name='id' value='{html.escape(spec_id)}'>"
-        "<input type='hidden' name='action' value='approve'>"
-        "<button type='submit'>Duyệt &amp; Chạy</button></form>"
-        "<form method='POST' action='/task-plan' style='display:inline'>"
-        f"<input type='hidden' name='id' value='{html.escape(spec_id)}'>"
-        "<input type='hidden' name='action' value='revise'>"
-        "<button type='submit' class='secondary'>Sửa spec</button></form>"
+        f"{action_buttons}"
         "</div>"
     )
     return _page("Plan", body)
 
 
 def _approve_task_plan_and_exec(spec_id: str) -> None:
-    """Mark the plan approved and spawn the executor (the gate → exec)."""
+    """Mark the plan approved and spawn the executor — once. Idempotent: a second
+    approve (double-click / back-resubmit) must not spawn a concurrent executor."""
     approve_plan(str(_config().storage_root), spec_id)
-    _spawn_task_executor(spec_id)
+    if _task_exec_status(spec_id).get("status") not in ("running", "done"):
+        _spawn_task_executor(spec_id)
+
+
+def _spec_approve_redirect(spec_id: str) -> str:
+    """After saving spec edits: build the plan if a repo is set and route to the
+    /task-plan review gate; otherwise stay on /task-spec. Never spawns the executor."""
+    try:
+        spec_data = json.loads(
+            (Path(_config().storage_root) / "task_specs" / f"{spec_id}.json")
+            .read_text(encoding="utf-8")
+        )
+        if spec_data.get("repo"):
+            plan_single_task(spec_data, spec_id, storage_root=str(_config().storage_root))
+            return f"/task-plan?id={urllib.parse.quote(spec_id)}"
+        return f"/task-spec?id={urllib.parse.quote(spec_id)}"
+    except Exception:  # noqa: BLE001
+        return f"/task-spec?id={urllib.parse.quote(spec_id)}"
 
 
 def _task_exec_status(spec_id: str) -> dict:
@@ -1576,19 +1609,7 @@ class Handler(BaseHTTPRequestHandler):
                 if spec_id:
                     edits = {key: (form.get(f"facet_{key}") or [""])[0] for key in FACET_KEYS}
                     _save_task_spec_edits(spec_id, edits, storage_root=str(_config().storage_root))
-                    try:
-                        _spec_data = json.loads(
-                            (Path(_config().storage_root) / "task_specs" / f"{spec_id}.json")
-                            .read_text(encoding="utf-8")
-                        )
-                        if _spec_data.get("repo"):
-                            plan_single_task(_spec_data, spec_id,
-                                             storage_root=str(_config().storage_root))
-                            redirect = f"/task-plan?id={urllib.parse.quote(spec_id)}"
-                        else:
-                            redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}"
-                    except Exception:  # noqa: BLE001
-                        redirect = f"/task-spec?id={urllib.parse.quote(spec_id)}"
+                    redirect = _spec_approve_redirect(spec_id)
                 else:
                     redirect = "/"
                 self._send(_page("saved", "<div class='card'><h2>Đã lưu ✓ — xem &amp; duyệt plan</h2></div>",
