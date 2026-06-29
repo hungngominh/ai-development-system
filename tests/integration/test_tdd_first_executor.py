@@ -93,7 +93,8 @@ def test_two_task_run_orders_test_before_impl(temp_repo, tmp_path):
     ste._create_run_row(conn, run_id, "it", "spec-it", "ai-dev/task-it")
 
     # TDD gate on: emits TASK-1-TEST → TASK-1-IMPL
-    graph = ste._build_task_graph(
+    from ai_dev_system.task_graph.single_task_plan import build_task_graph
+    graph = build_task_graph(
         {
             "id": "TASK-1",
             "type": "coding",
@@ -103,7 +104,6 @@ def test_two_task_run_orders_test_before_impl(temp_repo, tmp_path):
         },
         {"test_cases": {"status": "filled", "content": "401", "reason": ""}},
         "ai-dev/task-it",
-        "master",
     )
     gid = ste._create_task_graph_artifact(conn, run_id, graph, str(storage_root))
     conn.close()

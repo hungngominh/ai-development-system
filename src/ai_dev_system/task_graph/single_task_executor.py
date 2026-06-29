@@ -14,7 +14,6 @@ import argparse
 import hashlib
 import json
 import logging
-import os
 import subprocess
 import time
 import uuid
@@ -23,67 +22,9 @@ from pathlib import Path
 from ai_dev_system.config import Config
 from ai_dev_system.db.connection import get_connection
 from ai_dev_system.engine.runner import run_execution
+from ai_dev_system.task_graph.single_task_plan import load_plan, branch_name_for
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# TDD gate helpers
-# ---------------------------------------------------------------------------
-
-def _tdd_gate_enabled() -> bool:
-    """TDD-first split is ON unless EXEC_TDD_GATE is explicitly falsy."""
-    v = os.environ.get("EXEC_TDD_GATE")
-    if v is None:
-        return True
-    return v.strip().lower() not in ("0", "false", "no", "off", "")
-
-
-def _build_task_graph(task: dict, facets: dict, branch_name: str, base_branch: str) -> dict:
-    """Single-task graph. With the TDD gate on, emit TASK-TEST → TASK-IMPL
-    (same branch, ordered by deps). Off, emit the legacy single impl task."""
-    base_id = task.get("id") or "TASK-ADHOC"
-    objective = task.get("objective") or ""
-    description = task.get("description") or ""
-    impl_done = task.get("done_definition") or f"Code committed to branch {branch_name}"
-
-    _gate = _tdd_gate_enabled()
-    impl_task = {
-        "id": f"{base_id}-IMPL" if _gate else base_id,
-        "execution_type": "atomic",
-        "agent_type": "RepoBranchAgent",
-        "phase": "implementation",
-        "type": task.get("type") or "coding",
-        "objective": objective,
-        "description": description,
-        "done_definition": impl_done,
-        "verification_steps": [],
-        "required_inputs": [],
-        "expected_outputs": ["implementation_diff"],
-        "deps": [],
-        "facets": facets,
-        "tdd_tests_authored": _gate,
-    }
-    if not _gate:
-        return {"tasks": [impl_task]}
-
-    test_task = {
-        "id": f"{base_id}-TEST",
-        "execution_type": "atomic",
-        "agent_type": "TestAuthorAgent",
-        "phase": "test",
-        "type": "test",
-        "objective": objective,
-        "description": description,
-        "done_definition": "Failing tests committed from the acceptance source",
-        "verification_steps": [],
-        "required_inputs": [],
-        "expected_outputs": ["test_files"],
-        "deps": [],
-        "facets": facets,
-    }
-    impl_task["deps"] = [test_task["id"]]
-    return {"tasks": [test_task, impl_task]}
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +203,15 @@ def run_executor(
         )
         return
 
-    branch_name = f"ai-dev/task-{spec_id[:8]}"
+    # Gate: execute only an APPROVED, persisted plan (built at spec-approval time).
+    plan = load_plan(storage_root, spec_id)
+    if plan is None or not plan.get("approved"):
+        msg = "plan chưa được duyệt" if plan is not None else "chưa có plan đã duyệt"
+        _exec_log(log_path, f"LỖI: {msg} — không thể execute")
+        _write_exec_status(status_path, {"status": "error", "error": msg})
+        return
+
+    branch_name = plan.get("branch") or branch_name_for(spec_id)
     _exec_log(log_path, f"Repo: {repo_path}")
 
     # 1. Get current branch and create execution branch
@@ -307,8 +256,8 @@ def run_executor(
         conn.close()
         return
 
-    # 3. Build task_graph.json and create TASK_GRAPH_APPROVED artifact
-    task_graph = _build_task_graph(task, facets, branch_name, base_branch)
+    # 3. Load task_graph from approved plan and create TASK_GRAPH_APPROVED artifact
+    task_graph = plan["graph"]
     try:
         graph_artifact_id = _create_task_graph_artifact(
             conn, run_id, task_graph, storage_root
