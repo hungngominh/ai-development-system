@@ -29,7 +29,7 @@ SRC_PKG = REPO_ROOT / "src" / "ai_dev_system"
 # Canonical package list — src/ai_dev_system/<name>/__init__.py
 EXPECTED_PACKAGES = {
     "agents", "beads", "cli", "db", "debate", "engine", "eval", "gate",
-    "intake", "migration", "rules", "spec", "storage", "task_graph",
+    "harness", "intake", "migration", "rules", "spec", "storage", "task_graph",
     "verification",
 }
 
