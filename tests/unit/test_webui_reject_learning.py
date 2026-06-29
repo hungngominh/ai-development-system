@@ -1,6 +1,9 @@
 """webui reject-with-reason wires into the failure-learning loop."""
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import ai_dev_system.webui as webui
 from ai_dev_system.config import Config
 from ai_dev_system.db.connection import get_connection
@@ -66,3 +69,41 @@ def test_reject_without_reason_learns_nothing(tmp_path, monkeypatch):
     )
     assert result is None
     assert list(tmp_path.glob("learned-*.yaml")) == []
+
+
+def test_project_rules_dir_for_spec_resolves_repo(tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    specs = tmp_path / "task_specs"
+    specs.mkdir()
+    (specs / "spec1.json").write_text(json.dumps({"repo": str(repo)}), encoding="utf-8")
+    monkeypatch.setattr(webui, "_config",
+                        lambda: Config(storage_root=str(tmp_path), database_url="sqlite:///x"))
+
+    got = webui._project_rules_dir_for_spec("spec1")
+    assert got == Path(repo, ".ai-dev", "rules")
+
+
+def test_project_rules_dir_for_spec_missing_returns_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(webui, "_config",
+                        lambda: Config(storage_root=str(tmp_path), database_url="sqlite:///x"))
+    assert webui._project_rules_dir_for_spec("nope") is None
+
+
+def test_reject_writes_to_project_tier(tmp_path, monkeypatch):
+    url = f"sqlite:///{tmp_path / 'c.db'}"
+    run_id, tr = _seed_failed_task(url)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    specs = tmp_path / "task_specs"
+    specs.mkdir()
+    (specs / "spec1.json").write_text(json.dumps({"repo": str(repo)}), encoding="utf-8")
+    monkeypatch.setattr(webui, "_config",
+                        lambda: Config(storage_root=str(tmp_path), database_url=url))
+
+    # rules_dir NOT passed → must resolve to the project tier from the spec.
+    name = webui._learn_from_rejection(
+        "spec1", run_id, {"type": "coding", "tags": []}, "endpoint ignores auth check",
+    )
+    assert name and name.startswith("learned-")
+    assert (repo / ".ai-dev" / "rules" / "learned-coding.yaml").exists()

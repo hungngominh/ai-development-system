@@ -90,6 +90,21 @@ def _config() -> Config:
 _RULES_DEFS_DIR = Path(__file__).parent / "rules" / "definitions"
 
 
+def _project_rules_dir_for_spec(spec_id: str):
+    """Resolve <repo>/.ai-dev/rules from the task spec, or None if unavailable."""
+    try:
+        cfg = _config()
+        spec_path = Path(cfg.storage_root) / "task_specs" / f"{spec_id}.json"
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        repo = spec.get("repo")
+        if not repo:
+            return None
+        from ai_dev_system.rules.project_rules import project_rules_dir
+        return project_rules_dir(repo)
+    except Exception:  # noqa: BLE001 - resolution must never break reject
+        return None
+
+
 def _learn_from_rejection(spec_id: str, run_id: str, task_obj: dict, reason: str, rules_dir=None):
     """Best-effort: turn a human reject reason into a corrective rule.
 
@@ -114,9 +129,10 @@ def _learn_from_rejection(spec_id: str, run_id: str, task_obj: dict, reason: str
                 "task_type": (task_obj.get("type") or "").strip(),
                 "tags": list(task_obj.get("tags") or []),
             }
+            target_dir = rules_dir or _project_rules_dir_for_spec(spec_id) or _RULES_DEFS_DIR
             result = learn_from_failure(
                 conn, run_id, scope_task,
-                rules_dir=rules_dir or _RULES_DEFS_DIR, source="gate", rejection_reason=reason,
+                rules_dir=target_dir, source="gate", rejection_reason=reason,
             )
             conn.commit()  # we own this connection — persist the RULE_LEARNED event
             return result.rule_name if result else None
