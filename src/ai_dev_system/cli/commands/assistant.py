@@ -43,3 +43,4 @@ def assistant_cmd(
 
     runtime, system_prompt = build_assistant(model=model)
     run_repl(runtime, system_prompt)
+    raise typer.Exit(0)

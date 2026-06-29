@@ -7,13 +7,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+from claude_agent_sdk import CanUseTool, PermissionResultAllow, PermissionResultDeny
 
 SAFE_PREFIX = "mcp__ai_dev__"
 READ_ONLY = {"Read", "Grep", "Glob"}
 
 
-def make_permission_callback(extra_allowed: set[str] | None = None):
+def make_permission_callback(extra_allowed: set[str] | None = None) -> CanUseTool:
     allowed = set(extra_allowed or ())
 
     async def can_use_tool(tool_name: str, input_data: dict[str, Any], context: Any):

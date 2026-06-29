@@ -17,6 +17,8 @@ def test_allows_our_mcp_tools():
 def test_allows_read_only_builtins():
     cb = make_permission_callback()
     assert _decide(cb, "Read", {"file_path": "/x"}).behavior == "allow"
+    assert _decide(cb, "Grep", {"pattern": "x"}).behavior == "allow"
+    assert _decide(cb, "Glob", {"pattern": "**/*"}).behavior == "allow"
 
 
 def test_denies_unlisted_tool():
@@ -29,3 +31,5 @@ def test_denies_unlisted_tool():
 def test_extra_allowed_is_honored():
     cb = make_permission_callback(extra_allowed={"Bash"})
     assert _decide(cb, "Bash", {"command": "ls"}).behavior == "allow"
+    # a different unlisted tool is still denied even with extra_allowed set
+    assert _decide(cb, "WebFetch", {"url": "http://x"}).behavior == "deny"

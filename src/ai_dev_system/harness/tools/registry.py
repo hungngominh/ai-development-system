@@ -25,4 +25,4 @@ class ToolRegistry:
         return [f"mcp__{SERVER_NAME}__{n}" for n in self._names]
 
     def build_server(self) -> Any:
-        return create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=self._tools)
+        return create_sdk_mcp_server(name=SERVER_NAME, version="0.1.0", tools=list(self._tools))

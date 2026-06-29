@@ -47,6 +47,11 @@ def test_reduce_joins_multiple_text_blocks():
     assert out.final_text == "a\nb"
 
 
+def test_reduce_prefers_result_string_over_text():
+    out = reduce_messages([_assistant([_text("ignored")]), _result(result="FINAL")])
+    assert out.final_text == "FINAL"
+
+
 def test_fake_runtime_returns_scripted_and_records_calls():
     scripted = TurnResult("hi", [], {}, None, None)
     fake = FakeAgentRuntime(scripted)

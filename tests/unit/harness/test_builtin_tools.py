@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from ai_dev_system.harness.tools.builtin import now_tool
 
@@ -16,3 +16,4 @@ def test_now_tool_returns_iso8601_utc_text():
     # Must parse as an ISO-8601 timestamp and carry timezone info (UTC).
     parsed = datetime.fromisoformat(text)
     assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timedelta(0)
