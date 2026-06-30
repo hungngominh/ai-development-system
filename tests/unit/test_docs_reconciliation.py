@@ -30,7 +30,7 @@ SRC_PKG = REPO_ROOT / "src" / "ai_dev_system"
 EXPECTED_PACKAGES = {
     "agents", "assistant", "beads", "cli", "db", "debate", "engine", "eval", "gate",
     "gateway", "harness", "intake", "migration", "rules", "spec", "storage",
-    "task_graph", "verification",
+    "task_graph", "verification", "vcs",
 }
 
 # Sub-packages (dotted) tracked explicitly — only new ones need to be listed here;
