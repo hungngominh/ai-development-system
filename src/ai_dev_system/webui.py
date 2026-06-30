@@ -645,6 +645,41 @@ def _task_spec_log_card(spec_id: str, title: str = "Log tiến trình") -> str:
     return f"<div class='card'><h2>{html.escape(title)}</h2><pre>{pre}</pre></div>"
 
 
+def _render_self_review_findings(findings: list) -> str:
+    """Render a 'Spec self-review' card for a list of Finding dicts.
+
+    Each finding dict has: section, dimension, severity, message, fix.
+    All text is HTML-escaped. Returns empty string if findings is empty.
+    """
+    if not findings:
+        return ""
+    rows = []
+    for f in findings:
+        if not isinstance(f, dict):
+            continue
+        dimension = html.escape(str(f.get("dimension") or ""))
+        severity = html.escape(str(f.get("severity") or ""))
+        section = html.escape(str(f.get("section") or ""))
+        message = html.escape(str(f.get("message") or ""))
+        fix = html.escape(str(f.get("fix") or ""))
+        header = f"<strong>{dimension}</strong> · {severity} · <code>{section}</code>"
+        fix_line = f"<div class='muted' style='font-size:12px'>Fix: {fix}</div>" if fix else ""
+        rows.append(
+            f"<div style='margin-bottom:10px'>"
+            f"<div>{header}</div>"
+            f"<div style='margin:2px 0 0 0'>{message}</div>"
+            f"{fix_line}"
+            f"</div>"
+        )
+    body = "".join(rows)
+    return (
+        "<div class='card'>"
+        "<h2>Spec self-review</h2>"
+        f"{body}"
+        "</div>"
+    )
+
+
 def _task_spec_page(spec_id: str) -> bytes:
     path = Path(_config().storage_root) / "task_specs" / f"{spec_id}.json"
     if not path.exists():
@@ -673,8 +708,11 @@ def _task_spec_page(spec_id: str) -> bytes:
             )
         approved_badge = ("<p><span class='badge b-done'>Đã duyệt ✓</span></p>"
                           if data.get("approved") else "")
+        findings = data.get("findings", [])
+        findings_card = _render_self_review_findings(findings) if findings else ""
         return _page("Task spec",
                      warning
+                     + findings_card
                      + approved_badge
                      + _render_task_spec(data.get("task") or {}, facets, spec_id)
                      + "<p class='muted'><a href='/'>← trang chủ</a></p>")
