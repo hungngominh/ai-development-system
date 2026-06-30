@@ -112,6 +112,21 @@ def make_dev_pipeline_tools(
             _base_branch = getattr(_b, "base_branch", "") or ""
             break
 
+    # Compiled Gate-2 decision regex (case-insensitive) — shared by both the
+    # pending-chat-task block in dev_answer_gate AND the existing Gate-2 block.
+    _G2_APPROVE_RE = re.compile(
+        r"\b(approve|duy[eệ]t|đồng\s*ý|ok|yes)\b", re.IGNORECASE
+    )
+    # Reject includes English/Vietnamese NEGATORS so a negated approval
+    # ("do not approve", "never approve", "not ok") matches BOTH approve and
+    # reject → lands in the ambiguous→guidance branch instead of silently
+    # approving (the approve keyword alone would otherwise win). The Vietnamese
+    # negator "không" is already covered by the kh[oô]ng alternative.
+    _G2_REJECT_RE = re.compile(
+        r"\b(reject|t[uừ]\s*ch[oố]i|no|kh[oô]ng|not|never|cannot|don'?t|won'?t|can'?t)\b",
+        re.IGNORECASE,
+    )
+
     # ------------------------------------------------------------------ #
     # Tool 1: dev_newproject_start                                        #
     # ------------------------------------------------------------------ #
@@ -190,6 +205,53 @@ def make_dev_pipeline_tools(
         {"run_id": str},
     )
     async def dev_run_status(args: dict[str, Any]) -> dict[str, Any]:
+        # Repo-bound single-task flow takes priority when a task is pending for this chat.
+        pending = chat_task_store.get_pending(surface, chat_id)
+        if pending and not (args.get("run_id") or "").strip():
+            from pathlib import Path as _P
+            from ai_dev_system.task_graph.single_task_plan import (
+                plan_single_task, load_plan,
+            )
+            sr = str(config.storage_root)
+            spec_id = pending["spec_id"]
+            specs = _P(sr) / "task_specs"
+            exec_path = specs / f"{spec_id}-exec.json"
+            spec_path = specs / f"{spec_id}.json"
+
+            # 1. Execution finished? create the PR (once) and report it.
+            if exec_path.exists():
+                ex = json.loads(exec_path.read_text(encoding="utf-8"))
+                if ex.get("exec_status") == "COMPLETED":
+                    if not pending.get("pr_url"):
+                        res = create_pr(
+                            pending["repo"], ex.get("branch", ""),
+                            ex.get("base_branch") or pending.get("base_branch") or "main",
+                            f"ai-dev: {spec_id[:8]}",
+                        )
+                        if res.get("ok") and res.get("pr_url"):
+                            chat_task_store.set_pr_url(surface, chat_id, res["pr_url"])
+                            return {"content": [{"type": "text", "text":
+                                f"✅ PR: {res['pr_url']}"}]}
+                        return {"content": [{"type": "text", "text":
+                            f"Execution xong nhưng tạo PR lỗi: {res.get('error')}"}]}
+                    return {"content": [{"type": "text", "text":
+                        f"✅ PR: {pending['pr_url']}"}]}
+                if ex.get("exec_status") in ("FAILED", "ABORTED"):
+                    return {"content": [{"type": "text", "text":
+                        f"❌ Execution {ex.get('exec_status')}: {ex.get('error','')[:300]}"}]}
+                return {"content": [{"type": "text", "text": "⏳ Đang chạy execution..."}]}
+
+            # 2. Spec ready? materialize + summarize the plan, await approval.
+            if spec_path.exists():
+                spec = json.loads(spec_path.read_text(encoding="utf-8"))
+                plan = load_plan(sr, spec_id) or plan_single_task(spec, spec_id, storage_root=sr)
+                steps = (plan.get("graph") or {}).get("tasks") or plan.get("graph") or []
+                n = len(steps) if isinstance(steps, list) else 0
+                return {"content": [{"type": "text", "text":
+                    f"📋 Plan sẵn sàng ({n} bước). Nhắn 'duyệt' để chạy."}]}
+
+            return {"content": [{"type": "text", "text": "⏳ Đang tạo spec + plan..."}]}
+
         run_id: str = (args.get("run_id") or "").strip()
         if not run_id:
             run_id = link_store.latest_for_chat(surface, chat_id) or ""
@@ -269,20 +331,6 @@ def make_dev_pipeline_tools(
     # Tool 3: dev_answer_gate                                             #
     # ------------------------------------------------------------------ #
 
-    # Compiled Gate-2 decision regex (case-insensitive)
-    _G2_APPROVE_RE = re.compile(
-        r"\b(approve|duy[eệ]t|đồng\s*ý|ok|yes)\b", re.IGNORECASE
-    )
-    # Reject includes English/Vietnamese NEGATORS so a negated approval
-    # ("do not approve", "never approve", "not ok") matches BOTH approve and
-    # reject → lands in the ambiguous→guidance branch instead of silently
-    # approving (the approve keyword alone would otherwise win). The Vietnamese
-    # negator "không" is already covered by the kh[oô]ng alternative.
-    _G2_REJECT_RE = re.compile(
-        r"\b(reject|t[uừ]\s*ch[oố]i|no|kh[oô]ng|not|never|cannot|don'?t|won'?t|can'?t)\b",
-        re.IGNORECASE,
-    )
-
     @tool(
         "dev_answer_gate",
         "Route a free-text gate answer. At Gate 1: `Q1 chọn A/B`, `approve all`, `confirm`. "
@@ -292,6 +340,36 @@ def make_dev_pipeline_tools(
         {"run_id": str, "text": str},
     )
     async def dev_answer_gate(args: dict[str, Any]) -> dict[str, Any]:
+        pending = chat_task_store.get_pending(surface, chat_id)
+        if pending and not (args.get("run_id") or "").strip():
+            text = args.get("text", "")
+            if _G2_APPROVE_RE.search(text) and not _G2_REJECT_RE.search(text):
+                from ai_dev_system.task_graph.single_task_plan import approve_plan
+                sr = str(config.storage_root)
+                spec_id = pending["spec_id"]
+                if not approve_plan(sr, spec_id):
+                    return {"content": [{"type": "text", "text":
+                        "Chưa có plan để duyệt — hỏi trạng thái trước."}]}
+                log_dir = Path(sr) / "ui_logs"; log_dir.mkdir(parents=True, exist_ok=True)
+                argv = [
+                    sys.executable, "-m", "ai_dev_system.task_graph.single_task_executor",
+                    "--id", spec_id, "--storage-root", sr,
+                    "--database-url", str(config.database_url),
+                ]
+                try:
+                    with open(log_dir / f"exec_{spec_id[:8]}.log", "a",
+                              encoding="utf-8", errors="replace") as logf:
+                        _spawn_exec(argv, stdout=logf, stderr=subprocess.STDOUT, cwd=str(_REPO_ROOT))
+                except Exception as exc:  # pragma: no cover
+                    return {"content": [{"type": "text", "text": f"exec spawn error: {exc}"}]}
+                return {"content": [{"type": "text", "text":
+                    "▶️ Đang chạy execution. Hỏi trạng thái để nhận link PR khi xong."}]}
+            if _G2_REJECT_RE.search(text) and not _G2_APPROVE_RE.search(text):
+                chat_task_store.clear(surface, chat_id)
+                return {"content": [{"type": "text", "text": "Đã huỷ task."}]}
+            return {"content": [{"type": "text", "text":
+                "Nhắn 'duyệt' để chạy task, hoặc 'từ chối' để huỷ."}]}
+
         run_id: str = (args.get("run_id") or "").strip()
         if not run_id:
             run_id = link_store.latest_for_chat(surface, chat_id) or ""

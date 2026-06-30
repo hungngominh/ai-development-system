@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 from ai_dev_system.harness.tools.dev_pipeline import make_dev_pipeline_tools
 from ai_dev_system.harness.tools.chat_task_store import ChatTaskStore
 
@@ -52,3 +53,75 @@ def test_task_start_spawns_worker_and_records_pending(tmp_path):
     assert "add logout button" in spawned[0]
     pending = store.get_pending("tg", "1")
     assert pending["spec_id"] == "spec123" and pending["repo"] == "/repos/app"
+
+
+# ---------------------------------------------------------------------------
+# Task 7: Plan summary, approval, executor spawn, PR reply
+# ---------------------------------------------------------------------------
+
+def _seed_spec(tmp_path, spec_id, repo="/repos/app"):
+    d = tmp_path / "task_specs"; d.mkdir(parents=True, exist_ok=True)
+    (d / f"{spec_id}.json").write_text(json.dumps({
+        "status": "done", "idea": "add logout", "repo": repo,
+        "task": {"title": "Add logout"}, "facets": {},
+    }), encoding="utf-8")
+
+
+def test_status_shows_plan_when_spec_ready(tmp_path, monkeypatch):
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="s1", repo="/repos/app", base_branch="main")
+    _seed_spec(tmp_path, "s1")
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+    )
+    status = _find(tools, "dev_run_status")
+    out = asyncio.run(status.handler({"run_id": ""}))
+    txt = out["content"][0]["text"]
+    assert "plan" in txt.lower() and "duyệt" in txt.lower()
+    assert (tmp_path / "task_specs" / "s1-plan.json").exists()  # plan materialized
+
+
+def test_approve_spawns_executor(tmp_path):
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="s2", repo="/repos/app", base_branch="main")
+    _seed_spec(tmp_path, "s2")
+    # pre-build the plan so approve_plan finds it
+    from ai_dev_system.task_graph.single_task_plan import plan_single_task
+    plan_single_task({"task": {"title": "t"}, "facets": {}}, "s2", storage_root=str(tmp_path))
+    spawned = []
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+        spawn_executor=lambda argv, **kw: spawned.append(argv),
+    )
+    gate = _find(tools, "dev_answer_gate")
+    out = asyncio.run(gate.handler({"run_id": "", "text": "duyệt"}))
+    assert "s2" in spawned[0] and "single_task_executor" in " ".join(spawned[0])
+    assert "đang chạy" in out["content"][0]["text"].lower() or "execution" in out["content"][0]["text"].lower()
+
+
+def test_status_creates_pr_when_exec_completed(tmp_path):
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="s3", repo="/repos/app", base_branch="main")
+    _seed_spec(tmp_path, "s3")
+    d = tmp_path / "task_specs"
+    (d / "s3-exec.json").write_text(json.dumps({
+        "branch": "ai-dev/s3", "base_branch": "main", "exec_status": "COMPLETED",
+    }), encoding="utf-8")
+    pr_calls = []
+    def fake_create_pr(repo, branch, base, title, body="", **kw):
+        pr_calls.append((repo, branch, base))
+        return {"ok": True, "pr_url": "https://github.com/o/r/pull/9", "pushed": True, "error": None}
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store, create_pr=fake_create_pr,
+    )
+    status = _find(tools, "dev_run_status")
+    out = asyncio.run(status.handler({"run_id": ""}))
+    assert pr_calls and pr_calls[0][1] == "ai-dev/s3"
+    assert "pull/9" in out["content"][0]["text"]
+    assert store.get_pending("tg", "1")["pr_url"].endswith("/pull/9")
