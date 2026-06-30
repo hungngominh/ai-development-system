@@ -62,3 +62,46 @@ def test_reply_sends():
     a, sent = _adapter(_transport_seq([]))
     a.reply(111, "pong")
     assert sent == [(111, "pong")]
+
+
+# --- per-instance name tests ---
+
+def test_default_name_is_telegram():
+    a, _ = _adapter(_transport_seq([]))
+    assert a.name == "telegram"
+
+
+def _named_adapter(name, transport, allowed=(1,)):
+    sent = []
+    a = TelegramAdapter(
+        name=name,
+        token="T",
+        allowed_chat_ids=allowed,
+        transport=transport,
+        sender=lambda token, chat_id, text, transport=None: sent.append((chat_id, text)),
+    )
+    return a, sent
+
+
+def test_custom_name_stored_on_instance():
+    upd = [{"update_id": 10, "message": {"chat": {"id": 1}, "text": "hello"}}]
+    a, _ = _named_adapter("projA", _transport_seq([upd]))
+    assert a.name == "projA"
+
+
+def test_custom_name_propagates_to_inbound_surface():
+    upd = [{"update_id": 10, "message": {"chat": {"id": 1}, "text": "hello"}}]
+    a, _ = _named_adapter("projA", _transport_seq([upd]))
+    out = a.poll(timeout_s=0)
+    assert len(out) == 1
+    assert out[0].surface == "projA"
+
+
+def test_two_adapters_have_distinct_surfaces():
+    upd = [{"update_id": 1, "message": {"chat": {"id": 1}, "text": "msg"}}]
+    a_proj, _ = _named_adapter("projA", _transport_seq([upd]))
+    b_proj, _ = _named_adapter("projB", _transport_seq([upd]))
+    out_a = a_proj.poll(timeout_s=0)
+    out_b = b_proj.poll(timeout_s=0)
+    assert out_a[0].surface == "projA"
+    assert out_b[0].surface == "projB"

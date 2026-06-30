@@ -9,9 +9,8 @@ from ai_dev_system.gateway import telegram_client
 
 
 class TelegramAdapter:
-    name = "telegram"
-
-    def __init__(self, *, token: str, allowed_chat_ids, transport=None, sender=None) -> None:
+    def __init__(self, *, token: str, allowed_chat_ids, name: str = "telegram", transport=None, sender=None) -> None:
+        self.name = name
         self._token = token
         self._allowed = set(allowed_chat_ids or ())
         self._transport = transport
