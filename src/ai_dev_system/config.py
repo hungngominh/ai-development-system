@@ -26,6 +26,8 @@ class TelegramBotConfig:
     label: str
     token: str
     allowed_chat_ids: tuple[int, ...] = ()
+    repo_path: str = ""
+    base_branch: str = ""
 
 
 def _default_retry_policy() -> dict[str, dict[str, Any]]:
@@ -72,8 +74,13 @@ class Config:
                     label = str(b.get("label") or "").strip()
                     token = str(b.get("token") or "").strip()
                     ids = tuple(int(x) for x in (b.get("chat_ids") or []))
+                    repo_path = str(b.get("repo_path") or "").strip()
+                    base_branch = str(b.get("base_branch") or "").strip()
                     if label and token:
-                        _bots.append(TelegramBotConfig(label=label, token=token, allowed_chat_ids=ids))
+                        _bots.append(TelegramBotConfig(
+                            label=label, token=token, allowed_chat_ids=ids,
+                            repo_path=repo_path, base_branch=base_branch,
+                        ))
             except Exception:  # noqa: BLE001 - malformed JSON → fall back to single-token
                 _bots = []
         if not _bots and _tg_token:
