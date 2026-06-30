@@ -121,7 +121,7 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
         blocking = find_blocking(payload)
         if blocking:
             try:
-                synth_llm = make_llm_client("spec")
+                synth_llm = llm if llm is not None else make_llm_client("spec")
             except Exception:  # noqa: BLE001
                 synth_llm = None
             questions = synthesize_questions(blocking, idea=idea, llm=synth_llm)

@@ -23,7 +23,7 @@ def test_worker_writes_clarify_needed_true(tmp_path, monkeypatch):
     w.run_worker("abc", "add OwnerId", "/repo", storage_root=str(tmp_path), database_url="sqlite://")
     spec = json.loads((tmp_path / "task_specs" / "abc.json").read_text(encoding="utf-8"))
     assert spec["clarify"]["needed"] is True
-    assert spec["clarify"]["questions"]            # non-empty (fallback used)
+    assert spec["clarify"]["questions"]            # non-empty (raw-message fallback used)
 
 
 def test_worker_writes_clarify_needed_false_when_clean(tmp_path, monkeypatch):
