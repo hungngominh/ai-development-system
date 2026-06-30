@@ -48,8 +48,8 @@ from claude_agent_sdk import tool
 
 from ai_dev_system.cli.start_project import make_project_id, name_to_slug
 from ai_dev_system.gate.gate1_bridge import Decision as GateDecision
-from ai_dev_system.task_graph.clarify_questions import format_questions
 from ai_dev_system.gate.gate1_bridge import finalize_gate1
+from ai_dev_system.task_graph.clarify_questions import format_questions
 from ai_dev_system.gate.gate1_review.loader import load_gate1_context
 from ai_dev_system.gate.gate1_review.parser import parse_user_input
 from ai_dev_system.gate.gate1_review.state import clear_state, load_state, save_state
