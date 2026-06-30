@@ -42,7 +42,7 @@ from ai_dev_system.gate.gate1_bridge import Decision as GateDecision
 from ai_dev_system.gate.gate1_bridge import finalize_gate1
 from ai_dev_system.gate.gate1_review.loader import load_gate1_context
 from ai_dev_system.gate.gate1_review.parser import parse_user_input
-from ai_dev_system.gate.gate1_review.state import load_state, save_state
+from ai_dev_system.gate.gate1_review.state import clear_state, load_state, save_state
 
 # Repo root: this file lives at src/ai_dev_system/harness/tools/dev_pipeline.py
 # parents: [0]=tools/, [1]=harness/, [2]=ai_dev_system/, [3]=src/, [4]=repo root
@@ -259,6 +259,9 @@ def make_dev_pipeline_tools(
 
             # Finalize Gate 1 (sets run status to RUNNING_PHASE_1D, writes artifacts)
             finalize_gate1(run_id, decisions, config.storage_root, conn)
+            # Clear the gate session state so a finalized gate leaves no stale
+            # resolved choices behind (matches webui._do_gate1_approve).
+            clear_state(run_id, conn)
             conn.commit()
 
             # Spawn Phase B detached (auto-approves Gate 2 via non-TTY stdin)

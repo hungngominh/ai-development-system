@@ -246,6 +246,18 @@ class TestDevAnswerGateApprove:
         tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
         gate_tool = _gate_tool(tools)
 
+        # Seed a non-empty gate session so we can verify finalize clears it.
+        from ai_dev_system.gate.gate1_review.state import (
+            load_state as _ls, save_state as _ss,
+        )
+        _seed = _ls(run_id, db)
+        _seed.record_choice("Q1", "agent_a")
+        _ss(run_id, _seed, db)
+        db.commit()
+        assert db.execute(
+            "SELECT gate1_session_state FROM runs WHERE run_id=?", (run_id,)
+        ).fetchone()[0] is not None
+
         result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "confirm"}))
 
         # spawn_phase_b called exactly once with correct argv
@@ -263,6 +275,11 @@ class TestDevAnswerGateApprove:
         # Run status updated
         row = db.execute("SELECT status FROM runs WHERE run_id=?", (run_id,)).fetchone()
         assert row["status"] == "RUNNING_PHASE_1D"
+
+        # Gate session state cleared after finalize (no stale resolved choices).
+        assert db.execute(
+            "SELECT gate1_session_state FROM runs WHERE run_id=?", (run_id,)
+        ).fetchone()[0] is None
 
         # Content indicates phase-b started
         text = result["content"][0]["text"]
