@@ -6,6 +6,7 @@ All tests are offline/deterministic — no actual subprocess spawn, no LLM calls
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import uuid
 from pathlib import Path
@@ -169,8 +170,8 @@ class TestDevRunStatus:
         assert "content" in result
         text = result["content"][0]["text"]
         assert "RUNNING_PHASE_1B" in text
-        # Should NOT mention questions
-        assert "questions" not in text.lower() or "0" in text or "[]" in text
+        # Non-gate status must not carry a questions payload (unambiguous JSON check).
+        assert "questions" not in json.loads(text)
 
     def test_paused_at_gate1_returns_status_and_questions(self, db, conn_factory, link_store, config, tmp_path, monkeypatch):
         """PAUSED_AT_GATE_1 → returns status + non-empty questions list.
