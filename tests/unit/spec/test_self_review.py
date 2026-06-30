@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock
 
-import pytest
-
 from ai_dev_system.spec.self_review import (
     Finding, self_review, self_review_enabled,
 )
@@ -37,6 +35,19 @@ def test_parses_findings(monkeypatch):
     assert out[0] == Finding(section="proposal", dimension="placeholder",
                              severity="error", message="TBD", fix="fill")
     assert out[1].dimension == "scope_decomposition"
+
+
+def test_individual_malformed_finding_is_skipped(monkeypatch):
+    """A finding missing required keys is skipped without aborting the rest —
+    a named contract Tasks 2-3 rely on."""
+    monkeypatch.delenv("AI_DEV_SPEC_SELF_REVIEW", raising=False)
+    llm = _critic_stub([
+        {"dimension": "placeholder"},  # missing section + message → skipped
+        {"section": "design", "dimension": "ambiguity", "severity": "warning",
+         "message": "readable two ways", "fix": "pick one"},
+    ])
+    out = self_review({"design": "..."}, "project", llm)
+    assert len(out) == 1 and out[0].section == "design"
 
 
 def test_malformed_json_returns_empty(monkeypatch):
