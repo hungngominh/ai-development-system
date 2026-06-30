@@ -212,6 +212,63 @@ def test_mixed_findings_only_eligible_repaired(tmp_path):
     assert warn_finding in bundle.self_review_findings
 
 
+# ---- Important #2: persist self_review.json in bundle root_dir ----
+
+
+def test_self_review_json_written_when_findings_non_empty(tmp_path):
+    """run_spec_pipeline writes self_review.json in output_dir when findings exist (Important #2).
+
+    Asserts the file exists on disk (real on-disk assertion) and contains the expected finding.
+    Non-auto-repairable finding used (scope_decomposition/warning) so repair_section is not called.
+    """
+    llm = _stub_llm()
+    finding = _warning_finding()  # scope_decomposition/warning — not auto-repaired
+
+    with (
+        patch("ai_dev_system.spec.pipeline.self_review", return_value=[finding]),
+        patch("ai_dev_system.spec.pipeline.repair_section"),
+    ):
+        cfg = SpecPipelineConfig(parallel_sections=False)
+        bundle = run_spec_pipeline(_brief_v2(), {}, tmp_path, llm, config=cfg)
+
+    sr_file = tmp_path / "self_review.json"
+    assert sr_file.exists(), "self_review.json must be written to bundle root_dir"
+    import json
+    data = json.loads(sr_file.read_text(encoding="utf-8"))
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["dimension"] == "scope_decomposition"
+    assert data[0]["severity"] == "warning"
+    assert data[0]["message"] == "Spec may be too large for a single task graph."
+
+
+def test_self_review_json_not_written_when_disabled(tmp_path, monkeypatch):
+    """When AI_DEV_SPEC_SELF_REVIEW=0, self_review.json must NOT be written."""
+    monkeypatch.setenv("AI_DEV_SPEC_SELF_REVIEW", "0")
+    llm = _stub_llm()
+
+    with patch("ai_dev_system.spec.pipeline.self_review") as mock_sr:
+        cfg = SpecPipelineConfig(parallel_sections=False)
+        run_spec_pipeline(_brief_v2(), {}, tmp_path, llm, config=cfg)
+
+    mock_sr.assert_not_called()
+    assert not (tmp_path / "self_review.json").exists()
+
+
+def test_self_review_json_not_written_when_findings_empty(tmp_path):
+    """When self_review returns no findings, self_review.json must NOT be written (M1 parity)."""
+    llm = _stub_llm()
+
+    with (
+        patch("ai_dev_system.spec.pipeline.self_review", return_value=[]),
+        patch("ai_dev_system.spec.pipeline.repair_section"),
+    ):
+        cfg = SpecPipelineConfig(parallel_sections=False)
+        run_spec_pipeline(_brief_v2(), {}, tmp_path, llm, config=cfg)
+
+    assert not (tmp_path / "self_review.json").exists()
+
+
 # ---- section not in drafts dict ----
 
 

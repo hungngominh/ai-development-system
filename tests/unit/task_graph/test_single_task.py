@@ -45,6 +45,10 @@ def test_spec_single_task_stub_yields_all_needs_human():
 
 
 def test_spec_single_task_uses_agentic_when_repo_given(monkeypatch):
+    # Pin critic OFF so this hermetic test never spawns a real `claude` CLI call.
+    # The agentic path (llm=None) would otherwise try make_llm_client("critic") which
+    # shells out via the project .env ClaudeCodeLLMClient when AI_DEV_SPEC_SELF_REVIEW=1.
+    monkeypatch.setenv("AI_DEV_SPEC_SELF_REVIEW", "0")
     import ai_dev_system.task_graph.single_task as st
     called = {}
     def _fake_agentic(task, repo_path, **kw):

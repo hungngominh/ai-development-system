@@ -179,13 +179,16 @@ def test_run_worker_includes_findings_in_json(tmp_path, monkeypatch, file_db_url
 # Test 6: worker with no findings from spec (empty list propagated)
 # ---------------------------------------------------------------------------
 
-def test_run_worker_findings_empty_list_when_none_returned(tmp_path, monkeypatch, file_db_url):
-    """When spec_single_task returns no findings, worker JSON has findings: []."""
+def test_run_worker_findings_key_absent_when_none_returned(tmp_path, monkeypatch, file_db_url):
+    """When spec_single_task returns no findings, worker JSON omits the 'findings' key (M1).
+
+    The webui reader uses .get("findings", []) so the absent key is safe.
+    """
     from ai_dev_system.task_graph import single_task_worker as w
     from ai_dev_system.debate.llm import StubDebateLLMClient
 
     monkeypatch.setattr(w, "make_llm_client", lambda step="default": StubDebateLLMClient())
-    # spec_single_task returns no 'findings' key (old behavior) — worker should still include []
+    # spec_single_task returns no 'findings' key (disabled path behavior)
     real_spec = w.spec_single_task
     def _spec_no_findings(idea, llm, **kw):
         base = real_spec(idea, llm, **kw)
@@ -197,5 +200,33 @@ def test_run_worker_findings_empty_list_when_none_returned(tmp_path, monkeypatch
                         storage_root=str(tmp_path), database_url=file_db_url)
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["status"] == "done"
-    assert "findings" in data
-    assert data["findings"] == []
+    # M1: 'findings' key must be ABSENT when empty (byte-identical to legacy disabled path)
+    assert "findings" not in data
+
+
+# ---------------------------------------------------------------------------
+# Guard test #1: agentic path with critic disabled does NOT call make_llm_client
+# ---------------------------------------------------------------------------
+
+def test_agentic_critic_disabled_does_not_call_make_llm_client(monkeypatch):
+    """When AI_DEV_SPEC_SELF_REVIEW=0, the agentic path must NOT call make_llm_client.
+
+    Guards against regression where spec_single_task(idea, None, repo_path=...) with
+    default-ON critic would shell out to a real claude CLI via make_llm_client("critic").
+    """
+    import ai_dev_system.task_graph.single_task as st
+    from ai_dev_system.task_graph.facets import FACET_KEYS
+
+    monkeypatch.setenv("AI_DEV_SPEC_SELF_REVIEW", "0")
+
+    # Patch agentic facets so no real repo access
+    def _fake_agentic(task, repo_path, **kw):
+        return {k: {"status": "filled", "content": "x", "reason": ""} for k in FACET_KEYS}
+    monkeypatch.setattr(st, "generate_task_facets_agentic", _fake_agentic)
+
+    with patch("ai_dev_system.llm_factory.make_llm_client") as mock_mlc:
+        result = st.spec_single_task("add feature", None, repo_path="/some/repo")
+
+    # make_llm_client must NOT be called when critic is disabled
+    mock_mlc.assert_not_called()
+    assert result.get("findings", []) == []

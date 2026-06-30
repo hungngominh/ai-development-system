@@ -195,6 +195,17 @@ def run_spec_pipeline(
         path.write_text(content, encoding="utf-8")
         files[filename] = path
 
+    # Persist self-review findings alongside the 5 section files so they travel
+    # with the SPEC_BUNDLE artifact and are not silently discarded.
+    # Only written when non-empty (disabled path: self_review_findings == []).
+    import json as _json
+    if findings:
+        sr_path = output_dir / "self_review.json"
+        sr_path.write_text(
+            _json.dumps([f.__dict__ for f in findings], ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     # Stage 5: Trace map (SP8)
     trace_map_path: Path | None = None
     if cfg.require_trace_map:

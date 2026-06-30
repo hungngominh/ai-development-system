@@ -62,6 +62,9 @@ def spec_single_task(idea: str, llm, *, title: str | None = None,
             except Exception:  # noqa: BLE001 — non-blocking; critic failure must not break spec
                 critic_llm = None
         if critic_llm is not None:
-            findings = self_review(facets, "single_task", critic_llm)
+            # M2: include task objective so the critic has scope context for
+            # the scope_decomposition dimension (not just the raw facets dict).
+            critic_payload = {"objective": task.get("objective"), "facets": facets}
+            findings = self_review(critic_payload, "single_task", critic_llm)
 
     return {"task": task, "facets": facets, "findings": [f.__dict__ for f in findings]}
