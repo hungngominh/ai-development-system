@@ -210,9 +210,7 @@ def make_dev_pipeline_tools(
         pending = chat_task_store.get_pending(surface, chat_id)
         if pending and not (args.get("run_id") or "").strip():
             from pathlib import Path as _P
-            from ai_dev_system.task_graph.single_task_plan import (
-                plan_single_task, load_plan,
-            )
+            from ai_dev_system.task_graph.single_task_plan import load_plan
             sr = str(config.storage_root)
             spec_id = pending["spec_id"]
             specs = _P(sr) / "task_specs"
@@ -241,7 +239,7 @@ def make_dev_pipeline_tools(
                         f"❌ Execution {ex.get('exec_status')}: {ex.get('error','')[:300]}"}]}
                 return {"content": [{"type": "text", "text": "⏳ Đang chạy execution..."}]}
 
-            # 2. Spec ready? Clarify gate first, else materialize + summarize the plan.
+            # 2. Spec ready? Clarify gate → spec gate → plan gate.
             if spec_path.exists():
                 spec = json.loads(spec_path.read_text(encoding="utf-8"))
                 clarify = spec.get("clarify") or {}
@@ -250,13 +248,24 @@ def make_dev_pipeline_tools(
                                            clarify_questions=clarify.get("questions") or [])
                     return {"content": [{"type": "text", "text":
                         format_questions(clarify.get("questions") or [])}]}
-                plan = load_plan(sr, spec_id) or plan_single_task(spec, spec_id, storage_root=sr)
-                steps = (plan.get("graph") or {}).get("tasks") or plan.get("graph") or []
+                plan = load_plan(sr, spec_id)
+                if plan is None:
+                    # SPEC gate — plan not generated until the spec is approved.
+                    url = spec.get("spec_doc_url")
+                    link = f"\n📄 Spec: {url}" if url else ""
+                    chat_task_store.update(surface, chat_id, phase="awaiting_spec_approval")
+                    return {"content": [{"type": "text", "text":
+                        f"📄 Spec sẵn sàng.{link}\nNhắn 'duyệt' để tạo plan."}]}
+                # PLAN gate — plan generated + published; awaiting run approval.
+                steps = (plan.get("graph") or {}).get("tasks") or []
                 n = len(steps) if isinstance(steps, list) else 0
+                url = plan.get("doc_url")
+                link = f"\n📋 Plan: {url}" if url else ""
+                chat_task_store.update(surface, chat_id, phase="awaiting_plan_approval")
                 return {"content": [{"type": "text", "text":
-                    f"📋 Plan sẵn sàng ({n} bước). Nhắn 'duyệt' để chạy."}]}
+                    f"📋 Plan sẵn sàng ({n} bước).{link}\nNhắn 'duyệt' để chạy và tạo PR."}]}
 
-            return {"content": [{"type": "text", "text": "⏳ Đang tạo spec + plan..."}]}
+            return {"content": [{"type": "text", "text": "⏳ Đang tạo spec..."}]}
 
         run_id: str = (args.get("run_id") or "").strip()
         if not run_id:
@@ -349,32 +358,62 @@ def make_dev_pipeline_tools(
         pending = chat_task_store.get_pending(surface, chat_id)
         if pending and not (args.get("run_id") or "").strip():
             text = args.get("text", "")
-            if _G2_APPROVE_RE.search(text) and not _G2_REJECT_RE.search(text):
-                from ai_dev_system.task_graph.single_task_plan import approve_plan
-                sr = str(config.storage_root)
-                spec_id = pending["spec_id"]
-                if not approve_plan(sr, spec_id):
+            approve = bool(_G2_APPROVE_RE.search(text)) and not bool(_G2_REJECT_RE.search(text))
+            reject = bool(_G2_REJECT_RE.search(text)) and not bool(_G2_APPROVE_RE.search(text))
+            sr = str(config.storage_root)
+            spec_id = pending["spec_id"]
+            if approve:
+                from ai_dev_system.task_graph.single_task_plan import (
+                    approve_plan, load_plan,
+                )
+                plan = load_plan(sr, spec_id)
+                if plan is not None:
+                    # PLAN gate → approve + execute.
+                    approve_plan(sr, spec_id)
+                    log_dir = Path(sr) / "ui_logs"; log_dir.mkdir(parents=True, exist_ok=True)
+                    argv = [
+                        sys.executable, "-m", "ai_dev_system.task_graph.single_task_executor",
+                        "--id", spec_id, "--storage-root", sr,
+                        "--database-url", str(config.database_url),
+                    ]
+                    try:
+                        with open(log_dir / f"exec_{spec_id[:8]}.log", "a",
+                                  encoding="utf-8", errors="replace") as logf:
+                            _spawn_exec(argv, stdout=logf, stderr=subprocess.STDOUT, cwd=str(_REPO_ROOT))
+                    except Exception as exc:  # pragma: no cover
+                        return {"content": [{"type": "text", "text": f"exec spawn error: {exc}"}]}
                     return {"content": [{"type": "text", "text":
-                        "Chưa có plan để duyệt — hỏi trạng thái trước."}]}
+                        "▶️ Đang chạy execution. Hỏi trạng thái để nhận link PR khi xong."}]}
+                # SPEC gate → require a ready, unblocked spec, then build the plan.
+                from pathlib import Path as _P
+                spec_path = _P(sr) / "task_specs" / f"{spec_id}.json"
+                if not spec_path.exists():
+                    return {"content": [{"type": "text", "text":
+                        "Spec chưa sẵn sàng — hỏi trạng thái trước."}]}
+                spec = json.loads(spec_path.read_text(encoding="utf-8"))
+                if (spec.get("clarify") or {}).get("needed"):
+                    return {"content": [{"type": "text", "text":
+                        "Còn câu hỏi cần trả lời trước khi tạo plan."}]}
                 log_dir = Path(sr) / "ui_logs"; log_dir.mkdir(parents=True, exist_ok=True)
                 argv = [
-                    sys.executable, "-m", "ai_dev_system.task_graph.single_task_executor",
-                    "--id", spec_id, "--storage-root", sr,
-                    "--database-url", str(config.database_url),
+                    sys.executable, "-m", "ai_dev_system.task_graph.single_task_worker",
+                    "--id", spec_id, "--mode", "plan", "--repo", pending["repo"],
+                    "--storage-root", sr, "--database-url", str(config.database_url),
                 ]
                 try:
-                    with open(log_dir / f"exec_{spec_id[:8]}.log", "a",
+                    with open(log_dir / f"plan_{spec_id[:8]}.log", "a",
                               encoding="utf-8", errors="replace") as logf:
-                        _spawn_exec(argv, stdout=logf, stderr=subprocess.STDOUT, cwd=str(_REPO_ROOT))
+                        _spawn_worker(argv, stdout=logf, stderr=subprocess.STDOUT, cwd=str(_REPO_ROOT))
                 except Exception as exc:  # pragma: no cover
-                    return {"content": [{"type": "text", "text": f"exec spawn error: {exc}"}]}
+                    return {"content": [{"type": "text", "text": f"plan spawn error: {exc}"}]}
+                chat_task_store.update(surface, chat_id, phase="plan_generating")
                 return {"content": [{"type": "text", "text":
-                    "▶️ Đang chạy execution. Hỏi trạng thái để nhận link PR khi xong."}]}
-            if _G2_REJECT_RE.search(text) and not _G2_APPROVE_RE.search(text):
+                    "✅ Đã duyệt spec. Đang tạo plan… Hỏi trạng thái để xem plan."}]}
+            if reject:
                 chat_task_store.clear(surface, chat_id)
                 return {"content": [{"type": "text", "text": "Đã huỷ task."}]}
             return {"content": [{"type": "text", "text":
-                "Nhắn 'duyệt' để chạy task, hoặc 'từ chối' để huỷ."}]}
+                "Nhắn 'duyệt' để tiếp tục, hoặc 'từ chối' để huỷ."}]}
 
         run_id: str = (args.get("run_id") or "").strip()
         if not run_id:
@@ -625,7 +664,7 @@ def make_dev_pipeline_tools(
                                     repo=_repo_path, base_branch=_base_branch,
                                     idea=task_description)
         text = json.dumps({"spec_id": spec_id, "status": "spec_generating",
-                           "note": "Đang tạo spec + plan. Hỏi trạng thái rồi nhắn 'duyệt' để chạy."})
+                           "note": "Đang tạo spec. Hỏi trạng thái rồi nhắn 'duyệt' để duyệt spec (sau đó mình tạo plan)."})
         return {"content": [{"type": "text", "text": text}]}
 
     @tool(

@@ -67,7 +67,7 @@ def _seed_spec(tmp_path, spec_id, repo="/repos/app"):
     }), encoding="utf-8")
 
 
-def test_status_shows_plan_when_spec_ready(tmp_path, monkeypatch):
+def test_status_shows_spec_gate_when_spec_ready_no_plan(tmp_path):
     cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
     store = ChatTaskStore(str(tmp_path))
     store.set_pending("tg", "1", spec_id="s1", repo="/repos/app", base_branch="main")
@@ -78,9 +78,52 @@ def test_status_shows_plan_when_spec_ready(tmp_path, monkeypatch):
     )
     status = _find(tools, "dev_run_status")
     out = asyncio.run(status.handler({"run_id": ""}))
-    txt = out["content"][0]["text"]
-    assert "plan" in txt.lower() and "duyệt" in txt.lower()
-    assert (tmp_path / "task_specs" / "s1-plan.json").exists()  # plan materialized
+    txt = out["content"][0]["text"].lower()
+    assert "spec" in txt and "duyệt" in txt
+    # plan is NOT materialized at the spec gate
+    assert not (tmp_path / "task_specs" / "s1-plan.json").exists()
+    assert store.get_pending("tg", "1")["phase"] == "awaiting_spec_approval"
+
+
+def test_status_shows_plan_gate_when_plan_ready(tmp_path):
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="s1b", repo="/repos/app", base_branch="main")
+    _seed_spec(tmp_path, "s1b")
+    from ai_dev_system.task_graph.single_task_plan import plan_single_task, plan_path
+    plan_single_task({"task": {"title": "t"}, "facets": {}}, "s1b", storage_root=str(tmp_path))
+    # simulate a published plan doc
+    pp = plan_path(str(tmp_path), "s1b")
+    import json as _j
+    pl = _j.loads(pp.read_text(encoding="utf-8")); pl["doc_url"] = "https://github.com/o/r/blob/b/p.md"
+    pp.write_text(_j.dumps(pl), encoding="utf-8")
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+    )
+    status = _find(tools, "dev_run_status")
+    out = asyncio.run(status.handler({"run_id": ""}))
+    txt = out["content"][0]["text"].lower()
+    assert "plan" in txt and "bước" in txt and "github.com" in txt
+
+
+def test_approve_spec_spawns_plan_worker(tmp_path):
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="s7", repo="/repos/app", base_branch="main")
+    _seed_spec(tmp_path, "s7")  # spec ready, no plan yet
+    spawned = []
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+        spawn_task_worker=lambda argv, **kw: spawned.append(argv),
+    )
+    gate = _find(tools, "dev_answer_gate")
+    out = asyncio.run(gate.handler({"run_id": "", "text": "duyệt"}))
+    assert spawned and "--mode" in spawned[0] and "plan" in spawned[0]
+    assert "s7" in spawned[0]
+    assert store.get_pending("tg", "1")["phase"] == "plan_generating"
+    assert "plan" in out["content"][0]["text"].lower()
 
 
 def test_approve_spawns_executor(tmp_path):
