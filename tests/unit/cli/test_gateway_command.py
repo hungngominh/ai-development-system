@@ -3,8 +3,13 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _clear(monkeypatch, tmp_path):
-    monkeypatch.delenv("AI_DEV_TELEGRAM_TOKEN", raising=False)
-    monkeypatch.delenv("AI_DEV_TELEGRAM_ALLOWED_CHAT_IDS", raising=False)
+    # Set to empty (not delete): config.py runs load_dotenv(override=False) at
+    # import, which would re-populate a *deleted* var from the developer's ./.env
+    # when config is first imported after this fixture. An empty (present) var is
+    # not overridden by load_dotenv and Config reads it as "no telegram platform".
+    monkeypatch.setenv("AI_DEV_TELEGRAM_TOKEN", "")
+    monkeypatch.setenv("AI_DEV_TELEGRAM_ALLOWED_CHAT_IDS", "")
+    monkeypatch.setenv("AI_DEV_TELEGRAM_BOTS", "")
     monkeypatch.setenv("AI_DEV_ASSISTANT_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'ctl.db'}")
 
