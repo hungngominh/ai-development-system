@@ -1,9 +1,11 @@
 """ai-dev phase-b — Phase B execution pipeline commands.
 
 Verbs:
-- run     — run the Phase B worker loop for an approved task graph
-- resume  — resume a paused Phase B run
-- abort   — abort a running Phase B execution
+- run          — run the Phase B worker loop for an approved task graph
+- resume       — resume a paused Phase B run
+- abort        — abort a running Phase B execution
+- to-gate2     — run Phase B to Gate 2 and pause (detached spawn target)
+- resume-gate2 — resume Phase B after Gate 2 approval/rejection (detached spawn target)
 """
 from __future__ import annotations
 
@@ -109,3 +111,55 @@ def phase_b_abort(
         raise typer.Exit(1)
     finally:
         conn.close()
+
+
+@command(
+    noun="phase-b",
+    verb="to-gate2",
+    help="Run Phase B to Gate 2 and pause (detached non-interactive spawn target)",
+)
+def phase_b_to_gate2(
+    run_id: str = typer.Option(..., "--run-id", help="Run UUID in RUNNING_PHASE_1D status"),
+    json_output: bool = typer.Option(False, "--json"),
+    quiet: bool = typer.Option(False, "--quiet"),
+) -> None:
+    """Run Phase B (finalize_spec → task_graph) and pause at PAUSED_AT_GATE_2.
+
+    Intended as a detached spawn target from the harness. Exits 0 on success
+    (status PAUSED_AT_GATE_2), exits 1 on error.
+    """
+    from ai_dev_system.cli.run_phase_b_gate2 import main as gate2_main
+    import sys
+
+    out = OutputRenderer(mode="json" if json_output else "human", quiet=quiet)
+    out.progress(f"Running Phase B to Gate 2 for run {run_id}...")
+    sys.exit(gate2_main(["--mode", "to-gate2", "--run-id", run_id]))
+
+
+@command(
+    noun="phase-b",
+    verb="resume-gate2",
+    help="Resume Phase B after Gate 2 approval/rejection (detached non-interactive spawn target)",
+)
+def phase_b_resume_gate2(
+    run_id: str = typer.Option(..., "--run-id", help="Run UUID in PAUSED_AT_GATE_2 status"),
+    decision: str = typer.Option(..., "--decision", help="approve or reject"),
+    json_output: bool = typer.Option(False, "--json"),
+    quiet: bool = typer.Option(False, "--quiet"),
+) -> None:
+    """Resume Phase B after Gate 2: approve→execute/verify, reject→abort.
+
+    Intended as a detached spawn target from the harness. Exits 0 on both
+    approve and reject (reject is a normal outcome). Exits 1 on unexpected errors.
+    """
+    from ai_dev_system.cli.run_phase_b_gate2 import main as gate2_main
+    import sys
+
+    if decision not in ("approve", "reject"):
+        out = OutputRenderer(mode="json" if json_output else "human", quiet=quiet)
+        out.write_error(code=1, message=f"--decision must be 'approve' or 'reject', got {decision!r}")
+        raise typer.Exit(1)
+
+    out = OutputRenderer(mode="json" if json_output else "human", quiet=quiet)
+    out.progress(f"Resuming Phase B after Gate 2 (decision={decision}) for run {run_id}...")
+    sys.exit(gate2_main(["--mode", "resume-gate2", "--run-id", run_id, "--decision", decision]))
