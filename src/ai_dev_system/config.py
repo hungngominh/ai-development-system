@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -18,6 +19,13 @@ load_dotenv(override=False)
 # SQLite-first defaults: zero-install local dev.
 DEFAULT_STORAGE_ROOT = str(Path.home() / ".ai-dev-system" / "storage")
 DEFAULT_DATABASE_URL = f"sqlite:///{Path.home() / '.ai-dev-system' / 'control.db'}"
+
+
+@dataclass(frozen=True)
+class TelegramBotConfig:
+    label: str
+    token: str
+    allowed_chat_ids: tuple[int, ...] = ()
 
 
 def _default_retry_policy() -> dict[str, dict[str, Any]]:
@@ -42,6 +50,7 @@ class Config:
     retry_policy: dict = field(default_factory=_default_retry_policy)
     telegram_token: str | None = None
     telegram_allowed_chat_ids: tuple[int, ...] = ()
+    telegram_bots: tuple[TelegramBotConfig, ...] = ()
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -55,9 +64,25 @@ class Config:
         _tg_token = os.environ.get("AI_DEV_TELEGRAM_TOKEN") or None
         _tg_ids_raw = os.environ.get("AI_DEV_TELEGRAM_ALLOWED_CHAT_IDS", "")
         _tg_ids = tuple(int(x) for x in re.split(r"[,\s]+", _tg_ids_raw.strip()) if x)
+        _bots_raw = os.environ.get("AI_DEV_TELEGRAM_BOTS", "").strip()
+        _bots: list[TelegramBotConfig] = []
+        if _bots_raw:
+            try:
+                for b in json.loads(_bots_raw):
+                    label = str(b.get("label") or "").strip()
+                    token = str(b.get("token") or "").strip()
+                    ids = tuple(int(x) for x in (b.get("chat_ids") or []))
+                    if label and token:
+                        _bots.append(TelegramBotConfig(label=label, token=token, allowed_chat_ids=ids))
+            except Exception:  # noqa: BLE001 - malformed JSON → fall back to single-token
+                _bots = []
+        if not _bots and _tg_token:
+            _bots.append(TelegramBotConfig(label="telegram", token=_tg_token,
+                                           allowed_chat_ids=_tg_ids))
         return cls(
             storage_root=storage_root,
             database_url=database_url,
             telegram_token=_tg_token,
             telegram_allowed_chat_ids=_tg_ids,
+            telegram_bots=tuple(_bots),
         )
