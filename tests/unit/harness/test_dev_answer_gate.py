@@ -693,6 +693,40 @@ class TestDevAnswerGateGate2:
         text = result["content"][0]["text"]
         assert "duyệt" in text.lower() or "từ chối" in text.lower()
 
+    @pytest.mark.parametrize("text", [
+        "do not approve",
+        "I won't approve this",
+        "never approve",
+        "not ok",
+        "don't approve",
+    ])
+    def test_gate2_english_negation_does_not_silently_approve(
+        self, db, conn_factory, config, link_store, text
+    ):
+        """English negations of approval must NOT spawn --decision approve (the
+        negator makes it ambiguous → guidance). Regression for the final-review
+        finding that 'do not approve' silently approved the task graph."""
+        run_id = str(uuid.uuid4())
+        _seed_paused_at_gate2_run(db, run_id)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        asyncio.run(gate_tool.handler({"run_id": run_id, "text": text}))
+
+        approve_spawns = [
+            a for a in spawn_called
+            if "--decision" in a and a[a.index("--decision") + 1] == "approve"
+        ]
+        assert approve_spawns == [], (
+            f"{text!r} must NOT spawn an approve decision; got {spawn_called}"
+        )
+
     def test_gate2_reject_english_spawns_resume_with_reject(
         self, db, conn_factory, config, link_store
     ):

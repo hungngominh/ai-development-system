@@ -612,6 +612,13 @@ def resume_phase_b_after_gate2(
 
     # --- decision == "approve" ---
 
+    # Approve REQUIRES an execution agent: _phase_b_promote_and_execute only flips
+    # the run out of PAUSED_AT_GATE_2 inside `if agent is not None`. Without this
+    # guard, an agent=None approve would promote TASK_GRAPH_APPROVED and then strand
+    # the run at PAUSED_AT_GATE_2 forever. (No production caller passes agent=None,
+    # but the optional default makes this a foot-gun worth closing.)
+    assert agent is not None, "resume_phase_b_after_gate2 approve requires an execution agent"
+
     # Resolve the graph to use: edited_graph takes precedence; otherwise load the
     # generated graph from the TASK_GRAPH_GENERATED artifact.
     if edited_graph is not None:

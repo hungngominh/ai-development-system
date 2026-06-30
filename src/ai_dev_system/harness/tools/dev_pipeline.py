@@ -247,8 +247,14 @@ def make_dev_pipeline_tools(
     _G2_APPROVE_RE = re.compile(
         r"\b(approve|duy[eệ]t|đồng\s*ý|ok|yes)\b", re.IGNORECASE
     )
+    # Reject includes English/Vietnamese NEGATORS so a negated approval
+    # ("do not approve", "never approve", "not ok") matches BOTH approve and
+    # reject → lands in the ambiguous→guidance branch instead of silently
+    # approving (the approve keyword alone would otherwise win). The Vietnamese
+    # negator "không" is already covered by the kh[oô]ng alternative.
     _G2_REJECT_RE = re.compile(
-        r"\b(reject|t[uừ]\s*ch[oố]i|no|kh[oô]ng)\b", re.IGNORECASE
+        r"\b(reject|t[uừ]\s*ch[oố]i|no|kh[oô]ng|not|never|cannot|don'?t|won'?t|can'?t)\b",
+        re.IGNORECASE,
     )
 
     @tool(
