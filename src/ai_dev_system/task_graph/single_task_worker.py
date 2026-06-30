@@ -17,6 +17,12 @@ from ai_dev_system.task_graph.clarify_questions import find_blocking, synthesize
 from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS as _SPEC_KEYS
 from ai_dev_system.task_graph.single_task import spec_single_task, _TITLE_MAX
 from ai_dev_system.llm_factory import make_llm_client
+from ai_dev_system.task_graph.repo_docs import (
+    spec_doc_relpath, plan_doc_relpath, render_spec_md, render_plan_md, publish_doc,
+)
+from ai_dev_system.task_graph.single_task_plan import (
+    plan_single_task, plan_path, branch_name_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +140,21 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
         _spec_log(log_path, f"LỖI: {type(exc).__name__}: {exc}")
         payload = {"status": "error", "idea": idea, "repo": repo, "error": str(exc)}
 
+    # Publish the spec doc to the repo branch (off the gateway thread) when the
+    # spec is final and not blocked on clarify. Best-effort: no link on failure.
+    if (payload.get("status") == "done" and repo
+            and not (payload.get("clarify") or {}).get("needed")):
+        title = (payload.get("task") or {}).get("title") or idea
+        url = publish_doc(
+            repo, branch_name_for(spec_id),
+            spec_doc_relpath(spec_id, title),
+            render_spec_md(payload, spec_id),
+            f"docs(ai-dev): spec for {spec_id[:8]}",
+        )
+        if url:
+            payload["spec_doc_url"] = url
+        _spec_log(log_path, f"Spec doc: {url or '(local only / no push)'}")
+
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
 
     if database_url is None:
@@ -143,16 +164,45 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
     return path
 
 
+def run_plan_worker(spec_id: str, *, storage_root: str,
+                    database_url: str | None = None) -> dict:
+    """Plan gate: build the reviewable plan for an already-approved spec and
+    publish <id>-plan.md to the repo branch. Records doc_url in the plan file."""
+    out_dir = Path(storage_root) / "task_specs"
+    log_path = out_dir / f"{spec_id}.log"
+    spec = json.loads((out_dir / f"{spec_id}.json").read_text(encoding="utf-8"))
+    plan = plan_single_task(spec, spec_id, storage_root=storage_root)
+    repo = spec.get("repo")
+    if repo:
+        title = (spec.get("task") or {}).get("title") or spec.get("idea")
+        url = publish_doc(
+            repo, plan["branch"], plan_doc_relpath(spec_id, title),
+            render_plan_md(spec, plan),
+            f"docs(ai-dev): plan for {spec_id[:8]}",
+        )
+        if url:
+            plan["doc_url"] = url
+            plan_path(storage_root, spec_id).write_text(
+                json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
+        _spec_log(log_path, f"Plan doc: {url or '(local only / no push)'}")
+    return plan
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--id", required=True)
-    p.add_argument("--idea", required=True)
+    p.add_argument("--idea", default="")
     p.add_argument("--repo", default=None)
+    p.add_argument("--mode", choices=["spec", "plan"], default="spec")
     p.add_argument("--storage-root", required=True)
     p.add_argument("--database-url", default=None)
     args = p.parse_args(argv)
-    run_worker(args.id, args.idea, args.repo or None,
-               storage_root=args.storage_root, database_url=args.database_url)
+    if args.mode == "plan":
+        run_plan_worker(args.id, storage_root=args.storage_root,
+                        database_url=args.database_url)
+    else:
+        run_worker(args.id, args.idea, args.repo or None,
+                   storage_root=args.storage_root, database_url=args.database_url)
     return 0
 
 
