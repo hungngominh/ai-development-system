@@ -282,7 +282,11 @@ def make_dev_pipeline_tools(
         # Gate-2 routing                                                      #
         # ------------------------------------------------------------------ #
         if run_status == "PAUSED_AT_GATE_2":
-            if _G2_APPROVE_RE.search(text):
+            # Decide once. A message matching BOTH (or neither) is ambiguous — never
+            # silently approve a task graph on a mixed signal; ask for a clear answer.
+            _g2_approve = bool(_G2_APPROVE_RE.search(text))
+            _g2_reject = bool(_G2_REJECT_RE.search(text))
+            if _g2_approve and not _g2_reject:
                 log_dir = Path(config.storage_root) / "ui_logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
                 log_path = log_dir / f"phase_b_resume_{run_id[:8]}.log"
@@ -304,7 +308,7 @@ def make_dev_pipeline_tools(
                                       "message": "Đang chạy task graph đã duyệt..."})
                 return {"content": [{"type": "text", "text": payload}]}
 
-            elif _G2_REJECT_RE.search(text):
+            elif _g2_reject and not _g2_approve:
                 log_dir = Path(config.storage_root) / "ui_logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
                 log_path = log_dir / f"phase_b_resume_{run_id[:8]}.log"
@@ -327,7 +331,8 @@ def make_dev_pipeline_tools(
                 return {"content": [{"type": "text", "text": payload}]}
 
             else:
-                guidance = "Gõ 'duyệt' hoặc 'từ chối' để quyết định task graph."
+                # neither matched, or both matched (ambiguous)
+                guidance = "Gõ rõ 'duyệt' HOẶC 'từ chối' để quyết định task graph."
                 return {"content": [{"type": "text", "text": guidance}]}
 
         # ------------------------------------------------------------------ #

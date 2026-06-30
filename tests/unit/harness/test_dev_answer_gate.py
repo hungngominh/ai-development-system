@@ -669,6 +669,30 @@ class TestDevAnswerGateGate2:
         text = result["content"][0]["text"]
         assert len(text) > 0
 
+    def test_gate2_both_keywords_is_ambiguous_no_spawn(
+        self, db, conn_factory, config, link_store
+    ):
+        """A message matching BOTH approve and reject keywords must NOT silently
+        approve — it returns guidance and spawns nothing (safety on a mixed signal)."""
+        run_id = str(uuid.uuid4())
+        _seed_paused_at_gate2_run(db, run_id)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(
+            gate_tool.handler({"run_id": run_id, "text": "approve? no từ chối"})
+        )
+
+        assert spawn_called == [], "ambiguous (both keywords) must NOT spawn resume-gate2"
+        text = result["content"][0]["text"]
+        assert "duyệt" in text.lower() or "từ chối" in text.lower()
+
     def test_gate2_reject_english_spawns_resume_with_reject(
         self, db, conn_factory, config, link_store
     ):
