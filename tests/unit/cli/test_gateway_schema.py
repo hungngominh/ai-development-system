@@ -41,3 +41,20 @@ def test_ensure_schema_does_not_raise_on_already_applied(monkeypatch, tmp_path):
                       MigrationResult(name="v2.sql", applied=False, skipped_reason="already applied")],
     )
     _ensure_schema(f"sqlite:///{tmp_path / 'x.db'}")  # must NOT raise
+
+
+def test_ensure_git_ready_runs_setup_commands(monkeypatch):
+    from ai_dev_system.cli.commands import gateway
+
+    calls = []
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        class R: returncode = 0
+        return R()
+    monkeypatch.setattr(gateway.subprocess, "run", fake_run)
+
+    gateway._ensure_git_ready()
+
+    joined = [" ".join(a) for a in calls]
+    assert any("gh auth setup-git" in j for j in joined)
+    assert any("safe.directory" in j for j in joined)

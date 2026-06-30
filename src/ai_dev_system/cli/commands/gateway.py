@@ -2,6 +2,7 @@
 proactive run-status push (the notifier) lands in Plan 5."""
 from __future__ import annotations
 
+import subprocess
 import typer
 
 from ai_dev_system.cli.core.registry import command
@@ -63,6 +64,19 @@ def _ensure_schema(database_url: str) -> None:
         raise RuntimeError(f"DB schema apply failed: {details}")
 
 
+def _ensure_git_ready() -> None:
+    """Best-effort: make git/gh usable in the container for repo-bound bots.
+    Failures are non-fatal (a new-project-only deployment without gh still boots)."""
+    for argv in (
+        ["gh", "auth", "setup-git"],
+        ["git", "config", "--global", "--add", "safe.directory", "*"],
+    ):
+        try:
+            subprocess.run(argv, capture_output=True, text=True)
+        except Exception:  # noqa: BLE001
+            pass
+
+
 @command(verb="gateway", help="Launch the chat-gateway daemon (Telegram).")
 def gateway_cmd(
     once: bool = typer.Option(False, "--once", help="Poll a single batch then exit (smoke)."),
@@ -79,6 +93,7 @@ def gateway_cmd(
 
     cfg = Config.from_env()
     _ensure_schema(cfg.database_url)
+    _ensure_git_ready()
     daemon = build_gateway(cfg, poll_timeout=poll_timeout)
     if daemon is None:
         typer.echo("No gateway platform enabled (set AI_DEV_TELEGRAM_TOKEN).", err=True)
