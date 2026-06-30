@@ -1,0 +1,23 @@
+services:
+  gateway:
+    build: .
+    container_name: ai-dev-gateway
+    restart: unless-stopped
+    volumes:
+      # Claude Max auth — mount read-only từ Windows host.
+      # ${CLAUDE_AUTH_DIR} được docker-compose đọc từ ./.env.
+      - "${CLAUDE_AUTH_DIR}:/root/.claude:ro"
+      # SQLite DB + storage, persist qua restart/rebuild.
+      - ai-dev-data:/data
+      # Config cho app đọc (Telegram bots, feature flags).
+      - ./.env:/app/.env:ro
+    environment:
+      # Override về đường dẫn container — ghi đè Windows paths trong .env
+      # (app dùng load_dotenv(override=False) nên env này thắng).
+      DATABASE_URL: sqlite:////data/control.db
+      STORAGE_ROOT: /data/storage
+      LLM_PROVIDER: claude_code
+      PYTHONIOENCODING: utf-8
+
+volumes:
+  ai-dev-data:
