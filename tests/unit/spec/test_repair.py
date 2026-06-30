@@ -199,32 +199,31 @@ def test_pipeline_triggers_repair_on_grounding_errors(tmp_path):
     assert llm.complete.call_count > 5
 
 
-def test_pipeline_repair_budget_zero_skips_repair(tmp_path):
+def test_pipeline_repair_budget_zero_skips_repair(tmp_path, monkeypatch):
     """max_repair_calls=0 means no repair attempts even if violations found."""
-    call_count = {"n": 0}
-
-    def _llm_side_effect(system, user):
-        call_count["n"] += 1
-        return "## Section\n\nThe system works properly (fast)."
+    # This test is about the repair BUDGET, not the critic — pin the critic off so
+    # the count stays exactly "one per section" and isn't coupled to Stage 3.5.
+    monkeypatch.setenv("AI_DEV_SPEC_SELF_REVIEW", "0")
 
     llm = MagicMock()
-    llm.complete.side_effect = _llm_side_effect
+    llm.complete.return_value = "## Section\n\nThe system works properly (fast)."
 
     cfg = SpecPipelineConfig(parallel_sections=False, max_repair_calls=0)
     run_spec_pipeline(_brief(), {}, tmp_path, llm, config=cfg)
-    # 5 generator calls + 1 Stage 3.5 self-review critic call = 6 total (no repair)
-    assert llm.complete.call_count == 6
+    # 5 generator calls, no repair (budget=0), no critic (pinned off)
+    assert llm.complete.call_count == 5
 
 
-def test_pipeline_max_repair_iterations_zero_disables_repair(tmp_path):
+def test_pipeline_max_repair_iterations_zero_disables_repair(tmp_path, monkeypatch):
     """max_repair_iterations=0 disables repair even with errors."""
+    monkeypatch.setenv("AI_DEV_SPEC_SELF_REVIEW", "0")  # isolate the repair-budget assertion
     llm = MagicMock()
     llm.complete.return_value = "## Section\n\nWorks properly and fast."
 
     cfg = SpecPipelineConfig(parallel_sections=False, max_repair_iterations=0)
     run_spec_pipeline(_brief(), {}, tmp_path, llm, config=cfg)
-    # 5 generator calls + 1 Stage 3.5 self-review critic call = 6 total (no repair)
-    assert llm.complete.call_count == 6
+    # 5 generator calls, no repair, no critic (pinned off)
+    assert llm.complete.call_count == 5
 
 
 def test_pipeline_emits_warning_on_remaining_violations_after_repair(tmp_path):
