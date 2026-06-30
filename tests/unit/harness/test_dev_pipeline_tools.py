@@ -131,7 +131,9 @@ class TestDevNewprojectStart:
         assert link.chat_id == "42"
 
     def test_returns_starting_when_no_run_row(self, db, conn_factory, link_store, config):
-        """When no runs row exists yet, returns status:starting (no link created)."""
+        """When no runs row exists yet, returns status:starting (the run is recorded
+        as a pending link — see test_adds_pending_when_no_run_row — and resolved later
+        by the watcher once the debate writes its row)."""
         def recording_spawn(argv, **kwargs):
             pass
 
