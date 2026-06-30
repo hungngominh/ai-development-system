@@ -34,8 +34,11 @@ def test_multi_bot_builds_one_adapter_per_bot():
     cfg = _cfg_with_bots(bots=bots, token=None)
     reg = PlatformRegistry.from_config(cfg, transport=lambda *a: b"{}")
     assert reg.enabled() is True
-    names = {a.name for a in reg.adapters()}
-    assert names == {"projA", "projB"}
+    by_name = {a.name: a for a in reg.adapters()}
+    assert set(by_name) == {"projA", "projB"}
+    # Per-bot isolation: each adapter carries ITS OWN token + allowlist (no cross-wiring).
+    assert by_name["projA"]._token == "TA" and by_name["projA"]._allowed == {1}
+    assert by_name["projB"]._token == "TB" and by_name["projB"]._allowed == {2}
 
 
 def test_single_token_fallback_when_no_telegram_bots():
