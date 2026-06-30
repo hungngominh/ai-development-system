@@ -42,3 +42,81 @@ def test_upsert_duplicate_label_raises():
     env = 'AI_DEV_TELEGRAM_BOTS=[{"label": "a", "token": "T1", "chat_ids": [1]}]\n'
     with pytest.raises(ValueError, match="a"):
         ts.upsert_bot_in_env(env, "a", "T2", [2])
+
+
+import json as _json
+from pathlib import Path
+
+
+def _transport_with_message(chat_id=42, username="ngomi"):
+    payload = {
+        "ok": True,
+        "result": [
+            {"update_id": 1, "message": {"chat": {"id": chat_id},
+                                         "from": {"username": username}, "text": "hi"}}
+        ],
+    }
+
+    def _t(url, data, timeout):
+        return _json.dumps(payload).encode("utf-8")
+
+    return _t
+
+
+def test_run_telegram_setup_writes_bot(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("LLM_PROVIDER=claude_code\nAI_DEV_TELEGRAM_BOTS=[]\n")
+
+    inputs = iter(["123:ABC", "my-app"])  # token, then project label
+
+    rc = ts.run_telegram_setup(
+        env,
+        transport=_transport_with_message(chat_id=999),
+        input_fn=lambda *_a, **_k: next(inputs),
+        sleep_fn=lambda *_a, **_k: None,
+    )
+
+    assert rc == 0
+    text = env.read_text()
+    bots = _json.loads(
+        next(ln for ln in text.splitlines() if ln.startswith("AI_DEV_TELEGRAM_BOTS="))
+        .split("=", 1)[1]
+    )
+    assert bots == [{"label": "my-app", "token": "123:ABC", "chat_ids": [999]}]
+
+
+def test_run_telegram_setup_bad_token(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("AI_DEV_TELEGRAM_BOTS=[]\n")
+
+    def _t(url, data, timeout):
+        return _json.dumps({"ok": False, "description": "Unauthorized"}).encode("utf-8")
+
+    rc = ts.run_telegram_setup(
+        env, transport=_t,
+        input_fn=lambda *_a, **_k: "BADTOKEN",
+        sleep_fn=lambda *_a, **_k: None,
+    )
+    assert rc == 1
+    assert ts.BOTS_KEY in env.read_text()  # file untouched-ish, no bot added
+    assert '"label"' not in env.read_text()
+
+
+def test_run_telegram_setup_timeout_no_message(tmp_path):
+    env = tmp_path / ".env"
+    env.write_text("AI_DEV_TELEGRAM_BOTS=[]\n")
+
+    def _t(url, data, timeout):
+        return _json.dumps({"ok": True, "result": []}).encode("utf-8")  # no messages ever
+
+    # clock advances past deadline on the 2nd reading so the loop exits fast
+    ticks = iter([0.0, 0.0, 999.0, 999.0, 999.0])
+    rc = ts.run_telegram_setup(
+        env, transport=_t,
+        input_fn=lambda *_a, **_k: "123:ABC",
+        sleep_fn=lambda *_a, **_k: None,
+        clock=lambda: next(ticks),
+        max_wait_s=60.0,
+    )
+    assert rc == 1
+    assert '"label"' not in env.read_text()
