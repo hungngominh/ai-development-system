@@ -383,6 +383,7 @@ STEP_PROFILES: dict[str, tuple[str, str | None]] = {
     "questions":  ("sonnet", "medium"),   # decision inventory / question gen
     "debate":     ("opus",   "high"),     # ★ argument quality — core value
     "spec":       ("sonnet", "medium"),   # spec section generation / facets
+    "critic":     ("sonnet", "medium"),   # spec self-review critic
     "task_graph": ("sonnet", "low"),      # structured enrichment
     "executor":   ("opus",   "xhigh"),    # ★ agentic code/test authoring
     "judge":      ("opus",   "high"),     # ★ verification — avoid false PASS
