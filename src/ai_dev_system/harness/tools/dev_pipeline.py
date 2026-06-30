@@ -48,6 +48,7 @@ from claude_agent_sdk import tool
 
 from ai_dev_system.cli.start_project import make_project_id, name_to_slug
 from ai_dev_system.gate.gate1_bridge import Decision as GateDecision
+from ai_dev_system.task_graph.clarify_questions import format_questions
 from ai_dev_system.gate.gate1_bridge import finalize_gate1
 from ai_dev_system.gate.gate1_review.loader import load_gate1_context
 from ai_dev_system.gate.gate1_review.parser import parse_user_input
@@ -240,9 +241,15 @@ def make_dev_pipeline_tools(
                         f"❌ Execution {ex.get('exec_status')}: {ex.get('error','')[:300]}"}]}
                 return {"content": [{"type": "text", "text": "⏳ Đang chạy execution..."}]}
 
-            # 2. Spec ready? materialize + summarize the plan, await approval.
+            # 2. Spec ready? Clarify gate first, else materialize + summarize the plan.
             if spec_path.exists():
                 spec = json.loads(spec_path.read_text(encoding="utf-8"))
+                clarify = spec.get("clarify") or {}
+                if clarify.get("needed") and pending.get("round", 0) < 2:
+                    chat_task_store.update(surface, chat_id, phase="awaiting_clarify",
+                                           clarify_questions=clarify.get("questions") or [])
+                    return {"content": [{"type": "text", "text":
+                        format_questions(clarify.get("questions") or [])}]}
                 plan = load_plan(sr, spec_id) or plan_single_task(spec, spec_id, storage_root=sr)
                 steps = (plan.get("graph") or {}).get("tasks") or plan.get("graph") or []
                 n = len(steps) if isinstance(steps, list) else 0
@@ -615,9 +622,47 @@ def make_dev_pipeline_tools(
         except Exception as exc:  # pragma: no cover
             return {"content": [{"type": "text", "text": f"spawn error: {exc}"}]}
         chat_task_store.set_pending(surface, chat_id, spec_id=spec_id,
-                                    repo=_repo_path, base_branch=_base_branch)
+                                    repo=_repo_path, base_branch=_base_branch,
+                                    idea=task_description)
         text = json.dumps({"spec_id": spec_id, "status": "spec_generating",
                            "note": "Đang tạo spec + plan. Hỏi trạng thái rồi nhắn 'duyệt' để chạy."})
         return {"content": [{"type": "text", "text": text}]}
 
-    return [dev_newproject_start, dev_run_status, dev_answer_gate, dev_task_start]
+    @tool(
+        "dev_answer_clarify",
+        "Submit the user's answer to a clarifying question the bot asked about a "
+        "pending coding task. Use this when a clarification is pending (the bot just "
+        "asked) and the user replies with their decision — do NOT start a new task.",
+        {"answer": str},
+    )
+    async def dev_answer_clarify(args: dict[str, Any]) -> dict[str, Any]:
+        pending = chat_task_store.get_pending(surface, chat_id)
+        if not pending or pending.get("phase") != "awaiting_clarify":
+            return {"content": [{"type": "text", "text":
+                "Hiện không có câu hỏi nào đang chờ trả lời."}]}
+        questions = pending.get("clarify_questions") or []
+        merged = (pending.get("idea", "") + "\n\n## Làm rõ\n"
+                  + "\n".join(questions)
+                  + f"\n\nNgười dùng trả lời: {args['answer']}")
+        spec_id = pending["spec_id"]
+        log_dir = Path(config.storage_root) / "ui_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        argv = [
+            sys.executable, "-m", "ai_dev_system.task_graph.single_task_worker",
+            "--id", spec_id, "--idea", merged, "--repo", pending["repo"],
+            "--storage-root", str(config.storage_root),
+            "--database-url", str(config.database_url),
+        ]
+        try:
+            with open(log_dir / f"task_{spec_id[:8]}.log", "a", encoding="utf-8",
+                      errors="replace") as logf:
+                _spawn_worker(argv, stdout=logf, stderr=subprocess.STDOUT, cwd=str(_REPO_ROOT))
+        except Exception as exc:  # pragma: no cover
+            return {"content": [{"type": "text", "text": f"spawn error: {exc}"}]}
+        chat_task_store.update(surface, chat_id, phase="generating", idea=merged,
+                               round=pending.get("round", 0) + 1)
+        return {"content": [{"type": "text", "text":
+            "✅ Đã nhận. Đang cập nhật spec theo câu trả lời của bạn…"}]}
+
+    return [dev_newproject_start, dev_run_status, dev_answer_gate, dev_task_start,
+            dev_answer_clarify]
