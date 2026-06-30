@@ -66,3 +66,18 @@ def test_no_spec_file_yet_is_silent(tmp_path):
     plat = FakePlatform()
     w = ClarifyWatcher(s, {"Sigo": plat}, FakeSessions(), str(tmp_path))
     assert w.check_once() == 0 and plat.sent == []
+
+
+def test_no_push_when_surface_not_registered(tmp_path):
+    s = _store(tmp_path)
+    _write_spec(tmp_path, "ab", {"needed": True, "questions": ["Q?"]})
+    w = ClarifyWatcher(s, {}, FakeSessions(), str(tmp_path))   # "Sigo" not registered
+    assert w.check_once() == 0
+
+
+def test_no_push_when_questions_empty(tmp_path):
+    s = _store(tmp_path)
+    _write_spec(tmp_path, "ab", {"needed": True, "questions": []})
+    plat = FakePlatform()
+    w = ClarifyWatcher(s, {"Sigo": plat}, FakeSessions(), str(tmp_path))
+    assert w.check_once() == 0 and plat.sent == []

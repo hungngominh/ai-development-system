@@ -3,7 +3,9 @@
 For each pending single-task chat record whose spec finished with blocking
 findings, push the pre-generated questions to the chat ONCE and flip the record to
 phase='awaiting_clarify'. Reads JSON + sends only — never calls an LLM (it runs on
-the single-threaded daemon loop). One bad record never kills the sweep.
+the single-threaded daemon loop). One bad record never kills the sweep. Delivery is
+at-least-once: if the process dies after platform.reply but before the phase flip,
+the next sweep re-sends (a duplicate is possible, but a question is never silently lost).
 """
 from __future__ import annotations
 
@@ -55,6 +57,8 @@ class ClarifyWatcher:
         if platform is None:
             return 0
         questions = clarify.get("questions") or []
+        if not questions:
+            return 0
         msg = format_questions(questions)
         platform.reply(int(chat_id), msg)
         sid = self._sessions.load_or_create(surface, chat_id)
