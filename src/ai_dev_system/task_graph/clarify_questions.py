@@ -58,6 +58,7 @@ def synthesize_questions(blocking: list[dict], *, idea: str, llm) -> list[str]:
             qs = [str(q).strip() for q in parsed if str(q).strip()]
             if qs:
                 return qs[:3]
+            # LLM returned an empty/blank array → fall through to the raw fallback below.
         except Exception:  # noqa: BLE001 — any failure → raw fallback below
             pass
     return [b["message"][:300] for b in blocking if b["message"]][:3]

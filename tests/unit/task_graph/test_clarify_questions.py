@@ -65,3 +65,5 @@ def test_synthesize_questions_empty_for_no_blocking():
 def test_format_questions_numbers_and_frames():
     out = format_questions(["A?", "B?"])
     assert "1. A?" in out and "2. B?" in out
+    assert "Mình cần bạn làm rõ" in out   # header frame
+    assert "Bạn trả lời thẳng" in out      # footer frame
