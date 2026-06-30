@@ -212,8 +212,8 @@ def test_pipeline_repair_budget_zero_skips_repair(tmp_path):
 
     cfg = SpecPipelineConfig(parallel_sections=False, max_repair_calls=0)
     run_spec_pipeline(_brief(), {}, tmp_path, llm, config=cfg)
-    # Exactly 5 calls (one per section, no repair)
-    assert llm.complete.call_count == 5
+    # 5 generator calls + 1 Stage 3.5 self-review critic call = 6 total (no repair)
+    assert llm.complete.call_count == 6
 
 
 def test_pipeline_max_repair_iterations_zero_disables_repair(tmp_path):
@@ -223,7 +223,8 @@ def test_pipeline_max_repair_iterations_zero_disables_repair(tmp_path):
 
     cfg = SpecPipelineConfig(parallel_sections=False, max_repair_iterations=0)
     run_spec_pipeline(_brief(), {}, tmp_path, llm, config=cfg)
-    assert llm.complete.call_count == 5
+    # 5 generator calls + 1 Stage 3.5 self-review critic call = 6 total (no repair)
+    assert llm.complete.call_count == 6
 
 
 def test_pipeline_emits_warning_on_remaining_violations_after_repair(tmp_path):

@@ -23,10 +23,11 @@ from ai_dev_system.spec.generators.functional import generate_functional
 from ai_dev_system.spec.generators.non_functional import generate_non_functional
 from ai_dev_system.spec.generators.acceptance_criteria import generate_acceptance_criteria
 from ai_dev_system.spec.planner import SectionOutline, build_outlines, PlannerOutput
-from ai_dev_system.spec.grounding import check_section, llm_grounding_check, GroundingReport
+from ai_dev_system.spec.grounding import check_section, llm_grounding_check, GroundingReport, GroundingViolation
 from ai_dev_system.spec.repair import repair_section
 from ai_dev_system.spec.tracer import build_trace_map, write_trace_map
 from ai_dev_system.spec_bundle import SpecBundle
+from ai_dev_system.spec.self_review import self_review, self_review_enabled, AUTO_REPAIR_DIMENSIONS
 
 # System prompts for repair — mirrors what each generator passes to LLM
 from ai_dev_system.spec.generators.proposal import _SYSTEM_PROMPT as _PROMPT_PROPOSAL
@@ -135,6 +136,32 @@ def run_spec_pipeline(
                 rpt = GroundingReport(section=section, violations=list(viols))
                 grounding_reports[section] = rpt
 
+    # Stage 3.5: Self-review critic + auto-repair routing
+    findings = []
+    if self_review_enabled():
+        drafts_payload = {section: d.content for section, d in drafts.items()}
+        findings = self_review(drafts_payload, "project", llm_client)
+        for f in findings:
+            if (
+                f.severity == "error"
+                and f.dimension in AUTO_REPAIR_DIMENSIONS
+                and f.section in drafts
+                and repair_budget > 0
+            ):
+                outline = outline_by_section.get(f.section) or _fallback_outline(f.section)
+                violation = GroundingViolation(
+                    rule=f"self_review:{f.dimension}",
+                    message=f.message,
+                    severity="error",
+                )
+                repaired = repair_section(
+                    drafts[f.section], [violation], outline,
+                    brief, approved_answers, decisions, llm_client,
+                    system_prompt=_SYSTEM_PROMPT_MAP[f.section],
+                )
+                repair_budget -= 1
+                drafts[f.section] = repaired
+
     # Warn on degraded sections and grounding errors
     for draft in drafts.values():
         if draft.degraded:
@@ -180,6 +207,7 @@ def run_spec_pipeline(
         files=files,
         trace_map_path=trace_map_path,
         grounding_violations=remaining_violations,
+        self_review_findings=findings,
     )
 
 

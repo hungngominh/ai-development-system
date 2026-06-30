@@ -12,6 +12,7 @@ class SpecBundle:
     files: dict[str, Path]
     trace_map_path: Optional[Path] = None       # SP8 — set when trace map written
     grounding_violations: list = field(default_factory=list)  # SP7 — remaining violations
+    self_review_findings: list = field(default_factory=list)  # Stage 3.5 — critic findings
 
 def generate_spec_bundle(approved_brief: dict, output_dir: Path) -> SpecBundle:
     """Write 5 spec files from approved brief. Returns SpecBundle."""
