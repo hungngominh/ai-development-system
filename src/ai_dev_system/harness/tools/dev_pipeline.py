@@ -80,11 +80,37 @@ def make_dev_pipeline_tools(
     link_store,
     spawn_start=None,
     spawn_phase_b=None,
+    spawn_task_worker=None,
+    spawn_executor=None,
+    create_pr=None,
+    make_spec_id=None,
+    chat_task_store=None,
 ) -> list:
-    """Return [dev_newproject_start, dev_run_status, dev_answer_gate] bound to this chat."""
+    """Return [dev_newproject_start, dev_run_status, dev_answer_gate, dev_task_start] bound to this chat."""
 
     _spawn = spawn_start if spawn_start is not None else _real_spawn
     _spawn_pb = spawn_phase_b if spawn_phase_b is not None else _real_spawn
+    _spawn_worker = spawn_task_worker if spawn_task_worker is not None else _real_spawn
+    _spawn_exec = spawn_executor if spawn_executor is not None else _real_spawn
+
+    if create_pr is None:
+        from ai_dev_system.vcs.github_pr import create_pr as create_pr  # noqa: PLW0127
+    if make_spec_id is None:
+        import uuid
+        def make_spec_id():  # noqa: E306
+            return uuid.uuid4().hex
+    if chat_task_store is None:
+        from ai_dev_system.harness.tools.chat_task_store import ChatTaskStore
+        chat_task_store = ChatTaskStore(config.storage_root)
+
+    # Resolve this chat's bound repo (match surface == bot.label)
+    _repo_path = ""
+    _base_branch = ""
+    for _b in getattr(config, "telegram_bots", ()):
+        if getattr(_b, "label", None) == surface:
+            _repo_path = getattr(_b, "repo_path", "") or ""
+            _base_branch = getattr(_b, "base_branch", "") or ""
+            break
 
     # ------------------------------------------------------------------ #
     # Tool 1: dev_newproject_start                                        #
@@ -478,4 +504,40 @@ def make_dev_pipeline_tools(
             )
             return {"content": [{"type": "text", "text": guidance}]}
 
-    return [dev_newproject_start, dev_run_status, dev_answer_gate]
+    # ------------------------------------------------------------------ #
+    # Tool 4: dev_task_start                                              #
+    # ------------------------------------------------------------------ #
+
+    @tool(
+        "dev_task_start",
+        "Start a coding task on THIS bot's bound repo (existing repo). Generates a "
+        "task spec + plan; reply 'duyệt' to run it and get a PR. Only works if the bot "
+        "is repo-bound.",
+        {"task_description": str},
+    )
+    async def dev_task_start(args: dict[str, Any]) -> dict[str, Any]:
+        if not _repo_path:
+            return {"content": [{"type": "text", "text":
+                "Bot này chưa gắn repo. Chạy `ai-dev telegram setup` và nhập đường dẫn repo."}]}
+        task_description: str = args["task_description"]
+        spec_id = make_spec_id()
+        log_dir = Path(config.storage_root) / "ui_logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        argv = [
+            sys.executable, "-m", "ai_dev_system.task_graph.single_task_worker",
+            "--id", spec_id, "--idea", task_description, "--repo", _repo_path,
+            "--storage-root", str(config.storage_root),
+            "--database-url", str(config.database_url),
+        ]
+        try:
+            with open(log_dir / f"task_{spec_id[:8]}.log", "a", encoding="utf-8", errors="replace") as logf:
+                _spawn_worker(argv, stdout=logf, stderr=subprocess.STDOUT, cwd=str(_REPO_ROOT))
+        except Exception as exc:  # pragma: no cover
+            return {"content": [{"type": "text", "text": f"spawn error: {exc}"}]}
+        chat_task_store.set_pending(surface, chat_id, spec_id=spec_id,
+                                    repo=_repo_path, base_branch=_base_branch)
+        text = json.dumps({"spec_id": spec_id, "status": "spec_generating",
+                           "note": "Đang tạo spec + plan. Hỏi trạng thái rồi nhắn 'duyệt' để chạy."})
+        return {"content": [{"type": "text", "text": text}]}
+
+    return [dev_newproject_start, dev_run_status, dev_answer_gate, dev_task_start]
