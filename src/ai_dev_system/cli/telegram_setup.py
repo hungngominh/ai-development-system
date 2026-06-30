@@ -22,7 +22,36 @@ def extract_chat_id(updates: list) -> tuple[int, str] | None:
     return None
 
 
-def upsert_bot_in_env(env_text: str, label: str, token: str, chat_ids) -> str:
+def container_repo_path(label: str) -> str:
+    """Container-side mount point for a bot's repo."""
+    return f"/repos/{label}"
+
+
+def add_bot_mount(override_text: str, label: str, host_repo: str) -> str:
+    """Add a gateway volume mapping host_repo -> /repos/<label> to a
+    docker-compose.override.yml body. Idempotent on the container target.
+    Kept line-based (not a YAML lib) to avoid a new dependency; the file is
+    wizard-owned so the shape is fixed."""
+    target = container_repo_path(label)
+    mount = f'      - "{host_repo}:{target}:rw"'
+    lines = override_text.splitlines() if override_text.strip() else []
+    if any(f":{target}:rw" in ln for ln in lines):
+        return override_text if override_text.endswith("\n") else override_text + "\n"
+    if not lines:
+        lines = ["services:", "  gateway:", "    volumes:"]
+    else:
+        # Ensure the services/gateway/volumes scaffold exists.
+        if "    volumes:" not in lines:
+            # Append scaffold if a different shape; simplest: rebuild minimal block.
+            if "  gateway:" not in lines:
+                lines += ["  gateway:"]
+            lines += ["    volumes:"]
+    lines.append(mount)
+    return "\n".join(lines) + "\n"
+
+
+def upsert_bot_in_env(env_text: str, label: str, token: str, chat_ids,
+                      repo_path: str = "", base_branch: str = "") -> str:
     """Add a bot to the AI_DEV_TELEGRAM_BOTS line (single-line JSON), preserving
     all other lines. Raise ValueError on duplicate label."""
     lines = env_text.splitlines()
@@ -46,7 +75,12 @@ def upsert_bot_in_env(env_text: str, label: str, token: str, chat_ids) -> str:
     if any(isinstance(b, dict) and b.get("label") == label for b in bots):
         raise ValueError(f"Bot với label '{label}' đã tồn tại. Dùng tên khác.")
 
-    bots.append({"label": label, "token": token, "chat_ids": list(chat_ids)})
+    entry = {"label": label, "token": token, "chat_ids": list(chat_ids)}
+    if repo_path:
+        entry["repo_path"] = repo_path
+    if base_branch:
+        entry["base_branch"] = base_branch
+    bots.append(entry)
     new_line = f"{BOTS_KEY}={json.dumps(bots, ensure_ascii=False)}"
 
     if line_idx is not None:
@@ -116,9 +150,27 @@ def run_telegram_setup(
         print("Chưa đặt tên project. Huỷ.")
         return 1
 
+    host_repo = input_fn(
+        "Đường dẫn repo trên host (Enter để bỏ qua — bot chỉ tạo project mới): "
+    ).strip()
+    repo_path = ""
+    base_branch = ""
+    if host_repo:
+        from pathlib import Path as _P
+        if not (_P(host_repo) / ".git").is_dir():
+            print(f"⚠ {host_repo} không phải git repo — bỏ qua binding repo.")
+        else:
+            repo_path = container_repo_path(label)
+            base_branch = "main"
+            override = _P("docker-compose.override.yml")
+            override_text = override.read_text(encoding="utf-8") if override.exists() else ""
+            override.write_text(add_bot_mount(override_text, label, host_repo), encoding="utf-8")
+            print(f"✅ Mount: {host_repo} → {repo_path} (docker-compose.override.yml)")
+
     env_text = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
     try:
-        new_text = upsert_bot_in_env(env_text, label, token, [chat_id])
+        new_text = upsert_bot_in_env(env_text, label, token, [chat_id],
+                                     repo_path=repo_path, base_branch=base_branch)
     except ValueError as exc:
         print(str(exc))
         return 1

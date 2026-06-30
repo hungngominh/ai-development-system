@@ -76,7 +76,7 @@ def test_run_telegram_setup_writes_bot(tmp_path):
     env = tmp_path / ".env"
     env.write_text("LLM_PROVIDER=claude_code\nAI_DEV_TELEGRAM_BOTS=[]\n")
 
-    inputs = iter(["123:ABC", "my-app"])  # token, then project label
+    inputs = iter(["123:ABC", "my-app", ""])  # token, project label, host repo (skip)
 
     rc = ts.run_telegram_setup(
         env,
@@ -129,3 +129,63 @@ def test_run_telegram_setup_timeout_no_message(tmp_path):
     )
     assert rc == 1
     assert '"label"' not in env.read_text()
+
+
+def test_container_repo_path():
+    assert ts.container_repo_path("my-app") == "/repos/my-app"
+
+
+def test_upsert_writes_repo_fields():
+    env = "AI_DEV_TELEGRAM_BOTS=[]\n"
+    out = ts.upsert_bot_in_env(env, "my-app", "T", [1],
+                               repo_path="/repos/my-app", base_branch="main")
+    import json
+    line = next(l for l in out.splitlines() if l.startswith("AI_DEV_TELEGRAM_BOTS="))
+    bot = json.loads(line.split("=", 1)[1])[0]
+    assert bot["repo_path"] == "/repos/my-app"
+    assert bot["base_branch"] == "main"
+
+
+def test_upsert_omits_repo_fields_when_empty():
+    env = "AI_DEV_TELEGRAM_BOTS=[]\n"
+    out = ts.upsert_bot_in_env(env, "x", "T", [1])
+    import json
+    bot = json.loads(
+        next(l for l in out.splitlines() if l.startswith("AI_DEV_TELEGRAM_BOTS="))
+        .split("=", 1)[1]
+    )[0]
+    assert "repo_path" not in bot and "base_branch" not in bot
+
+
+def test_add_bot_mount_fresh():
+    out = ts.add_bot_mount("", "my-app", "E:/Work/my-app")
+    assert "services:" in out and "gateway:" in out and "volumes:" in out
+    assert '"E:/Work/my-app:/repos/my-app:rw"' in out
+
+
+def test_add_bot_mount_idempotent():
+    once = ts.add_bot_mount("", "my-app", "E:/Work/my-app")
+    twice = ts.add_bot_mount(once, "my-app", "E:/Work/my-app")
+    assert twice.count("/repos/my-app:rw") == 1
+
+
+def test_run_setup_binds_repo(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    repo = tmp_path / "myrepo"
+    (repo / ".git").mkdir(parents=True)
+    env = tmp_path / ".env"
+    env.write_text("AI_DEV_TELEGRAM_BOTS=[]\n")
+    inputs = iter(["123:ABC", "my-app", str(repo)])  # token, label, host repo
+    import json
+    rc = ts.run_telegram_setup(
+        env, transport=_transport_with_message(chat_id=7),
+        input_fn=lambda *_a, **_k: next(inputs),
+        sleep_fn=lambda *_a, **_k: None,
+    )
+    assert rc == 0
+    bot = json.loads(
+        next(l for l in env.read_text().splitlines() if l.startswith("AI_DEV_TELEGRAM_BOTS="))
+        .split("=", 1)[1]
+    )[0]
+    assert bot["repo_path"] == "/repos/my-app"
+    assert (tmp_path / "docker-compose.override.yml").exists()
