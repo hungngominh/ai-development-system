@@ -288,3 +288,93 @@ class TestDevRunStatus:
         assert "content" in result
         text = result["content"][0]["text"].lower()
         assert "not found" in text or "error" in text
+
+    def test_paused_at_gate2_returns_task_graph(self, db, conn_factory, link_store, config, tmp_path, monkeypatch):
+        """PAUSED_AT_GATE_2 → returns status + task_graph list from TASK_GRAPH_GENERATED artifact.
+
+        Seeds a minimal artifact row with a generate_task_graph.json on disk, then
+        verifies the tool includes task_graph payload (id, title/objective, agent_type).
+        """
+        import ai_dev_system.harness.tools.dev_pipeline as dp_module
+
+        run_id = str(uuid.uuid4())
+        project_id = str(uuid.uuid4())
+
+        # Seed run first (artifacts FK references runs)
+        current_artifacts = json.dumps({"task_graph_gen_id": "gen-art-001"})
+        db.execute(
+            "INSERT INTO runs (run_id, project_id, status, pipeline_version, legacy, "
+            "current_artifacts, metadata) VALUES (?,?,?,1,0,?,'{}')",
+            (run_id, project_id, "PAUSED_AT_GATE_2", current_artifacts),
+        )
+        db.commit()
+
+        # Create the artifact directory and generate_task_graph.json
+        art_dir = tmp_path / "storage" / "artifacts" / "gen-art-001"
+        art_dir.mkdir(parents=True, exist_ok=True)
+        envelope = {
+            "tasks": [
+                {"id": "T1", "title": "Build API", "agent_type": "code_writer"},
+                {"id": "T2", "objective": "Write tests", "agent_type": "test_author"},
+            ]
+        }
+        (art_dir / "generate_task_graph.json").write_text(
+            json.dumps(envelope), encoding="utf-8"
+        )
+
+        # Seed artifact row (version is NOT NULL; run must exist first for FK)
+        db.execute(
+            "INSERT INTO artifacts (artifact_id, run_id, artifact_type, version, content_ref, "
+            "input_artifact_ids, content_checksum, content_size) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            ("gen-art-001", run_id, "TASK_GRAPH_GENERATED", 1, str(art_dir), "[]", "abc", 100),
+        )
+        db.commit()
+
+        tools = _make_tools(conn_factory, config, link_store)
+        status_tool = next(t for t in tools if t.name == "dev_run_status")
+
+        result = asyncio.run(status_tool.handler({"run_id": run_id}))
+
+        assert "content" in result
+        text = result["content"][0]["text"]
+        assert "PAUSED_AT_GATE_2" in text
+
+        payload = json.loads(text)
+        assert "task_graph" in payload, f"Expected 'task_graph' key in payload, got: {list(payload.keys())}"
+        tasks = payload["task_graph"]
+        assert len(tasks) == 2, f"Expected 2 tasks, got {len(tasks)}: {tasks}"
+
+        # Check first task fields
+        t1 = next((t for t in tasks if t["id"] == "T1"), None)
+        assert t1 is not None, f"Task T1 not found in {tasks}"
+        assert t1.get("agent_type") == "code_writer"
+        assert "title" in t1 or "objective" in t1  # either key acceptable
+
+        # Check second task fields
+        t2 = next((t for t in tasks if t["id"] == "T2"), None)
+        assert t2 is not None, f"Task T2 not found in {tasks}"
+        assert t2.get("agent_type") == "test_author"
+
+    def test_paused_at_gate2_no_artifact_returns_status_no_crash(
+        self, db, conn_factory, link_store, config
+    ):
+        """PAUSED_AT_GATE_2 with missing task_graph_gen_id → still returns status, no crash."""
+        run_id = str(uuid.uuid4())
+        project_id = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO runs (run_id, project_id, status, pipeline_version, legacy, "
+            "current_artifacts, metadata) VALUES (?,?,?,1,0,'{}','{}')",
+            (run_id, project_id, "PAUSED_AT_GATE_2"),
+        )
+        db.commit()
+
+        tools = _make_tools(conn_factory, config, link_store)
+        status_tool = next(t for t in tools if t.name == "dev_run_status")
+
+        result = asyncio.run(status_tool.handler({"run_id": run_id}))
+
+        assert "content" in result
+        text = result["content"][0]["text"]
+        # Must return the status even if graph can't be loaded
+        assert "PAUSED_AT_GATE_2" in text

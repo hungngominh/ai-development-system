@@ -264,7 +264,8 @@ class TestDevAnswerGateApprove:
         assert len(spawn_called) == 1, f"Expected 1 spawn_phase_b call, got {len(spawn_called)}"
         argv = spawn_called[0]
         assert "phase-b" in argv, f"argv should contain 'phase-b': {argv}"
-        assert "run" in argv, f"argv should contain 'run': {argv}"
+        # Gate 1 approve now spawns 'to-gate2' (pauses at Gate 2 for human review)
+        assert "to-gate2" in argv, f"argv should contain 'to-gate2': {argv}"
         assert "--run-id" in argv, f"argv should contain '--run-id': {argv}"
         assert run_id in argv, f"argv should contain run_id: {argv}"
 
@@ -324,6 +325,8 @@ class TestDevAnswerGateApprove:
         assert len(spawn_called) == 1
         argv = spawn_called[0]
         assert "phase-b" in argv
+        # Gate 1 approve_all now spawns 'to-gate2' (pauses at Gate 2 for human review)
+        assert "to-gate2" in argv, f"argv should contain 'to-gate2': {argv}"
         assert run_id in argv
 
 
@@ -551,5 +554,191 @@ class TestDevAnswerGateUnresolvedGuard:
 
         result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "confirm"}))
 
-        # spawn_phase_b called (all resolved)
+        # spawn_phase_b called (all resolved) with to-gate2 verb
         assert len(spawn_called) == 1, "spawn_phase_b should be called when all questions resolved"
+        assert "to-gate2" in spawn_called[0], (
+            f"Gate-1 confirm should spawn 'to-gate2', got: {spawn_called[0]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: Gate-2 routing (PAUSED_AT_GATE_2)
+# ---------------------------------------------------------------------------
+
+
+def _seed_paused_at_gate2_run(db, run_id: str, task_graph_gen_id: str | None = None) -> str:
+    """Seed a run at PAUSED_AT_GATE_2 with optional task_graph_gen_id in current_artifacts."""
+    project_id = str(uuid.uuid4())
+    current_artifacts = json.dumps(
+        {"task_graph_gen_id": task_graph_gen_id} if task_graph_gen_id else {}
+    )
+    db.execute(
+        "INSERT INTO runs (run_id, project_id, title, status, pipeline_version, legacy, "
+        "current_artifacts, metadata, gate1_session_state) "
+        "VALUES (?,?,?,?,1,0,?,?,NULL)",
+        (run_id, project_id, "TestProject", "PAUSED_AT_GATE_2", current_artifacts, "{}"),
+    )
+    db.commit()
+    return run_id
+
+
+class TestDevAnswerGateGate2:
+    """Gate-2 routing: PAUSED_AT_GATE_2 → resume-gate2 spawn."""
+
+    def test_gate2_approve_vietnamese_spawns_resume_with_approve(
+        self, db, conn_factory, config, link_store
+    ):
+        """'duyệt' on PAUSED_AT_GATE_2 run → spawn resume-gate2 --decision approve."""
+        run_id = str(uuid.uuid4())
+        _seed_paused_at_gate2_run(db, run_id)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "duyệt"}))
+
+        assert len(spawn_called) == 1, f"Expected 1 spawn call, got {len(spawn_called)}"
+        argv = spawn_called[0]
+        assert "phase-b" in argv, f"argv must contain 'phase-b': {argv}"
+        assert "resume-gate2" in argv, f"argv must contain 'resume-gate2': {argv}"
+        assert "--run-id" in argv, f"argv must contain '--run-id': {argv}"
+        assert run_id in argv, f"argv must contain run_id: {argv}"
+        assert "--decision" in argv, f"argv must contain '--decision': {argv}"
+        decision_index = argv.index("--decision")
+        assert argv[decision_index + 1] == "approve", (
+            f"--decision value should be 'approve', got {argv[decision_index + 1]!r}"
+        )
+        # Response confirms the action
+        text = result["content"][0]["text"]
+        assert len(text) > 0
+
+    def test_gate2_approve_english_spawns_resume_with_approve(
+        self, db, conn_factory, config, link_store
+    ):
+        """'approve' (English) on PAUSED_AT_GATE_2 → spawn resume-gate2 --decision approve."""
+        run_id = str(uuid.uuid4())
+        _seed_paused_at_gate2_run(db, run_id)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        asyncio.run(gate_tool.handler({"run_id": run_id, "text": "approve"}))
+
+        assert len(spawn_called) == 1
+        argv = spawn_called[0]
+        assert "resume-gate2" in argv
+        decision_index = argv.index("--decision")
+        assert argv[decision_index + 1] == "approve"
+
+    def test_gate2_reject_vietnamese_spawns_resume_with_reject(
+        self, db, conn_factory, config, link_store
+    ):
+        """'từ chối' on PAUSED_AT_GATE_2 → spawn resume-gate2 --decision reject."""
+        run_id = str(uuid.uuid4())
+        _seed_paused_at_gate2_run(db, run_id)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "từ chối"}))
+
+        assert len(spawn_called) == 1, f"Expected 1 spawn call, got {len(spawn_called)}"
+        argv = spawn_called[0]
+        assert "phase-b" in argv
+        assert "resume-gate2" in argv
+        assert "--decision" in argv
+        decision_index = argv.index("--decision")
+        assert argv[decision_index + 1] == "reject", (
+            f"--decision value should be 'reject', got {argv[decision_index + 1]!r}"
+        )
+        text = result["content"][0]["text"]
+        assert len(text) > 0
+
+    def test_gate2_reject_english_spawns_resume_with_reject(
+        self, db, conn_factory, config, link_store
+    ):
+        """'reject' (English) on PAUSED_AT_GATE_2 → spawn resume-gate2 --decision reject."""
+        run_id = str(uuid.uuid4())
+        _seed_paused_at_gate2_run(db, run_id)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        asyncio.run(gate_tool.handler({"run_id": run_id, "text": "reject"}))
+
+        assert len(spawn_called) == 1
+        argv = spawn_called[0]
+        assert "resume-gate2" in argv
+        decision_index = argv.index("--decision")
+        assert argv[decision_index + 1] == "reject"
+
+    def test_gate2_ambiguous_text_returns_guidance_no_spawn(
+        self, db, conn_factory, config, link_store
+    ):
+        """Ambiguous text on PAUSED_AT_GATE_2 → guidance returned, no spawn."""
+        run_id = str(uuid.uuid4())
+        _seed_paused_at_gate2_run(db, run_id)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "hmm what do I do?"}))
+
+        assert spawn_called == [], f"No spawn expected for ambiguous text, got: {spawn_called}"
+        text = result["content"][0]["text"]
+        # Should provide guidance
+        assert len(text) > 5
+
+    def test_gate2_other_status_returns_guidance(
+        self, db, conn_factory, config, link_store
+    ):
+        """Run at non-gate status → guidance about wrong status, no spawn."""
+        run_id = str(uuid.uuid4())
+        project_id = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO runs (run_id, project_id, title, status, pipeline_version, legacy, "
+            "current_artifacts, metadata, gate1_session_state) "
+            "VALUES (?,?,?,?,1,0,'{}','{}',NULL)",
+            (run_id, project_id, "TestProject", "RUNNING_PHASE_3"),
+        )
+        db.commit()
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "duyệt"}))
+
+        assert spawn_called == [], f"No spawn expected for wrong status, got: {spawn_called}"
+        text = result["content"][0]["text"]
+        # Should include status info in guidance
+        assert "RUNNING_PHASE_3" in text or "status" in text.lower() or "trạng thái" in text

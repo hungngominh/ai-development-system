@@ -25,11 +25,20 @@ debate_report["results"], maps ResolvedItem.choice → (answer, resolution_type)
   agent_b → agent_b_position, CONSENSUS
   moderator / None → moderator_summary, CONSENSUS
   override → override_text, FORCED_HUMAN
+
+Gate routing:
+  PAUSED_AT_GATE_1 → Gate-1 NLU handling (parse_user_input); on approve/confirm
+      spawns `phase-b to-gate2 --run-id R` (pauses pipeline at Gate 2 for review).
+  PAUSED_AT_GATE_2 → simple approve/reject regex; on approve spawns
+      `phase-b resume-gate2 --run-id R --decision approve`; on reject `--decision reject`.
+  other status → guidance only.
 """
 from __future__ import annotations
 
+import glob as _glob
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -183,18 +192,70 @@ def make_dev_pipeline_tools(
             except Exception as exc:
                 payload["gate1_load_error"] = str(exc)
 
+        elif status == "PAUSED_AT_GATE_2":
+            try:
+                # Load the generated task graph from the TASK_GRAPH_GENERATED artifact.
+                # current_artifacts["task_graph_gen_id"] → artifacts.content_ref →
+                # <dir>/generate_task_graph.json (fallback: any non-task_graph.json *.json)
+                arts_row = conn.execute(
+                    "SELECT current_artifacts FROM runs WHERE run_id=?", (run_id,)
+                ).fetchone()
+                current_artifacts: dict = {}
+                if arts_row and arts_row["current_artifacts"]:
+                    try:
+                        current_artifacts = json.loads(arts_row["current_artifacts"])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+
+                gen_id = current_artifacts.get("task_graph_gen_id")
+                if gen_id:
+                    art_row = conn.execute(
+                        "SELECT content_ref FROM artifacts WHERE artifact_id=?", (gen_id,)
+                    ).fetchone()
+                    if art_row:
+                        content_dir = art_row["content_ref"]
+                        graph_path = Path(content_dir) / "generate_task_graph.json"
+                        if not graph_path.exists():
+                            all_json = _glob.glob(str(Path(content_dir) / "*.json"))
+                            candidates = [
+                                f for f in all_json
+                                if Path(f).name != "task_graph.json"
+                                and not Path(f).name.startswith("_")
+                            ] or all_json
+                            graph_path = Path(candidates[0]) if candidates else graph_path
+                        if graph_path.exists():
+                            with open(graph_path, encoding="utf-8") as f:
+                                envelope = json.load(f)
+                            payload["task_graph"] = [
+                                {
+                                    "id": t.get("id", ""),
+                                    "title": t.get("title") or t.get("objective") or "",
+                                    "agent_type": t.get("agent_type", ""),
+                                }
+                                for t in envelope.get("tasks", [])
+                            ]
+            except Exception as exc:
+                payload["task_graph_load_error"] = str(exc)
+
         return {"content": [{"type": "text", "text": json.dumps(payload)}]}
 
     # ------------------------------------------------------------------ #
     # Tool 3: dev_answer_gate                                             #
     # ------------------------------------------------------------------ #
 
+    # Compiled Gate-2 decision regex (case-insensitive)
+    _G2_APPROVE_RE = re.compile(
+        r"\b(approve|duy[eệ]t|đồng\s*ý|ok|yes)\b", re.IGNORECASE
+    )
+    _G2_REJECT_RE = re.compile(
+        r"\b(reject|t[uừ]\s*ch[oố]i|no|kh[oô]ng)\b", re.IGNORECASE
+    )
+
     @tool(
         "dev_answer_gate",
-        "Route a free-text Gate-1 answer. Supported inputs: "
-        "`Q1 chọn A/B`, `Q1 approve moderator`, `Q1: override text`, "
-        "`confirm` / `finalize`, `approve all`, `show Q1`, `abort`. "
-        "On confirm/approve_all: finalizes Gate 1 and spawns Phase B automatically. "
+        "Route a free-text gate answer. At Gate 1: `Q1 chọn A/B`, `approve all`, `confirm`. "
+        "At Gate 2: `duyệt` / `approve` to approve the task graph, "
+        "`từ chối` / `reject` to reject it. "
         "run_id is optional — if omitted, resolves this chat's most recent run.",
         {"run_id": str, "text": str},
     )
@@ -208,6 +269,81 @@ def make_dev_pipeline_tools(
         text: str = args["text"]
         conn = conn_factory()
 
+        # Read status first to route between Gate 1 and Gate 2
+        status_row = conn.execute(
+            "SELECT status FROM runs WHERE run_id=?", (run_id,)
+        ).fetchone()
+        if status_row is None:
+            return {"content": [{"type": "text", "text": f"run not found: {run_id!r}"}]}
+
+        run_status: str = status_row["status"]
+
+        # ------------------------------------------------------------------ #
+        # Gate-2 routing                                                      #
+        # ------------------------------------------------------------------ #
+        if run_status == "PAUSED_AT_GATE_2":
+            if _G2_APPROVE_RE.search(text):
+                log_dir = Path(config.storage_root) / "ui_logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_path = log_dir / f"phase_b_resume_{run_id[:8]}.log"
+                pb_argv = [
+                    sys.executable, "-m", "ai_dev_system.cli.main",
+                    "phase-b", "resume-gate2", "--run-id", run_id, "--decision", "approve",
+                ]
+                try:
+                    with open(log_path, "a", encoding="utf-8", errors="replace") as logf:
+                        _spawn_pb(
+                            pb_argv,
+                            stdout=logf,
+                            stderr=subprocess.STDOUT,
+                            cwd=str(_REPO_ROOT),
+                        )
+                except Exception as exc:  # pragma: no cover
+                    return {"content": [{"type": "text", "text": f"resume spawn error: {exc}"}]}
+                payload = json.dumps({"gate2_decision": "approve", "run_id": run_id,
+                                      "message": "Đang chạy task graph đã duyệt..."})
+                return {"content": [{"type": "text", "text": payload}]}
+
+            elif _G2_REJECT_RE.search(text):
+                log_dir = Path(config.storage_root) / "ui_logs"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_path = log_dir / f"phase_b_resume_{run_id[:8]}.log"
+                pb_argv = [
+                    sys.executable, "-m", "ai_dev_system.cli.main",
+                    "phase-b", "resume-gate2", "--run-id", run_id, "--decision", "reject",
+                ]
+                try:
+                    with open(log_path, "a", encoding="utf-8", errors="replace") as logf:
+                        _spawn_pb(
+                            pb_argv,
+                            stdout=logf,
+                            stderr=subprocess.STDOUT,
+                            cwd=str(_REPO_ROOT),
+                        )
+                except Exception as exc:  # pragma: no cover
+                    return {"content": [{"type": "text", "text": f"resume spawn error: {exc}"}]}
+                payload = json.dumps({"gate2_decision": "reject", "run_id": run_id,
+                                      "message": "Đã từ chối, huỷ run."})
+                return {"content": [{"type": "text", "text": payload}]}
+
+            else:
+                guidance = "Gõ 'duyệt' hoặc 'từ chối' để quyết định task graph."
+                return {"content": [{"type": "text", "text": guidance}]}
+
+        # ------------------------------------------------------------------ #
+        # Non-gate status → guidance                                          #
+        # ------------------------------------------------------------------ #
+        if run_status != "PAUSED_AT_GATE_1":
+            guidance = (
+                f"Run không ở trạng thái chờ duyệt "
+                f"(status={run_status}). "
+                "Dùng dev_run_status để kiểm tra tiến độ."
+            )
+            return {"content": [{"type": "text", "text": guidance}]}
+
+        # ------------------------------------------------------------------ #
+        # Gate-1 routing (PAUSED_AT_GATE_1)                                  #
+        # ------------------------------------------------------------------ #
         # Parse the input (regex-first; LLM off in v1 tool path)
         pr = parse_user_input(text, llm_client=None)
 
@@ -300,14 +436,14 @@ def make_dev_pipeline_tools(
             clear_state(run_id, conn)
             conn.commit()
 
-            # Spawn Phase B detached (auto-approves Gate 2 via non-TTY stdin)
+            # Spawn Phase B detached — pauses at Gate 2 for human review
             log_dir = Path(config.storage_root) / "ui_logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             log_path = log_dir / f"phase_b_{run_id[:8]}.log"
 
             pb_argv = [
                 sys.executable, "-m", "ai_dev_system.cli.main",
-                "phase-b", "run", "--run-id", run_id,
+                "phase-b", "to-gate2", "--run-id", run_id,
             ]
             try:
                 with open(log_path, "a", encoding="utf-8", errors="replace") as logf:
