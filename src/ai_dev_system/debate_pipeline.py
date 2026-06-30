@@ -279,40 +279,27 @@ class PhaseBResult:
     execution_result: "ExecutionResult | None" = None
 
 
-def run_phase_b_pipeline(
+def _phase_b_spec_and_graph(
     run_id: str,
     config: Config,
-    conn_factory,
-    gate2_io,
-    llm_client,
-    agent=None,
-    llm_for=None,
-) -> PhaseBResult:
-    """Phase B: approved_answers → finalize_spec → task_graph → Gate 2 → beads_sync → execution.
+    conn,
+    *,
+    current_artifacts: dict,
+    pick,
+    task_run_repo,
+    event_repo,
+) -> tuple:
+    """Steps 1-2 of Phase B: finalize_spec → SPEC_BUNDLE + generate_task_graph → TASK_GRAPH_GENERATED.
 
-    Accepts conn_factory (not a live conn) because Phase B is invoked in a new process
-    after the Gate 1 pause. In tests, pass `lambda: db_conn`.
+    Also creates the task_run_g2 row (task_graph_gate2) and emits its TASK_STARTED event
+    so the caller can hand task_run_g2 straight to run_gate_2 bookkeeping.
 
-    `llm_for(step)` (optional) resolves a per-step client so spec/task-graph and
-    the verification judge can run on different model tiers. When omitted, every
-    step uses the single `llm_client` (preserves the stub/test path unchanged).
+    `current_artifacts` is the already-loaded dict from the run row (passed in by the
+    caller so we don't re-query current_artifacts a second time).
+
+    Returns (spec_artifact_id, envelope, task_run_g2).
     """
-    pick = (lambda step: llm_for(step)) if llm_for else (lambda step: llm_client)
-    conn = conn_factory()
-    task_run_repo = TaskRunRepo(conn)
-    event_repo = EventRepo(conn)
-
-    # Guard: must be called after Gate 1
-    row = conn.execute(
-        "SELECT status, current_artifacts FROM runs WHERE run_id = ?", (run_id,)
-    ).fetchone()
-    assert row["status"] == "RUNNING_PHASE_1D", (
-        f"Expected RUNNING_PHASE_1D, got {row['status']}"
-    )
-
-    # Load approved_answers from artifact (current_artifacts is JSON TEXT in SQLite)
-    from ai_dev_system.db.helpers import load_json
-    current_artifacts = load_json(row["current_artifacts"], default={}) or {}
+    # Load approved_answers from artifact
     aa_artifact_id = current_artifacts["approved_answers_id"]
     aa_artifact = conn.execute(
         "SELECT content_ref FROM artifacts WHERE artifact_id = ?", (aa_artifact_id,)
@@ -371,20 +358,38 @@ def run_phase_b_pipeline(
                    PromotedOutput("task_graph", "TASK_GRAPH_GENERATED", "Generated task graph"),
                    temp_tg)
 
-    # Step 3: Gate 2
+    # Step 3 setup: create the Gate 2 task_run row + emit TASK_STARTED
     task_run_g2 = task_run_repo.create_sync(run_id, task_type="task_graph_gate2")
     task_run_g2["input_artifact_ids"] = []
     event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run_g2["task_run_id"])
 
-    gate2_result = run_gate_2(envelope, gate2_io)
-    if gate2_result.status == "rejected":
-        task_run_repo.mark_failed(task_run_g2["task_run_id"], "EXECUTION_ERROR", "user_rejected")
-        raise PipelineAborted("User rejected task graph at Gate 2")
+    return spec_artifact_id, envelope, task_run_g2
 
+
+def _phase_b_promote_and_execute(
+    run_id: str,
+    config: Config,
+    conn,
+    *,
+    graph: dict,
+    spec_artifact_id: str,
+    task_run_g2: dict,
+    agent,
+    llm_client,
+    pick,
+) -> tuple:
+    """Steps 4-6 of Phase B: promote TASK_GRAPH_APPROVED → beads_sync → execute → Phase V.
+
+    Accepts `graph` (the approved graph dict from gate2_result.graph) so that
+    run_gate_2 remains in the caller and this helper is resumable from a future
+    PAUSED_AT_GATE_2 state.
+
+    Returns (execution_result, graph_artifact_id).
+    """
     # Name the file task_graph.json — materialize_task_runs reads exactly that
     # from the TASK_GRAPH_APPROVED artifact dir.
     temp_approved = _write_json_to_temp_debate(
-        config, task_run_g2, gate2_result.graph, filename="task_graph.json"
+        config, task_run_g2, graph, filename="task_graph.json"
     )
     graph_artifact_id = promote_output(
         conn, config, task_run_g2,
@@ -393,7 +398,7 @@ def run_phase_b_pipeline(
     )
 
     # Step 4: Beads sync
-    beads_sync(run_id, gate2_result.graph, conn)
+    beads_sync(run_id, graph, conn)
 
     # Commit before execution: run_execution spawns worker/background threads
     # that open their OWN connections (conn_factory) and must see the committed
@@ -404,13 +409,13 @@ def run_phase_b_pipeline(
     # Step 5: Execution (only if agent provided)
     execution_result = None
     if agent is not None:
-        # Advance out of RUNNING_PHASE_1D so materialize_task_runs flips the run
-        # to RUNNING_EXECUTION (it only transitions from CREATED / RUNNING_PHASE_2A
-        # / RUNNING_PHASE_3). Without this the run stays at 1D, never reaches a
-        # terminal state, and run_execution blocks forever.
+        # Advance out of RUNNING_PHASE_1D (or PAUSED_AT_GATE_2 on a resume path) so
+        # materialize_task_runs flips the run to RUNNING_EXECUTION (it only transitions
+        # from CREATED / RUNNING_PHASE_2A / RUNNING_PHASE_3). Without this the run
+        # stays at 1D, never reaches a terminal state, and run_execution blocks forever.
         conn.execute(
             "UPDATE runs SET status='RUNNING_PHASE_3', last_activity_at=CURRENT_TIMESTAMP "
-            "WHERE run_id=? AND status='RUNNING_PHASE_1D'",
+            "WHERE run_id=? AND status IN ('RUNNING_PHASE_1D','PAUSED_AT_GATE_2')",
             (run_id,),
         )
         conn.commit()
@@ -437,11 +442,58 @@ def run_phase_b_pipeline(
     # already committed on their own connections.
     conn.commit()
 
-    return PhaseBResult(
-        run_id=run_id,
-        graph_artifact_id=graph_artifact_id,
-        execution_result=execution_result,
+    return execution_result, graph_artifact_id
+
+
+def run_phase_b_pipeline(
+    run_id: str,
+    config: Config,
+    conn_factory,
+    gate2_io,
+    llm_client,
+    agent=None,
+    llm_for=None,
+) -> PhaseBResult:
+    """Phase B: approved_answers → finalize_spec → task_graph → Gate 2 → beads_sync → execution.
+
+    Accepts conn_factory (not a live conn) because Phase B is invoked in a new process
+    after the Gate 1 pause. In tests, pass `lambda: db_conn`.
+
+    `llm_for(step)` (optional) resolves a per-step client so spec/task-graph and
+    the verification judge can run on different model tiers. When omitted, every
+    step uses the single `llm_client` (preserves the stub/test path unchanged).
+    """
+    pick = (lambda step: llm_for(step)) if llm_for else (lambda step: llm_client)
+    conn = conn_factory()
+    task_run_repo = TaskRunRepo(conn)
+    event_repo = EventRepo(conn)
+
+    # Guard: must be called after Gate 1
+    row = conn.execute(
+        "SELECT status, current_artifacts FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["status"] == "RUNNING_PHASE_1D", (
+        f"Expected RUNNING_PHASE_1D, got {row['status']}"
     )
+
+    # Load current_artifacts once here and pass it in so _phase_b_spec_and_graph
+    # doesn't need a second query (current_artifacts is JSON TEXT in SQLite).
+    from ai_dev_system.db.helpers import load_json
+    current_artifacts = load_json(row["current_artifacts"], default={}) or {}
+
+    spec_artifact_id, envelope, task_run_g2 = _phase_b_spec_and_graph(
+        run_id, config, conn, current_artifacts=current_artifacts,
+        pick=pick, task_run_repo=task_run_repo, event_repo=event_repo,
+    )
+    gate2_result = run_gate_2(envelope, gate2_io)
+    if gate2_result.status == "rejected":
+        task_run_repo.mark_failed(task_run_g2["task_run_id"], "EXECUTION_ERROR", "user_rejected")
+        raise PipelineAborted("User rejected task graph at Gate 2")
+    execution_result, graph_artifact_id = _phase_b_promote_and_execute(
+        run_id, config, conn, graph=gate2_result.graph, spec_artifact_id=spec_artifact_id,
+        task_run_g2=task_run_g2, agent=agent, llm_client=llm_client, pick=pick,
+    )
+    return PhaseBResult(run_id=run_id, graph_artifact_id=graph_artifact_id, execution_result=execution_result)
 
 
 def _write_json_to_temp_debate(
