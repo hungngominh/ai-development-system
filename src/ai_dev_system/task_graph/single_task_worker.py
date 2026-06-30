@@ -13,6 +13,7 @@ import logging
 import time
 from pathlib import Path
 
+from ai_dev_system.task_graph.clarify_questions import find_blocking, synthesize_questions
 from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS as _SPEC_KEYS
 from ai_dev_system.task_graph.single_task import spec_single_task, _TITLE_MAX
 from ai_dev_system.llm_factory import make_llm_client
@@ -115,6 +116,19 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
         _findings = result.get("findings", [])
         if _findings:
             payload["findings"] = _findings
+        # Pre-generate clarifying questions for blocking findings so the gateway
+        # ClarifyWatcher can push them WITHOUT any LLM call on the daemon thread.
+        blocking = find_blocking(payload)
+        if blocking:
+            try:
+                synth_llm = make_llm_client("spec")
+            except Exception:  # noqa: BLE001
+                synth_llm = None
+            questions = synthesize_questions(blocking, idea=idea, llm=synth_llm)
+            _spec_log(log_path, f"Cần làm rõ: {len(questions)} câu hỏi (blocking={len(blocking)})")
+        else:
+            questions = []
+        payload["clarify"] = {"needed": bool(blocking), "questions": questions}
         _spec_log(log_path, "Hoàn thành ✓")
     except Exception as exc:  # noqa: BLE001
         _spec_log(log_path, f"LỖI: {type(exc).__name__}: {exc}")
