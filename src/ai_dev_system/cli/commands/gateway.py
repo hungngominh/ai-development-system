@@ -38,15 +38,27 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
         conn_factory=conn_factory,
     )
 
+    from ai_dev_system.gateway.clarify_watcher import ClarifyWatcher
+    from ai_dev_system.harness.tools.chat_task_store import ChatTaskStore
+
     platforms_by_name = {p.name: p for p in registry.adapters()}
+    session_store = SessionStore(conn_factory)
 
     watcher = RunStatusWatcher(conn_factory, link_store, platforms_by_name)
+    clarify_watcher = ClarifyWatcher(
+        ChatTaskStore(cfg.storage_root), platforms_by_name, session_store,
+        str(cfg.storage_root),
+    )
+
+    def _post_poll():
+        watcher.check_once()
+        clarify_watcher.check_once()
 
     return GatewayDaemon(
         factory=factory, platforms=registry.adapters(), home=assistant_home(),
-        session_store=SessionStore(conn_factory),
+        session_store=session_store,
         poll_timeout=poll_timeout,
-        post_poll_hook=watcher.check_once,
+        post_poll_hook=_post_poll,
     )
 
 
