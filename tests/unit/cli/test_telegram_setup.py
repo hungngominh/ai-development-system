@@ -44,6 +44,15 @@ def test_upsert_duplicate_label_raises():
         ts.upsert_bot_in_env(env, "a", "T2", [2])
 
 
+def test_upsert_coerces_non_list_json_to_empty():
+    env = 'AI_DEV_TELEGRAM_BOTS={"oops": 1}\n'
+    out = ts.upsert_bot_in_env(env, "a", "T1", [1])
+    line = next(ln for ln in out.splitlines() if ln.startswith("AI_DEV_TELEGRAM_BOTS="))
+    import json
+    bots = json.loads(line.split("=", 1)[1])
+    assert bots == [{"label": "a", "token": "T1", "chat_ids": [1]}]
+
+
 import json as _json
 from pathlib import Path
 

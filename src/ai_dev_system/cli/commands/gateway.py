@@ -50,11 +50,17 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
 
 
 def _ensure_schema(database_url: str) -> None:
-    """Apply the control-layer schema (idempotent) so a fresh DB doesn't crash the daemon."""
+    """Apply the control-layer schema (idempotent) so a fresh DB doesn't crash the daemon.
+    Raise if the schema could not be applied, rather than letting the daemon crash later
+    on a missing table with a confusing error."""
     from ai_dev_system.db.connection import get_connection
     from ai_dev_system.db.migrator import apply_schema
 
-    apply_schema(get_connection(database_url))
+    results = apply_schema(get_connection(database_url))
+    failed = [r for r in results if r.error or (not r.applied and r.skipped_reason == "file not found")]
+    if failed:
+        details = "; ".join(f"{r.name}: {r.error or r.skipped_reason}" for r in failed)
+        raise RuntimeError(f"DB schema apply failed: {details}")
 
 
 @command(verb="gateway", help="Launch the chat-gateway daemon (Telegram).")

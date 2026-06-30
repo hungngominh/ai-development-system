@@ -40,6 +40,9 @@ def upsert_bot_in_env(env_text: str, label: str, token: str, chat_ids) -> str:
                     bots = []
             break
 
+    if not isinstance(bots, list):
+        bots = []
+
     if any(isinstance(b, dict) and b.get("label") == label for b in bots):
         raise ValueError(f"Bot với label '{label}' đã tồn tại. Dùng tên khác.")
 
