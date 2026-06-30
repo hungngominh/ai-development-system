@@ -496,6 +496,174 @@ def run_phase_b_pipeline(
     return PhaseBResult(run_id=run_id, graph_artifact_id=graph_artifact_id, execution_result=execution_result)
 
 
+def run_phase_b_to_gate2(
+    run_id: str,
+    config: Config,
+    conn_factory,
+    llm_client,
+    *,
+    llm_for=None,
+) -> dict:
+    """Run Phase B up to (not including) Gate 2 and pause.
+
+    Entry guard: run must be in RUNNING_PHASE_1D.
+    Calls _phase_b_spec_and_graph → produces SPEC_BUNDLE + TASK_GRAPH_GENERATED.
+    Sets status to PAUSED_AT_GATE_2 and commits.
+
+    Returns dict with keys: run_id, task_graph_gen_id, envelope.
+    Does NOT run Gate 2 or execution.
+    """
+    from ai_dev_system.db.helpers import load_json
+
+    pick = (lambda step: llm_for(step)) if llm_for else (lambda step: llm_client)
+    conn = conn_factory()
+    task_run_repo = TaskRunRepo(conn)
+    event_repo = EventRepo(conn)
+
+    row = conn.execute(
+        "SELECT status, current_artifacts FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["status"] == "RUNNING_PHASE_1D", (
+        f"Expected RUNNING_PHASE_1D, got {row['status']}"
+    )
+
+    current_artifacts = load_json(row["current_artifacts"], default={}) or {}
+
+    spec_artifact_id, envelope, task_run_g2 = _phase_b_spec_and_graph(
+        run_id, config, conn,
+        current_artifacts=current_artifacts,
+        pick=pick,
+        task_run_repo=task_run_repo,
+        event_repo=event_repo,
+    )
+
+    # Pause at Gate 2 — no gate review, no execution
+    conn.execute(
+        "UPDATE runs SET status='PAUSED_AT_GATE_2', last_activity_at=CURRENT_TIMESTAMP "
+        "WHERE run_id=? AND status='RUNNING_PHASE_1D'",
+        (run_id,),
+    )
+    conn.commit()
+
+    # Re-read current_artifacts to get the task_graph_gen_id that was just stored
+    row2 = conn.execute(
+        "SELECT current_artifacts FROM runs WHERE run_id=?", (run_id,)
+    ).fetchone()
+    current_artifacts2 = load_json(row2["current_artifacts"], default={}) or {}
+
+    return {
+        "run_id": run_id,
+        "task_graph_gen_id": current_artifacts2.get("task_graph_gen_id"),
+        "envelope": envelope,
+    }
+
+
+def resume_phase_b_after_gate2(
+    run_id: str,
+    config: Config,
+    conn_factory,
+    *,
+    decision: str,
+    edited_graph: dict | None = None,
+    agent=None,
+    llm_client=None,
+    llm_for=None,
+):
+    """Resume Phase B after the operator has reviewed the task graph at Gate 2.
+
+    Entry guard: run must be in PAUSED_AT_GATE_2.
+
+    decision='reject': abort the run, raise PipelineAborted.
+    decision='approve': promote TASK_GRAPH_APPROVED → beads_sync → execution → Phase V.
+                        Returns ExecutionResult.
+
+    edited_graph (optional): if supplied, use instead of the generated graph.
+    """
+    from ai_dev_system.db.helpers import load_json
+    from pathlib import Path
+    import glob as _glob
+
+    pick = (lambda step: llm_for(step)) if llm_for else (lambda step: llm_client)
+    conn = conn_factory()
+    task_run_repo = TaskRunRepo(conn)
+    event_repo = EventRepo(conn)
+
+    row = conn.execute(
+        "SELECT status, current_artifacts FROM runs WHERE run_id = ?", (run_id,)
+    ).fetchone()
+    assert row["status"] == "PAUSED_AT_GATE_2", (
+        f"Expected PAUSED_AT_GATE_2, got {row['status']}"
+    )
+
+    current_artifacts = load_json(row["current_artifacts"], default={}) or {}
+
+    if decision == "reject":
+        # Mark the run ABORTED; consistent with sync path raising PipelineAborted
+        conn.execute(
+            "UPDATE runs SET status='ABORTED', last_activity_at=CURRENT_TIMESTAMP "
+            "WHERE run_id=? AND status='PAUSED_AT_GATE_2'",
+            (run_id,),
+        )
+        conn.commit()
+        raise PipelineAborted("User rejected task graph at Gate 2")
+
+    if decision != "approve":
+        raise ValueError(f"decision must be 'approve' or 'reject', got {decision!r}")
+
+    # --- decision == "approve" ---
+
+    # Resolve the graph to use: edited_graph takes precedence; otherwise load the
+    # generated graph from the TASK_GRAPH_GENERATED artifact.
+    if edited_graph is not None:
+        graph = edited_graph
+    else:
+        gen_id = current_artifacts.get("task_graph_gen_id")
+        assert gen_id, "task_graph_gen_id missing from current_artifacts"
+        art_row = conn.execute(
+            "SELECT content_ref FROM artifacts WHERE artifact_id=?", (gen_id,)
+        ).fetchone()
+        assert art_row, f"Artifact {gen_id} not found"
+
+        content_dir = art_row["content_ref"]
+        # The generated file is named {task_id}.json (NOT task_graph.json).
+        # Glob for all *.json files that are not task_graph.json.
+        all_json = _glob.glob(str(Path(content_dir) / "*.json"))
+        # Exclude system files: _complete.marker is not .json, but be safe
+        candidates = [f for f in all_json
+                      if Path(f).name not in ("task_graph.json",)
+                      and not Path(f).name.startswith("_")]
+        if not candidates:
+            # Fallback: any *.json
+            candidates = all_json
+        assert len(candidates) >= 1, (
+            f"No generated graph file found in {content_dir}: {all_json}"
+        )
+        # If multiple candidates, pick the first (there should only be one)
+        graph_path = candidates[0]
+        with open(graph_path, encoding="utf-8") as f:
+            graph = json.load(f)
+
+    spec_artifact_id = current_artifacts.get("spec_bundle_id")
+    assert spec_artifact_id, "spec_bundle_id missing from current_artifacts"
+
+    # Create a fresh task_run for Gate 2 resume
+    task_run_g2 = task_run_repo.create_sync(run_id, task_type="task_graph_gate2_resume")
+    task_run_g2["input_artifact_ids"] = []
+    event_repo.insert(run_id, "TASK_STARTED", "debate_pipeline", task_run_g2["task_run_id"])
+
+    execution_result, graph_artifact_id = _phase_b_promote_and_execute(
+        run_id, config, conn,
+        graph=graph,
+        spec_artifact_id=spec_artifact_id,
+        task_run_g2=task_run_g2,
+        agent=agent,
+        llm_client=llm_client,
+        pick=pick,
+    )
+
+    return execution_result
+
+
 def _write_json_to_temp_debate(
     config: Config, task_run: dict, data: dict, filename: str | None = None
 ) -> str:
