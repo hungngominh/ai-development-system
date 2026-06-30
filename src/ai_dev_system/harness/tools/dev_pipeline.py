@@ -222,21 +222,20 @@ def make_dev_pipeline_tools(
             if exec_path.exists():
                 ex = json.loads(exec_path.read_text(encoding="utf-8"))
                 if ex.get("exec_status") == "COMPLETED":
-                    if not pending.get("pr_url"):
-                        res = create_pr(
-                            pending["repo"], ex.get("branch", ""),
-                            ex.get("base_branch") or pending.get("base_branch") or "main",
-                            f"ai-dev: {spec_id[:8]}",
-                        )
-                        if res.get("ok") and res.get("pr_url"):
-                            chat_task_store.set_pr_url(surface, chat_id, res["pr_url"])
-                            return {"content": [{"type": "text", "text":
-                                f"✅ PR: {res['pr_url']}"}]}
+                    res = create_pr(
+                        pending["repo"], ex.get("branch", ""),
+                        ex.get("base_branch") or pending.get("base_branch") or "main",
+                        f"ai-dev: {spec_id[:8]}",
+                    )
+                    if res.get("ok") and res.get("pr_url"):
+                        chat_task_store.clear(surface, chat_id)
                         return {"content": [{"type": "text", "text":
-                            f"Execution xong nhưng tạo PR lỗi: {res.get('error')}"}]}
+                            f"✅ PR: {res['pr_url']}"}]}
+                    # PR creation failed — leave pending so next poll retries
                     return {"content": [{"type": "text", "text":
-                        f"✅ PR: {pending['pr_url']}"}]}
+                        f"Execution xong nhưng tạo PR lỗi: {res.get('error')}"}]}
                 if ex.get("exec_status") in ("FAILED", "ABORTED"):
+                    chat_task_store.clear(surface, chat_id)
                     return {"content": [{"type": "text", "text":
                         f"❌ Execution {ex.get('exec_status')}: {ex.get('error','')[:300]}"}]}
                 return {"content": [{"type": "text", "text": "⏳ Đang chạy execution..."}]}
@@ -597,6 +596,9 @@ def make_dev_pipeline_tools(
         if not _repo_path:
             return {"content": [{"type": "text", "text":
                 "Bot này chưa gắn repo. Chạy `ai-dev telegram setup` và nhập đường dẫn repo."}]}
+        if chat_task_store.get_pending(surface, chat_id):
+            return {"content": [{"type": "text", "text":
+                "Đang có task chờ duyệt. Nhắn 'từ chối' để huỷ trước khi tạo task mới."}]}
         task_description: str = args["task_description"]
         spec_id = make_spec_id()
         log_dir = Path(config.storage_root) / "ui_logs"
