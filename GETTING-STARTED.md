@@ -33,9 +33,18 @@ Chạy lệnh sau **trên máy host** (không phải trong container) và làm t
 lệnh sẽ tự bắt `chat_id` của bạn và ghi vào `.env`:
 
 ```bash
-pip install -e .          # cài một lần để có lệnh ai-dev
+python -m pip install -e .          # cài một lần để có lệnh ai-dev
 ai-dev telegram setup
 ```
+
+> **Windows — nếu báo `pip` hoặc `ai-dev` "not recognized":** thư mục Scripts của Python
+> thường không nằm trên PATH. Dùng dạng đầy đủ (không phụ thuộc PATH):
+> ```powershell
+> python -m pip install -e .
+> python -m ai_dev_system.cli.main telegram setup
+> ```
+> Lệnh thật chạy đúng và in tiếng Việt bình thường (nó ép UTF-8). Riêng `--help` có thể
+> vỡ trên console cp1252 — không sao, cứ chạy lệnh thật.
 
 Wizard sẽ: hỏi token (từ @BotFather) → bảo bạn nhắn cho bot một tin → tự phát hiện
 `chat_id` → hỏi tên project → ghi bot vào `.env`.
@@ -89,6 +98,7 @@ docker-compose down       # dừng (dữ liệu /data vẫn còn trong volume)
 - **Lỗi auth / "not logged in"** → chạy `claude login` trên Windows host, rồi `docker-compose restart`. Kiểm tra `CLAUDE_AUTH_DIR` trỏ đúng `.claude` và dùng forward slash.
 - **Bot không phản hồi đúng người** → kiểm tra `chat_ids` trong `.env` đúng ID của bạn (chạy lại `ai-dev telegram setup`).
 - **Sửa `.env` nhưng không có tác dụng** → phải `docker-compose restart` (hoặc `up -d`) để nạp lại.
+- **`pip` / `ai-dev` "not recognized" (Windows)** → thư mục Scripts của Python không trên PATH. Dùng `python -m pip install -e .` và `python -m ai_dev_system.cli.main telegram setup` (xem Bước 3). Hoặc thêm thư mục Scripts vào PATH một lần.
 
 ## Image lớn (~800MB)?
 
