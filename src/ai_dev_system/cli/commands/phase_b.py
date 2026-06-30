@@ -155,11 +155,10 @@ def phase_b_resume_gate2(
     from ai_dev_system.cli.run_phase_b_gate2 import main as gate2_main
     import sys
 
+    out = OutputRenderer(mode="json" if json_output else "human", quiet=quiet)
     if decision not in ("approve", "reject"):
-        out = OutputRenderer(mode="json" if json_output else "human", quiet=quiet)
         out.write_error(code=1, message=f"--decision must be 'approve' or 'reject', got {decision!r}")
         raise typer.Exit(1)
 
-    out = OutputRenderer(mode="json" if json_output else "human", quiet=quiet)
     out.progress(f"Resuming Phase B after Gate 2 (decision={decision}) for run {run_id}...")
     sys.exit(gate2_main(["--mode", "resume-gate2", "--run-id", run_id, "--decision", decision]))
