@@ -23,6 +23,30 @@ _SYSTEM_PROMPT = (
 )
 
 
+def build_clarify_prompt_suffix(surface: str, telegram_bots) -> str:
+    """Per-chat awareness: which repo this bot serves + how to route a clarify answer."""
+    repo_path = ""
+    base_branch = ""
+    for b in telegram_bots or ():
+        if getattr(b, "label", None) == surface:
+            repo_path = getattr(b, "repo_path", "") or ""
+            base_branch = getattr(b, "base_branch", "") or ""
+            break
+    parts = []
+    if repo_path:
+        parts.append(
+            f"Bạn được gắn với repo '{surface}' (nhánh nền '{base_branch or 'main'}'). "
+            "Khi người dùng yêu cầu sửa/thêm code, dùng tool dev_task_start; hỏi tiến độ "
+            "dùng dev_run_status; duyệt plan dùng dev_answer_gate."
+        )
+    parts.append(
+        "QUAN TRỌNG: nếu lượt trước bạn (bot) đã hỏi người dùng một câu LÀM RÕ, thì tin "
+        "nhắn kế tiếp của họ là CÂU TRẢ LỜI — gọi tool dev_answer_clarify với nguyên văn, "
+        "KHÔNG tạo task mới."
+    )
+    return "\n\n".join(parts)
+
+
 class AssistantFactory:
     def __init__(
         self,
@@ -66,10 +90,14 @@ class AssistantFactory:
             # No dev tools (REPL / tests without pipeline); reuse shared runtime
             runtime = self._runtime
 
+        suffix = build_clarify_prompt_suffix(
+            surface, getattr(self._config, "telegram_bots", ()) if self._config else ()
+        )
+        effective_prompt = self._base_prompt + ("\n\n" + suffix if suffix else "")
         return Assistant(
             runtime=runtime, memory_store=self._memory_store,
             session_store=self._session_store, budget=self._budget,
-            base_prompt=self._base_prompt, session_id=session_id,
+            base_prompt=effective_prompt, session_id=session_id,
             window=self._window, cap_usd=self._cap_usd,
         )
 
