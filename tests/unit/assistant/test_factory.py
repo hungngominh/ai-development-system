@@ -72,3 +72,36 @@ def test_build_assistant_factory_shares_one_connection(tmp_path, monkeypatch):
     assert connections_after_build == 1, (
         f"build_assistant_factory opened {connections_after_build} connections, expected 1"
     )
+
+
+def test_build_assistant_factory_reuses_injected_conn_factory(tmp_path, monkeypatch):
+    """When a caller (build_gateway) injects a conn_factory, build_assistant_factory
+    must NOT open a second connection — guards the Plan 4 leak fix on the gateway path."""
+    import ai_dev_system.db.connection as _connmod
+    from ai_dev_system.db.connection import get_connection as _real_get_connection
+    from ai_dev_system.db.migrator import apply_schema
+    monkeypatch.setenv("AI_DEV_ASSISTANT_HOME", str(tmp_path / "home"))
+    db_url = f"sqlite:///{tmp_path / 'ctl.db'}"
+    monkeypatch.setenv("DATABASE_URL", db_url)
+
+    # One shared connection owned by the caller, like build_gateway's gw_conn.
+    shared = _real_get_connection(db_url)
+    apply_schema(shared)
+
+    opened = []
+
+    def counting_get_connection(url):
+        conn = _real_get_connection(url)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(_connmod, "get_connection", counting_get_connection)
+
+    from ai_dev_system.assistant.factory import build_assistant_factory
+    f = build_assistant_factory(model=None, conn_factory=lambda: shared)
+    assert opened == [], (
+        f"build_assistant_factory opened {len(opened)} connection(s) despite an injected "
+        f"conn_factory (Plan 4 leak regression)"
+    )
+    f.for_chat("telegram", "100")  # store ops must reuse the injected conn too
+    assert opened == []

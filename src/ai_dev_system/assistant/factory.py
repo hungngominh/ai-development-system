@@ -141,12 +141,19 @@ def build_assistant_factory(
     from ai_dev_system.assistant.budget import BudgetTracker
 
     cfg = config or Config.from_env()
-    shared_conn = get_connection(cfg.database_url)
-    apply_schema(shared_conn)
-
     if conn_factory is None:
+        # Own a single shared connection (Plan 4: avoids the per-call connection
+        # leak in the long-lived daemon). Only when the caller didn't inject one.
+        shared_conn = get_connection(cfg.database_url)
+        apply_schema(shared_conn)
+
         def conn_factory():  # noqa: F811
             return shared_conn
+    else:
+        # Caller supplied the connection factory (e.g. build_gateway's shared
+        # conn); reuse it and just ensure the schema exists (idempotent). Do NOT
+        # open a second connection here — that would reintroduce the leak.
+        apply_schema(conn_factory())
 
     store = MemoryStore(assistant_home())
     registry = ToolRegistry()
