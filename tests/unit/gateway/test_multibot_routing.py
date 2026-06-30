@@ -37,24 +37,10 @@ def _seed_run(conn_factory, run_id: str, status: str) -> None:
     conn.commit()
 
 
-def _make_sender_recorder():
-    """Return (sent_list, sender_fn) pair — sender appends (chat_id, text) to sent_list."""
-    calls: list[tuple[int | str, str]] = []
-
-    def sender(token, chat_id, text, transport=None):
-        calls.append((chat_id, text))
-
-    return calls, sender
-
-
-def _make_adapter(name: str, sent: list, fake_transport=object()) -> TelegramAdapter:
-    """Build a TelegramAdapter with an injected recorder sender and a canned transport."""
-    _, sender = _make_sender_recorder()
-    # We need to reuse the list reference from the caller, so we build a closure here.
-    calls = sent
-
+def _make_adapter(name: str, sent: list, fake_transport=None) -> TelegramAdapter:
+    """Build a TelegramAdapter whose injected sender records (chat_id, text) into `sent`."""
     def recording_sender(token, chat_id, text, transport=None):
-        calls.append((chat_id, text))
+        sent.append((chat_id, text))
 
     return TelegramAdapter(
         name=name,
