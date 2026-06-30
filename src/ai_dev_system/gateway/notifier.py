@@ -45,8 +45,27 @@ class RunStatusWatcher:
     def check_once(self) -> int:
         """Sweep all active links; push notifications for new gate/terminal states.
 
+        At the start of each sweep, resolve any pending links (project_id → run_id)
+        so a freshly-created run gets linked on the same sweep that notices it.
+
         Returns the count of notifications actually sent in this sweep.
         """
+        # Step 1: resolve pending links (add pending → run_links when runs row exists)
+        for p in self._link_store.pending():
+            try:
+                conn = self._conn_factory()
+                row = conn.execute(
+                    "SELECT run_id FROM runs WHERE project_id=? ORDER BY created_at DESC LIMIT 1",
+                    (p.project_id,),
+                ).fetchone()
+                if row is not None:
+                    self._link_store.resolve_pending(p.project_id, row["run_id"])
+            except Exception:
+                logger.exception(
+                    "notifier: pending-link resolve failed for project_id=%s", p.project_id
+                )
+
+        # Step 2: sweep active (now-resolved) links
         pushed = 0
         for link in self._link_store.active():
             try:

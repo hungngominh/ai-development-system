@@ -144,6 +144,64 @@ class TestDevNewprojectStart:
         text = result["content"][0]["text"].lower()
         assert "starting" in text
 
+    def test_adds_pending_when_no_run_row(self, db, conn_factory, link_store, config):
+        """When no runs row exists, tool calls add_pending(project_id, surface, chat_id)."""
+        def recording_spawn(argv, **kwargs):
+            pass
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_start=recording_spawn)
+        start_tool = next(t for t in tools if t.name == "dev_newproject_start")
+
+        asyncio.run(start_tool.handler({"project_name": "GhostProject", "idea": "Nothing yet"}))
+
+        # The tool must add a pending entry (not just return "starting" with no linking)
+        pending = link_store.pending()
+        assert len(pending) == 1, f"Expected 1 pending entry, got {len(pending)}: {pending}"
+        p = pending[0]
+        assert p.surface == "telegram"
+        assert p.chat_id == "42"
+
+
+# ---------------------------------------------------------------------------
+# dev_run_status optional run_id tests
+# ---------------------------------------------------------------------------
+
+
+class TestDevRunStatusOptionalRunId:
+    def test_no_run_id_resolves_via_latest_for_chat(self, db, conn_factory, link_store, config):
+        """dev_run_status with no run_id resolves via latest_for_chat."""
+        run_id = str(uuid.uuid4())
+        project_id = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO runs (run_id, project_id, status, pipeline_version, legacy, "
+            "current_artifacts, metadata) VALUES (?,?,?,1,0,'{}','{}')",
+            (run_id, project_id, "RUNNING_PHASE_1B"),
+        )
+        db.commit()
+        # Seed a run_link for this chat
+        link_store.link(run_id, "telegram", "42")
+
+        tools = _make_tools(conn_factory, config, link_store)
+        status_tool = next(t for t in tools if t.name == "dev_run_status")
+
+        result = asyncio.run(status_tool.handler({"run_id": ""}))
+
+        assert "content" in result
+        text = result["content"][0]["text"]
+        assert "RUNNING_PHASE_1B" in text
+
+    def test_no_run_id_no_link_returns_friendly_message(self, db, conn_factory, link_store, config):
+        """dev_run_status with no run_id and no link → friendly message."""
+        tools = _make_tools(conn_factory, config, link_store)
+        status_tool = next(t for t in tools if t.name == "dev_run_status")
+
+        result = asyncio.run(status_tool.handler({"run_id": ""}))
+
+        assert "content" in result
+        text = result["content"][0]["text"].lower()
+        # Friendly message indicating no run for this chat
+        assert "chat" in text or "run" in text or "chưa" in text
+
 
 # ---------------------------------------------------------------------------
 # dev_run_status tests

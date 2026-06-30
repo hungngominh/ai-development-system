@@ -395,3 +395,161 @@ class TestDevAnswerGateUnknown:
         assert spawn_called == []
         text = result["content"][0]["text"]
         assert len(text) > 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: optional run_id (Critical #1 — chat-bound resolution)
+# ---------------------------------------------------------------------------
+
+
+class TestDevAnswerGateOptionalRunId:
+    def test_no_run_id_resolves_via_latest_for_chat(self, db, conn_factory, config, link_store, monkeypatch):
+        """dev_answer_gate with empty run_id resolves via latest_for_chat."""
+        import ai_dev_system.harness.tools.dev_pipeline as dp_module
+
+        run_id = str(uuid.uuid4())
+        _seed_paused_run(db, run_id)
+        link_store.link(run_id, "telegram", "42")
+
+        stub_ctx = _make_stub_context(["Q1"])
+        monkeypatch.setattr(dp_module, "load_gate1_context", lambda rid, conn: stub_ctx)
+
+        tools = _make_tools(conn_factory, config, link_store)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": "", "text": "Q1 chọn A"}))
+
+        assert "content" in result
+        # State should have been updated for the correct run_id
+        from ai_dev_system.gate.gate1_review.state import load_state
+        state = load_state(run_id, db)
+        assert "Q1" in state.resolved, "Q1 should be resolved via chat-bound run lookup"
+
+    def test_no_run_id_no_link_returns_friendly_message(self, db, conn_factory, config, link_store, monkeypatch):
+        """dev_answer_gate with empty run_id + no link → friendly 'no run for this chat' message."""
+        tools = _make_tools(conn_factory, config, link_store)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": "", "text": "Q1 chọn A"}))
+
+        assert "content" in result
+        text = result["content"][0]["text"].lower()
+        assert "chat" in text or "run" in text or "chưa" in text
+
+
+# ---------------------------------------------------------------------------
+# Tests: unresolved-questions guard (Important #2)
+# ---------------------------------------------------------------------------
+
+
+class TestDevAnswerGateUnresolvedGuard:
+    def test_confirm_with_unresolved_questions_returns_guidance_no_spawn(
+        self, db, conn_factory, config, link_store, monkeypatch
+    ):
+        """confirm with unresolved questions → guidance message; spawn_phase_b NOT called."""
+        import ai_dev_system.harness.tools.dev_pipeline as dp_module
+
+        run_id = str(uuid.uuid4())
+        _seed_paused_run(db, run_id)
+
+        # ctx has Q1, Q2 — neither resolved in state
+        stub_ctx = _make_stub_context(["Q1", "Q2"])
+        monkeypatch.setattr(dp_module, "load_gate1_context", lambda rid, conn: stub_ctx)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        def stub_finalize(run_id, decisions, storage_root, conn):
+            conn.execute("UPDATE runs SET status=? WHERE run_id=?", ("RUNNING_PHASE_1D", run_id))
+            conn.commit()
+            return ("aa-stub", "dl-stub")
+
+        monkeypatch.setattr(dp_module, "finalize_gate1", stub_finalize)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "confirm"}))
+
+        # spawn_phase_b NOT called
+        assert spawn_called == [], "spawn_phase_b must NOT be called when questions are unresolved"
+
+        # Returns guidance with unresolved question ids
+        text = result["content"][0]["text"]
+        assert "Q1" in text or "Q2" in text or "chưa" in text.lower(), (
+            f"Expected guidance about unresolved questions, got: {text!r}"
+        )
+
+    def test_approve_all_with_unresolved_proceeds(
+        self, db, conn_factory, config, link_store, monkeypatch
+    ):
+        """'approve all' with unresolved questions → proceeds (explicit accept-defaults intent)."""
+        import ai_dev_system.harness.tools.dev_pipeline as dp_module
+
+        run_id = str(uuid.uuid4())
+        _seed_paused_run(db, run_id)
+
+        # ctx has Q1, Q2 — neither resolved in state (approve_all should proceed anyway)
+        stub_ctx = _make_stub_context(["Q1", "Q2"])
+        monkeypatch.setattr(dp_module, "load_gate1_context", lambda rid, conn: stub_ctx)
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        def stub_finalize(run_id, decisions, storage_root, conn):
+            conn.execute("UPDATE runs SET status=? WHERE run_id=?", ("RUNNING_PHASE_1D", run_id))
+            conn.commit()
+            return ("aa-stub", "dl-stub")
+
+        monkeypatch.setattr(dp_module, "finalize_gate1", stub_finalize)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "approve all"}))
+
+        # spawn_phase_b called (approve_all bypasses the guard)
+        assert len(spawn_called) == 1, "spawn_phase_b should be called on 'approve all'"
+
+    def test_confirm_all_resolved_spawns_phase_b_still_works(
+        self, db, conn_factory, config, link_store, monkeypatch
+    ):
+        """confirm with ALL questions resolved still spawns Phase B (guard doesn't block it)."""
+        import ai_dev_system.harness.tools.dev_pipeline as dp_module
+        from ai_dev_system.gate.gate1_review.state import GateSessionState, save_state
+
+        run_id = str(uuid.uuid4())
+        _seed_paused_run(db, run_id)
+
+        stub_ctx = _make_stub_context(["Q1"])
+        monkeypatch.setattr(dp_module, "load_gate1_context", lambda rid, conn: stub_ctx)
+
+        # Pre-resolve Q1
+        state = GateSessionState(run_id=run_id)
+        state.record_choice("Q1", "moderator")
+        save_state(run_id, state, db)
+        db.commit()
+
+        spawn_called = []
+
+        def recording_spawn(argv, **kwargs):
+            spawn_called.append(argv)
+
+        def stub_finalize(run_id, decisions, storage_root, conn):
+            conn.execute("UPDATE runs SET status=? WHERE run_id=?", ("RUNNING_PHASE_1D", run_id))
+            conn.commit()
+            return ("aa-stub", "dl-stub")
+
+        monkeypatch.setattr(dp_module, "finalize_gate1", stub_finalize)
+
+        tools = _make_tools(conn_factory, config, link_store, spawn_phase_b=recording_spawn)
+        gate_tool = _gate_tool(tools)
+
+        result = asyncio.run(gate_tool.handler({"run_id": run_id, "text": "confirm"}))
+
+        # spawn_phase_b called (all resolved)
+        assert len(spawn_called) == 1, "spawn_phase_b should be called when all questions resolved"

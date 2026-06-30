@@ -133,7 +133,13 @@ def make_dev_pipeline_tools(
             link_store.link(run_id, surface, chat_id)
             text = json.dumps({"run_id": run_id, "project_id": project_id, "status": "started"})
         else:
-            text = json.dumps({"project_id": project_id, "status": "starting"})
+            # Debate row not yet written — record as pending so the watcher can link later
+            link_store.add_pending(project_id, surface, chat_id)
+            text = json.dumps({
+                "project_id": project_id,
+                "status": "starting",
+                "note": "Debate đang khởi động; sẽ thông báo khi tới Gate 1.",
+            })
 
         return {"content": [{"type": "text", "text": text}]}
 
@@ -144,11 +150,17 @@ def make_dev_pipeline_tools(
     @tool(
         "dev_run_status",
         "Get the current status of a pipeline run. If the run is PAUSED_AT_GATE_1, "
-        "includes the Gate 1 questions the human needs to answer.",
+        "includes the Gate 1 questions the human needs to answer. "
+        "run_id is optional — if omitted, resolves this chat's most recent run.",
         {"run_id": str},
     )
     async def dev_run_status(args: dict[str, Any]) -> dict[str, Any]:
-        run_id: str = args["run_id"]
+        run_id: str = (args.get("run_id") or "").strip()
+        if not run_id:
+            run_id = link_store.latest_for_chat(surface, chat_id) or ""
+        if not run_id:
+            return {"content": [{"type": "text", "text": "Chưa có run nào cho chat này."}]}
+
         conn = conn_factory()
 
         row = conn.execute(
@@ -182,11 +194,17 @@ def make_dev_pipeline_tools(
         "Route a free-text Gate-1 answer. Supported inputs: "
         "`Q1 chọn A/B`, `Q1 approve moderator`, `Q1: override text`, "
         "`confirm` / `finalize`, `approve all`, `show Q1`, `abort`. "
-        "On confirm/approve_all: finalizes Gate 1 and spawns Phase B automatically.",
+        "On confirm/approve_all: finalizes Gate 1 and spawns Phase B automatically. "
+        "run_id is optional — if omitted, resolves this chat's most recent run.",
         {"run_id": str, "text": str},
     )
     async def dev_answer_gate(args: dict[str, Any]) -> dict[str, Any]:
-        run_id: str = args["run_id"]
+        run_id: str = (args.get("run_id") or "").strip()
+        if not run_id:
+            run_id = link_store.latest_for_chat(surface, chat_id) or ""
+        if not run_id:
+            return {"content": [{"type": "text", "text": "Chưa có run nào cho chat này."}]}
+
         text: str = args["text"]
         conn = conn_factory()
 
@@ -210,6 +228,24 @@ def make_dev_pipeline_tools(
             # Build decisions list (mirrors webui._do_gate1_approve logic)
             state = load_state(run_id, conn)
             ctx = load_gate1_context(run_id, conn)
+
+            # Unresolved-questions guard (mirrors webui._do_gate1_approve):
+            # For "confirm", block if any question is not yet answered.
+            # For "approve_all", set approved_all=True and proceed (explicit accept-defaults).
+            if pr.action_type == "approve_all":
+                state.approved_all = True
+                save_state(run_id, state, conn)
+                conn.commit()
+            else:
+                # confirm: guard against unresolved questions
+                unresolved = [q.id for q in ctx.questions if not state.is_resolved(q.id)]
+                if unresolved:
+                    ids_str = ", ".join(unresolved)
+                    guidance = (
+                        f"Còn {len(unresolved)} câu chưa trả lời: {ids_str}. "
+                        "Trả lời hoặc gõ 'approve all'."
+                    )
+                    return {"content": [{"type": "text", "text": guidance}]}
 
             result_by_id = {
                 qdr["question"]["id"]: qdr

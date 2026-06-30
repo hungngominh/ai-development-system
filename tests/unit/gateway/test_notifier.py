@@ -186,3 +186,61 @@ def test_missing_run_row_no_crash(file_db_url):
     count = watcher.check_once()
     assert count == 0
     assert platform.calls == []
+
+
+# ---------------------------------------------------------------------------
+# Test: pending-link resolution (Critical #1)
+# ---------------------------------------------------------------------------
+
+def test_pending_link_resolves_then_pushes_on_same_sweep(file_db_url):
+    """pending link + runs row at PAUSED_AT_GATE_1 → check_once resolves + pushes."""
+    conn_factory, link_store = _make_store(file_db_url)
+    run_id = "pend1111-0000-0000-0000-000000000001"
+    project_id = "proj-pending-test-1"
+
+    # Add a pending link (NOT a resolved run_links entry yet)
+    link_store.add_pending(project_id, "telegram", "55")
+    _seed_run_with_project(conn_factory, run_id, project_id, "PAUSED_AT_GATE_1")
+
+    platform = _FakePlatform()
+    watcher = RunStatusWatcher(conn_factory, link_store, {"telegram": platform})
+
+    count = watcher.check_once()
+
+    # Pending should be resolved (no pending entries left)
+    assert link_store.pending() == [], "pending entry should be resolved after check_once"
+    # A run_links entry should now exist
+    assert link_store.lookup(run_id) is not None, "run_links row should be created after resolve"
+    # Push should have happened
+    assert count == 1, f"Expected 1 push, got {count}"
+    assert len(platform.calls) == 1
+
+
+def test_pending_link_no_runs_row_no_crash_no_push(file_db_url):
+    """pending link but no runs row yet → no resolve, no push, no crash."""
+    conn_factory, link_store = _make_store(file_db_url)
+    project_id = "proj-pending-test-2"
+
+    link_store.add_pending(project_id, "telegram", "66")
+    # Do NOT seed a runs row
+
+    platform = _FakePlatform()
+    watcher = RunStatusWatcher(conn_factory, link_store, {"telegram": platform})
+
+    count = watcher.check_once()
+
+    # Still pending
+    assert len(link_store.pending()) == 1, "pending entry should remain if no runs row"
+    assert count == 0
+    assert platform.calls == []
+
+
+def _seed_run_with_project(conn_factory, run_id: str, project_id: str, status: str) -> None:
+    """Insert a runs row with a specific project_id."""
+    conn = conn_factory()
+    conn.execute(
+        "INSERT INTO runs (run_id, project_id, status, title, current_artifacts, metadata) "
+        "VALUES (?, ?, ?, 'Test Run', '{}', '{}')",
+        (run_id, project_id, status),
+    )
+    conn.commit()
