@@ -625,21 +625,19 @@ def resume_phase_b_after_gate2(
         assert art_row, f"Artifact {gen_id} not found"
 
         content_dir = art_row["content_ref"]
-        # The generated file is named {task_id}.json (NOT task_graph.json).
-        # Glob for all *.json files that are not task_graph.json.
-        all_json = _glob.glob(str(Path(content_dir) / "*.json"))
-        # Exclude system files: _complete.marker is not .json, but be safe
-        candidates = [f for f in all_json
-                      if Path(f).name not in ("task_graph.json",)
-                      and not Path(f).name.startswith("_")]
-        if not candidates:
-            # Fallback: any *.json
-            candidates = all_json
-        assert len(candidates) >= 1, (
-            f"No generated graph file found in {content_dir}: {all_json}"
-        )
-        # If multiple candidates, pick the first (there should only be one)
-        graph_path = candidates[0]
+        # TASK_GRAPH_GENERATED is written by _write_json_to_temp_debate as
+        # f"{task_id}.json"; the generating task_run's task_type is
+        # "generate_task_graph", so the file is "generate_task_graph.json".
+        # Prefer that exact name; only fall back to a glob if it's absent, so a
+        # future sidecar .json can never be mistaken for the graph.
+        graph_path = Path(content_dir) / "generate_task_graph.json"
+        if not graph_path.exists():
+            all_json = _glob.glob(str(Path(content_dir) / "*.json"))
+            candidates = [f for f in all_json
+                          if Path(f).name != "task_graph.json"
+                          and not Path(f).name.startswith("_")] or all_json
+            assert candidates, f"No generated graph file in {content_dir}: {all_json}"
+            graph_path = candidates[0]
         with open(graph_path, encoding="utf-8") as f:
             graph = json.load(f)
 
