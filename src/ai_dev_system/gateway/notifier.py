@@ -10,7 +10,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PUSH_STATES = ("PAUSED_AT_GATE_1", "COMPLETED", "FAILED", "ABORTED")
+DEFAULT_PUSH_STATES = ("PAUSED_AT_GATE_1", "PAUSED_AT_GATE_2", "COMPLETED", "FAILED", "ABORTED")
 
 _GATE_STATES = frozenset(["PAUSED_AT_GATE_1"])
 
@@ -19,6 +19,8 @@ def _format_message(run_id: str, status: str) -> str:
     short = run_id[:8]
     if status in _GATE_STATES:
         return f"\U0001f514 Run {short} tới Gate 1 — trả lời để duyệt"
+    if status == "PAUSED_AT_GATE_2":
+        return f"\U0001f514 Run {short} tới Gate 2 — xem & duyệt task graph"
     if status == "COMPLETED":
         return f"✅ Run {short}: {status}"
     # FAILED / ABORTED / other terminal
