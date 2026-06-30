@@ -10,6 +10,8 @@ def test_suffix_names_repo_and_routing_when_bound():
     assert "Sigo" in s
     assert "dev_task_start" in s
     assert "dev_answer_clarify" in s
+    assert "dev_run_status" in s
+    assert "dev_answer_gate" in s
 
 
 def test_suffix_generic_when_not_bound():
