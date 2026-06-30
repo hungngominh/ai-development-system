@@ -49,6 +49,14 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
     )
 
 
+def _ensure_schema(database_url: str) -> None:
+    """Apply the control-layer schema (idempotent) so a fresh DB doesn't crash the daemon."""
+    from ai_dev_system.db.connection import get_connection
+    from ai_dev_system.db.migrator import apply_schema
+
+    apply_schema(get_connection(database_url))
+
+
 @command(verb="gateway", help="Launch the chat-gateway daemon (Telegram).")
 def gateway_cmd(
     once: bool = typer.Option(False, "--once", help="Poll a single batch then exit (smoke)."),
@@ -63,7 +71,9 @@ def gateway_cmd(
 
     from ai_dev_system.config import Config
 
-    daemon = build_gateway(Config.from_env(), poll_timeout=poll_timeout)
+    cfg = Config.from_env()
+    _ensure_schema(cfg.database_url)
+    daemon = build_gateway(cfg, poll_timeout=poll_timeout)
     if daemon is None:
         typer.echo("No gateway platform enabled (set AI_DEV_TELEGRAM_TOKEN).", err=True)
         raise typer.Exit(1)
