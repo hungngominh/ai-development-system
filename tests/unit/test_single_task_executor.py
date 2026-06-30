@@ -29,30 +29,30 @@ def _fake_git_fail() -> MagicMock:
 # ── Git helpers ────────────────────────────────────────────────────────────────
 
 def test_get_current_branch_returns_stripped_name():
-    from ai_dev_system.task_graph.single_task_executor import _git_current_branch
-    with patch("ai_dev_system.task_graph.single_task_executor.subprocess.run",
+    from ai_dev_system.task_graph.git_ops import current_branch as _git_current_branch
+    with patch("ai_dev_system.task_graph.git_ops.subprocess.run",
                return_value=_fake_git_ok("  main\n")):
         branch = _git_current_branch("/some/repo")
     assert branch == "main"
 
 
 def test_get_current_branch_raises_on_fail():
-    from ai_dev_system.task_graph.single_task_executor import _git_current_branch
-    with patch("ai_dev_system.task_graph.single_task_executor.subprocess.run",
+    from ai_dev_system.task_graph.git_ops import current_branch as _git_current_branch
+    with patch("ai_dev_system.task_graph.git_ops.subprocess.run",
                return_value=_fake_git_fail()):
         with pytest.raises(RuntimeError, match="not a git repository"):
             _git_current_branch("/not/a/repo")
 
 
 def test_checkout_branch_calls_git(tmp_path):
-    from ai_dev_system.task_graph.single_task_executor import _git_checkout_branch
+    from ai_dev_system.task_graph.git_ops import checkout_branch as _git_checkout_branch
     calls: list = []
 
     def _fake_run(cmd, **kw):
         calls.append(cmd)
         return _fake_git_ok("")
 
-    with patch("ai_dev_system.task_graph.single_task_executor.subprocess.run",
+    with patch("ai_dev_system.task_graph.git_ops.subprocess.run",
                side_effect=_fake_run):
         _git_checkout_branch(str(tmp_path), "ai-dev/task-abc123")
 
@@ -61,7 +61,7 @@ def test_checkout_branch_calls_git(tmp_path):
 
 
 def test_checkout_branch_creates_new_when_not_exists(tmp_path):
-    from ai_dev_system.task_graph.single_task_executor import _git_checkout_branch
+    from ai_dev_system.task_graph.git_ops import checkout_branch as _git_checkout_branch
     calls: list = []
 
     def _fake_run(cmd, **kw):
@@ -71,7 +71,7 @@ def test_checkout_branch_creates_new_when_not_exists(tmp_path):
             return _fake_git_fail()
         return _fake_git_ok("")
 
-    with patch("ai_dev_system.task_graph.single_task_executor.subprocess.run",
+    with patch("ai_dev_system.task_graph.git_ops.subprocess.run",
                side_effect=_fake_run):
         _git_checkout_branch(str(tmp_path), "ai-dev/task-new")
 
@@ -81,14 +81,14 @@ def test_checkout_branch_creates_new_when_not_exists(tmp_path):
 # ── push branch + GitHub compare URL ────────────────────────────────────────────
 
 def test_normalize_github_url_variants():
-    from ai_dev_system.task_graph.single_task_executor import _normalize_github_url
+    from ai_dev_system.task_graph.git_ops import normalize_github_url as _normalize_github_url
     assert _normalize_github_url("https://github.com/o/r.git") == "https://github.com/o/r"
     assert _normalize_github_url("git@github.com:o/r.git") == "https://github.com/o/r"
     assert _normalize_github_url("https://github.com/o/r/") == "https://github.com/o/r"
 
 
 def test_push_branch_compare_builds_url(tmp_path):
-    from ai_dev_system.task_graph.single_task_executor import _push_branch_compare
+    from ai_dev_system.task_graph.git_ops import push_branch_compare as _push_branch_compare
 
     def _fake_run(cmd, **kw):
         if cmd[:2] == ["git", "push"]:
@@ -97,7 +97,7 @@ def test_push_branch_compare_builds_url(tmp_path):
             return _fake_git_ok("https://github.com/o/r.git\n")
         return _fake_git_ok("")
 
-    with patch("ai_dev_system.task_graph.single_task_executor.subprocess.run",
+    with patch("ai_dev_system.task_graph.git_ops.subprocess.run",
                side_effect=_fake_run):
         info = _push_branch_compare(str(tmp_path), "ai-dev/task-x", "master")
 
@@ -106,9 +106,9 @@ def test_push_branch_compare_builds_url(tmp_path):
 
 
 def test_push_branch_compare_push_failure(tmp_path):
-    from ai_dev_system.task_graph.single_task_executor import _push_branch_compare
+    from ai_dev_system.task_graph.git_ops import push_branch_compare as _push_branch_compare
 
-    with patch("ai_dev_system.task_graph.single_task_executor.subprocess.run",
+    with patch("ai_dev_system.task_graph.git_ops.subprocess.run",
                return_value=_fake_git_fail()):
         info = _push_branch_compare(str(tmp_path), "ai-dev/task-x", "master")
 
@@ -216,7 +216,7 @@ def test_run_executor_creates_exec_log_and_status(tmp_path):
 
     db_url = f"sqlite:///{tmp_path}/exec.db"
     # Patch all external calls so the test is isolated
-    with patch("ai_dev_system.task_graph.single_task_executor._git_current_branch",
+    with patch("ai_dev_system.task_graph.single_task_executor._git_base_branch",
                return_value="main"), \
          patch("ai_dev_system.task_graph.single_task_executor._git_checkout_branch"), \
          patch("ai_dev_system.task_graph.single_task_executor.get_connection") as mock_conn, \

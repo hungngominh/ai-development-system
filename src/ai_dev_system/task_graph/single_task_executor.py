@@ -28,84 +28,16 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Git helpers
+# Git helpers (shared — see ai_dev_system.task_graph.git_ops)
 # ---------------------------------------------------------------------------
-
-def _git(args: list[str], cwd: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args], cwd=cwd,
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
-
-
-def _git_current_branch(repo_path: str) -> str:
-    proc = _git(["rev-parse", "--abbrev-ref", "HEAD"], repo_path)
-    if proc.returncode != 0:
-        raise RuntimeError(f"git rev-parse failed: {proc.stderr.strip()}")
-    return proc.stdout.strip()
-
-
-def _git_base_branch(repo_path: str) -> str:
-    """Return the repo's default integration branch (master or main).
-
-    Never returns an ai-dev/ branch — if the repo is already on one, we probe
-    master/main instead so the new branch forks from the right base.
-    """
-    current = _git_current_branch(repo_path)
-    if not current.startswith("ai-dev/"):
-        return current
-    # Repo already on an ai-dev/ branch; find the real default
-    for candidate in ("master", "main"):
-        proc = _git(["rev-parse", "--verify", candidate], repo_path)
-        if proc.returncode == 0:
-            return candidate
-    # Last resort: origin/HEAD
-    proc = _git(["symbolic-ref", "refs/remotes/origin/HEAD", "--short"], repo_path)
-    if proc.returncode == 0:
-        return proc.stdout.strip().removeprefix("origin/")
-    return "master"
-
-
-def _git_checkout_branch(repo_path: str, branch_name: str) -> None:
-    proc = _git(["checkout", branch_name], repo_path)
-    if proc.returncode != 0:
-        proc2 = _git(["checkout", "-b", branch_name], repo_path)
-        if proc2.returncode != 0:
-            raise RuntimeError(
-                f"git checkout -b {branch_name!r} failed: {proc2.stderr.strip()}"
-            )
-
-
-def _normalize_github_url(remote: str) -> str:
-    """Best-effort convert a git remote URL into an https GitHub web URL base."""
-    remote = (remote or "").strip()
-    if remote.endswith(".git"):
-        remote = remote[:-4]
-    if remote.startswith("git@github.com:"):
-        remote = "https://github.com/" + remote[len("git@github.com:"):]
-    elif remote.startswith("ssh://git@github.com/"):
-        remote = "https://github.com/" + remote[len("ssh://git@github.com/"):]
-    return remote.rstrip("/")
-
-
-def _push_branch_compare(repo_path: str, branch: str, base: str) -> dict:
-    """Push ``branch`` to origin and build a GitHub compare URL. Best-effort.
-
-    Returns ``{"pushed", "compare_url", "push_error"}`` — never raises so a push
-    failure (no remote / auth) does not sink an otherwise-successful run.
-    """
-    info: dict = {"pushed": False, "compare_url": None, "push_error": None}
-    push = _git(["push", "-u", "origin", branch], repo_path)
-    if push.returncode != 0:
-        info["push_error"] = (push.stderr or push.stdout or "").strip()[:300]
-        return info
-    info["pushed"] = True
-    remote = _git(["remote", "get-url", "origin"], repo_path)
-    if remote.returncode == 0 and remote.stdout.strip():
-        base_url = _normalize_github_url(remote.stdout.strip())
-        if "github.com/" in base_url:
-            info["compare_url"] = f"{base_url}/compare/{base}...{branch}"
-    return info
+from ai_dev_system.task_graph.git_ops import (  # noqa: E402
+    run_git as _git,
+    current_branch as _git_current_branch,
+    base_branch as _git_base_branch,
+    checkout_branch as _git_checkout_branch,
+    normalize_github_url as _normalize_github_url,
+    push_branch_compare as _push_branch_compare,
+)
 
 
 # ---------------------------------------------------------------------------
