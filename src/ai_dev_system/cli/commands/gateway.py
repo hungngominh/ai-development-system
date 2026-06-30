@@ -11,20 +11,41 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
     """Wire a GatewayDaemon from config, or return None if no platform is enabled."""
     from ai_dev_system.gateway.registry import PlatformRegistry
     from ai_dev_system.gateway.daemon import GatewayDaemon
+    from ai_dev_system.gateway.notifier import RunStatusWatcher
     from ai_dev_system.assistant.factory import build_assistant_factory
     from ai_dev_system.assistant.memory import assistant_home
     from ai_dev_system.assistant.session import SessionStore
+    from ai_dev_system.assistant.run_links import RunLinkStore
     from ai_dev_system.db.connection import get_connection
 
     registry = PlatformRegistry.from_config(cfg, transport=transport, sender=sender)
     if not registry.enabled():
         return None
-    factory = build_assistant_factory(model=None)
+
+    # Single shared connection for this daemon (single-threaded)
     gw_conn = get_connection(cfg.database_url)
+
+    def conn_factory():
+        return gw_conn
+
+    link_store = RunLinkStore(conn_factory)
+
+    factory = build_assistant_factory(
+        model=None,
+        link_store=link_store,
+        config=cfg,
+        conn_factory=conn_factory,
+    )
+
+    platforms_by_name = {p.name: p for p in registry.adapters()}
+
+    watcher = RunStatusWatcher(conn_factory, link_store, platforms_by_name)
+
     return GatewayDaemon(
         factory=factory, platforms=registry.adapters(), home=assistant_home(),
-        session_store=SessionStore(lambda: gw_conn),
+        session_store=SessionStore(conn_factory),
         poll_timeout=poll_timeout,
+        post_poll_hook=watcher.check_once,
     )
 
 

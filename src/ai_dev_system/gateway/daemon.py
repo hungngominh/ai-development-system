@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class GatewayDaemon:
     def __init__(self, *, factory, platforms, home, poll_timeout: int = 30,
                  sleep_fn=None, stop_event=None, session_store=None,
-                 idle_backoff: float = 1.0) -> None:
+                 idle_backoff: float = 1.0, post_poll_hook=None) -> None:
         self._factory = factory
         self._platforms = list(platforms)
         self._home = home
@@ -25,6 +25,7 @@ class GatewayDaemon:
         self._cache: dict[tuple[str, int], object] = {}
         self._session_store = session_store
         self._idle_backoff = idle_backoff
+        self._post_poll_hook = post_poll_hook
 
     def _handle(self, platform, inbound) -> None:
         key = (inbound.surface, inbound.chat_id)
@@ -57,6 +58,11 @@ class GatewayDaemon:
                             self._handle(platform, inbound)
                         except Exception:  # noqa: BLE001 - one bad message must not kill the loop
                             logger.exception("gateway: error handling message from %s", inbound.chat_id)
+                if self._post_poll_hook is not None:
+                    try:
+                        self._post_poll_hook()
+                    except Exception:
+                        logger.exception("gateway: post_poll_hook failed")
                 i += 1
                 if max_iterations is not None and i >= max_iterations:
                     break

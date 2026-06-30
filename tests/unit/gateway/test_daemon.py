@@ -99,3 +99,46 @@ def test_busy_iteration_sleeps_zero(tmp_path):
     d.run(max_iterations=2)
     # sleep fires after iteration 1 (busy=0), not after iteration 2 (break before sleep)
     assert sleep_calls == [0], f"expected sleep(0) on busy iteration, got {sleep_calls}"
+
+
+def test_post_poll_hook_called_once_per_iteration(tmp_path):
+    """A daemon with post_poll_hook calls it exactly once per iteration."""
+    hook_calls = []
+    p = _FakePlatform([[], [], []])  # three iterations, all idle
+
+    d = GatewayDaemon(
+        factory=_FakeFactory(), platforms=[p], home=tmp_path,
+        session_store=SimpleNamespace(mark_recent_resume_pending=lambda **k: 0),
+        sleep_fn=lambda s: None,
+        post_poll_hook=lambda: hook_calls.append(1),
+    )
+    d.run(max_iterations=3)
+    assert hook_calls == [1, 1, 1], f"expected 3 hook calls, got {hook_calls}"
+
+
+def test_post_poll_hook_exception_does_not_kill_loop(tmp_path):
+    """A post_poll_hook that raises must not kill the daemon loop."""
+    p = _FakePlatform([[Inbound("telegram", 111, "hi")], []])
+
+    def _boom():
+        raise RuntimeError("hook error")
+
+    d = GatewayDaemon(
+        factory=_FakeFactory(), platforms=[p], home=tmp_path,
+        session_store=SimpleNamespace(mark_recent_resume_pending=lambda **k: 0),
+        sleep_fn=lambda s: None,
+        post_poll_hook=_boom,
+    )
+    # Should not raise despite the hook crashing
+    d.run(max_iterations=2)
+    # The daemon still replied to the message (loop didn't die)
+    # Check via factory.made that both iterations ran
+    assert len(d._factory.made) >= 1
+
+
+def test_no_post_poll_hook_is_default(tmp_path):
+    """GatewayDaemon works without post_poll_hook (backward-compatible)."""
+    p = _FakePlatform([[Inbound("telegram", 111, "hi")]])
+    d = _daemon(p, tmp_path)  # no post_poll_hook
+    d.run(max_iterations=1)
+    assert p.sent == [(111, "echo:hi")]
