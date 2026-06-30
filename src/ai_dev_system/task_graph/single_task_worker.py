@@ -109,7 +109,8 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
             _spec_log(log_path, f"CẢNH BÁO: tất cả {len(_SPEC_KEYS)} spec facets đều needs_human — có thể claude CLI đã timeout hoặc lỗi nội bộ")
 
         payload = {"status": "done", "idea": idea, "repo": repo,
-                   "task": result["task"], "facets": facets}
+                   "task": result["task"], "facets": facets,
+                   "findings": result.get("findings", [])}
         _spec_log(log_path, "Hoàn thành ✓")
     except Exception as exc:  # noqa: BLE001
         _spec_log(log_path, f"LỖI: {type(exc).__name__}: {exc}")
