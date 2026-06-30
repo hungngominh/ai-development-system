@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .env
+docker-compose.override.yml
 .venv/
 node_modules/
 .DS_Store
