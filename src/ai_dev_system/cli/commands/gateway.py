@@ -2,64 +2,109 @@
 proactive run-status push (the notifier) lands in Plan 5."""
 from __future__ import annotations
 
+import logging
 import subprocess
 import typer
 
 from ai_dev_system.cli.core.registry import command
+from ai_dev_system.gateway.notifier import RunStatusWatcher
+
+logger = logging.getLogger(__name__)
 
 
 def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
     """Wire a GatewayDaemon from config, or return None if no platform is enabled."""
     from ai_dev_system.gateway.registry import PlatformRegistry
     from ai_dev_system.gateway.daemon import GatewayDaemon
-    from ai_dev_system.gateway.notifier import RunStatusWatcher
+    from ai_dev_system.gateway.clarify_watcher import ClarifyWatcher
+    from ai_dev_system.gateway.project_registry import ProjectRegistry
     from ai_dev_system.assistant.factory import build_assistant_factory
     from ai_dev_system.assistant.memory import assistant_home
     from ai_dev_system.assistant.session import SessionStore
     from ai_dev_system.assistant.run_links import RunLinkStore
+    from ai_dev_system.harness.tools.chat_task_store import ChatTaskStore
     from ai_dev_system.db.connection import get_connection
+    from ai_dev_system.config import repo_path_for_label
 
     registry = PlatformRegistry.from_config(cfg, transport=transport, sender=sender)
     if not registry.enabled():
         return None
 
-    # Single shared connection for this daemon (single-threaded)
+    platforms_by_name = {p.name: p for p in registry.adapters()}
+    project_registry = ProjectRegistry()
+
+    # Global (fallback) resources for non-repo bots.
     gw_conn = get_connection(cfg.database_url)
 
-    def conn_factory():
+    def global_conn_factory():
         return gw_conn
 
-    link_store = RunLinkStore(conn_factory)
+    global_link_store = RunLinkStore(global_conn_factory)
+    global_session_store = SessionStore(global_conn_factory)
 
     factory = build_assistant_factory(
         model=None,
-        link_store=link_store,
+        link_store=global_link_store,
         config=cfg,
-        conn_factory=conn_factory,
+        conn_factory=global_conn_factory,
+        project_registry=project_registry,
     )
 
-    from ai_dev_system.gateway.clarify_watcher import ClarifyWatcher
-    from ai_dev_system.harness.tools.chat_task_store import ChatTaskStore
+    # Distinct bound repos → one watcher pair each; global pair iff any non-repo bot.
+    repos: list[str] = []
+    has_non_repo = False
+    for b in getattr(cfg, "telegram_bots", ()):
+        rp = repo_path_for_label((b,), b.label)
+        if rp:
+            if rp not in repos:
+                repos.append(rp)
+        else:
+            has_non_repo = True
 
-    platforms_by_name = {p.name: p for p in registry.adapters()}
-    session_store = SessionStore(conn_factory)
+    watchers = []            # (RunStatusWatcher, ClarifyWatcher)
+    resume_stores = []       # session stores to mark resume-pending on unclean restart
 
-    watcher = RunStatusWatcher(conn_factory, link_store, platforms_by_name)
-    clarify_watcher = ClarifyWatcher(
-        ChatTaskStore(cfg.storage_root), platforms_by_name, session_store,
-        str(cfg.storage_root),
-    )
+    for rp in repos:
+        res = project_registry.get(rp)
+        rw = RunStatusWatcher(res.conn_factory, res.link_store, platforms_by_name)
+        cwt = ClarifyWatcher(
+            ChatTaskStore(res.paths.storage_root), platforms_by_name,
+            res.session_store, res.paths.storage_root,
+        )
+        watchers.append((rw, cwt))
+        resume_stores.append(res.session_store)
+
+    if has_non_repo or not repos:
+        rw = RunStatusWatcher(global_conn_factory, global_link_store, platforms_by_name)
+        cwt = ClarifyWatcher(
+            ChatTaskStore(cfg.storage_root), platforms_by_name,
+            global_session_store, str(cfg.storage_root),
+        )
+        watchers.append((rw, cwt))
+        resume_stores.append(global_session_store)
 
     def _post_poll():
-        watcher.check_once()
-        clarify_watcher.check_once()
+        for rw, cwt in watchers:
+            rw.check_once()
+            cwt.check_once()
 
-    return GatewayDaemon(
+    class _ResumeFanout:
+        """Daemon calls mark_recent_resume_pending() once; fan it out to every store."""
+        def mark_recent_resume_pending(self):
+            for s in resume_stores:
+                try:
+                    s.mark_recent_resume_pending()
+                except Exception:  # noqa: BLE001
+                    logger.exception("gateway: resume-pending mark failed")
+
+    daemon = GatewayDaemon(
         factory=factory, platforms=registry.adapters(), home=assistant_home(),
-        session_store=session_store,
+        session_store=_ResumeFanout(),
         poll_timeout=poll_timeout,
         post_poll_hook=_post_poll,
     )
+    daemon._project_registry = project_registry  # closed in gateway_cmd finally
+    return daemon
 
 
 def _ensure_schema(database_url: str) -> None:
@@ -110,5 +155,10 @@ def gateway_cmd(
     if daemon is None:
         typer.echo("No gateway platform enabled (set AI_DEV_TELEGRAM_TOKEN).", err=True)
         raise typer.Exit(1)
-    daemon.run(max_iterations=1 if once else (max_iterations or None))
+    try:
+        daemon.run(max_iterations=1 if once else (max_iterations or None))
+    finally:
+        reg = getattr(daemon, "_project_registry", None)
+        if reg is not None:
+            reg.close_all()
     raise typer.Exit(0)
