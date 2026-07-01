@@ -16,6 +16,11 @@ from __future__ import annotations
 
 import os
 
+try:
+    from ai_dev_system.harness.tools.dev_pipeline import make_dev_pipeline_tools
+except ImportError:  # pragma: no cover — only absent in very minimal test envs
+    make_dev_pipeline_tools = None  # type: ignore[assignment]
+
 _SYSTEM_PROMPT = (
     "You are ai-dev's internal assistant. You own your tool-use loop. "
     "Use the 'now' tool for the current time. Use the 'memory' tool to durably "
@@ -64,6 +69,7 @@ class AssistantFactory:
         conn_factory=None,
         spawn_start=None,
         spawn_phase_b=None,
+        project_registry=None,
     ) -> None:
         self._runtime = runtime               # shared base runtime (no dev tools)
         self._memory_store = memory_store
@@ -78,16 +84,26 @@ class AssistantFactory:
         self._conn_factory = conn_factory
         self._spawn_start = spawn_start
         self._spawn_phase_b = spawn_phase_b
+        self._project_registry = project_registry
 
     def for_chat(self, surface: str, chat_id: str):
         from ai_dev_system.assistant.agent import Assistant
-        session_id = self._session_store.load_or_create(surface, chat_id)
+        from ai_dev_system.config import repo_path_for_label
+
+        repo = repo_path_for_label(
+            getattr(self._config, "telegram_bots", ()) if self._config else (), surface
+        )
+        proj = None
+        if repo and self._project_registry is not None:
+            proj = self._project_registry.get(repo)
+
+        session_store = proj.session_store if proj else self._session_store
+        budget = proj.budget if proj else self._budget
+        session_id = session_store.load_or_create(surface, chat_id)
 
         if self._link_store is not None:
-            # Option A: build a per-chat runtime that includes chat-bound dev tools
-            runtime = self._build_chat_runtime(surface, chat_id)
+            runtime = self._build_chat_runtime(surface, chat_id, proj)
         else:
-            # No dev tools (REPL / tests without pipeline); reuse shared runtime
             runtime = self._runtime
 
         suffix = build_clarify_prompt_suffix(
@@ -96,30 +112,32 @@ class AssistantFactory:
         effective_prompt = self._base_prompt + ("\n\n" + suffix if suffix else "")
         return Assistant(
             runtime=runtime, memory_store=self._memory_store,
-            session_store=self._session_store, budget=self._budget,
+            session_store=session_store, budget=budget,
             base_prompt=effective_prompt, session_id=session_id,
             window=self._window, cap_usd=self._cap_usd,
         )
 
-    def _build_chat_runtime(self, surface: str, chat_id: str):
+    def _build_chat_runtime(self, surface: str, chat_id: str, proj=None):
         """Build a fresh SdkAgentRuntime for this chat that includes dev tools."""
         from ai_dev_system.harness.tools.registry import ToolRegistry
         from ai_dev_system.harness.tools.builtin import now_tool
         from ai_dev_system.harness.tools.memory_tool import make_memory_tool
         from ai_dev_system.harness.permissions import make_permission_callback
         from ai_dev_system.harness.runtime import SdkAgentRuntime
-        from ai_dev_system.harness.tools.dev_pipeline import make_dev_pipeline_tools
+        import ai_dev_system.assistant.factory as _self_mod
 
         reg = ToolRegistry()
         reg.register(now_tool, "now")
         reg.register(make_memory_tool(self._memory_store), "memory")
 
-        dev_tools = make_dev_pipeline_tools(
+        dev_tools = _self_mod.make_dev_pipeline_tools(
             surface=surface,
             chat_id=chat_id,
-            conn_factory=self._conn_factory,
+            conn_factory=(proj.conn_factory if proj else self._conn_factory),
             config=self._config,
-            link_store=self._link_store,
+            link_store=(proj.link_store if proj else self._link_store),
+            storage_root=(proj.paths.storage_root if proj else None),
+            database_url=(proj.paths.database_url if proj else None),
             spawn_start=self._spawn_start,
             spawn_phase_b=self._spawn_phase_b,
         )
@@ -155,6 +173,7 @@ def build_assistant_factory(
     conn_factory=None,
     spawn_start=None,
     spawn_phase_b=None,
+    project_registry=None,
 ) -> AssistantFactory:
     from ai_dev_system.config import Config
     from ai_dev_system.db.connection import get_connection
@@ -200,4 +219,5 @@ def build_assistant_factory(
         conn_factory=conn_factory if link_store is not None else None,
         spawn_start=spawn_start,
         spawn_phase_b=spawn_phase_b,
+        project_registry=project_registry,
     )
