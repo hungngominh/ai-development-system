@@ -105,11 +105,11 @@ def make_dev_pipeline_tools(
         chat_task_store = ChatTaskStore(config.storage_root)
 
     # Resolve this chat's bound repo (match surface == bot.label)
-    _repo_path = ""
+    from ai_dev_system.config import repo_path_for_label
+    _repo_path = repo_path_for_label(getattr(config, "telegram_bots", ()), surface)
     _base_branch = ""
     for _b in getattr(config, "telegram_bots", ()):
         if getattr(_b, "label", None) == surface:
-            _repo_path = getattr(_b, "repo_path", "") or ""
             _base_branch = getattr(_b, "base_branch", "") or ""
             break
 

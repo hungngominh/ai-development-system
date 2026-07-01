@@ -39,6 +39,14 @@ class TelegramBotConfig:
     base_branch: str = ""
 
 
+def repo_path_for_label(telegram_bots, label: str) -> str:
+    """Return the bound repo_path for the bot whose label matches, else ''."""
+    for b in telegram_bots or ():
+        if getattr(b, "label", None) == label:
+            return getattr(b, "repo_path", "") or ""
+    return ""
+
+
 def resolve_project(repo_path: str, *, ensure: bool = True) -> ProjectPaths:
     """Derive (and optionally initialize) a project's data location.
 

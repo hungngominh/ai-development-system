@@ -25,11 +25,11 @@ _SYSTEM_PROMPT = (
 
 def build_clarify_prompt_suffix(surface: str, telegram_bots) -> str:
     """Per-chat awareness: which repo this bot serves + how to route a clarify answer."""
-    repo_path = ""
+    from ai_dev_system.config import repo_path_for_label
+    repo_path = repo_path_for_label(telegram_bots, surface)
     base_branch = ""
     for b in telegram_bots or ():
         if getattr(b, "label", None) == surface:
-            repo_path = getattr(b, "repo_path", "") or ""
             base_branch = getattr(b, "base_branch", "") or ""
             break
     parts = []
