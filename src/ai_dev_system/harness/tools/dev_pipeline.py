@@ -86,6 +86,8 @@ def make_dev_pipeline_tools(
     create_pr=None,
     make_spec_id=None,
     chat_task_store=None,
+    storage_root: str | None = None,
+    database_url: str | None = None,
 ) -> list:
     """Return [dev_newproject_start, dev_run_status, dev_answer_gate, dev_task_start] bound to this chat."""
 
@@ -93,6 +95,10 @@ def make_dev_pipeline_tools(
     _spawn_pb = spawn_phase_b if spawn_phase_b is not None else _real_spawn
     _spawn_worker = spawn_task_worker if spawn_task_worker is not None else _real_spawn
     _spawn_exec = spawn_executor if spawn_executor is not None else _real_spawn
+
+    _storage_root = storage_root if storage_root is not None else str(config.storage_root)
+    _database_url = database_url if database_url is not None else str(config.database_url)
+    _env_overlay = {**os.environ, "STORAGE_ROOT": _storage_root, "DATABASE_URL": _database_url}
 
     if create_pr is None:
         from ai_dev_system.vcs.github_pr import create_pr as create_pr  # noqa: PLW0127
@@ -102,7 +108,7 @@ def make_dev_pipeline_tools(
             return uuid.uuid4().hex
     if chat_task_store is None:
         from ai_dev_system.harness.tools.chat_task_store import ChatTaskStore
-        chat_task_store = ChatTaskStore(config.storage_root)
+        chat_task_store = ChatTaskStore(_storage_root)
 
     # Resolve this chat's bound repo (match surface == bot.label)
     from ai_dev_system.config import repo_path_for_label
@@ -148,7 +154,7 @@ def make_dev_pipeline_tools(
         project_id = make_project_id(slug)
 
         # Prepare log directory
-        log_dir = Path(config.storage_root) / "ui_logs"
+        log_dir = Path(_storage_root) / "ui_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / "start.log"
 
@@ -168,6 +174,7 @@ def make_dev_pipeline_tools(
                     stdout=logf,
                     stderr=subprocess.STDOUT,
                     cwd=str(_REPO_ROOT),
+                    env=_env_overlay,
                 )
         except Exception as exc:  # pragma: no cover
             return {"content": [{"type": "text", "text": f"spawn error: {exc}"}]}
@@ -211,7 +218,7 @@ def make_dev_pipeline_tools(
         if pending and not (args.get("run_id") or "").strip():
             from pathlib import Path as _P
             from ai_dev_system.task_graph.single_task_plan import load_plan
-            sr = str(config.storage_root)
+            sr = _storage_root
             spec_id = pending["spec_id"]
             specs = _P(sr) / "task_specs"
             exec_path = specs / f"{spec_id}-exec.json"
@@ -360,7 +367,7 @@ def make_dev_pipeline_tools(
             text = args.get("text", "")
             approve = bool(_G2_APPROVE_RE.search(text)) and not bool(_G2_REJECT_RE.search(text))
             reject = bool(_G2_REJECT_RE.search(text)) and not bool(_G2_APPROVE_RE.search(text))
-            sr = str(config.storage_root)
+            sr = _storage_root
             spec_id = pending["spec_id"]
             if approve:
                 from ai_dev_system.task_graph.single_task_plan import (
@@ -379,7 +386,7 @@ def make_dev_pipeline_tools(
                     argv = [
                         sys.executable, "-m", "ai_dev_system.task_graph.single_task_executor",
                         "--id", spec_id, "--storage-root", sr,
-                        "--database-url", str(config.database_url),
+                        "--database-url", _database_url,
                     ]
                     try:
                         with open(log_dir / f"exec_{spec_id[:8]}.log", "a",
@@ -407,7 +414,7 @@ def make_dev_pipeline_tools(
                 argv = [
                     sys.executable, "-m", "ai_dev_system.task_graph.single_task_worker",
                     "--id", spec_id, "--mode", "plan", "--repo", pending["repo"],
-                    "--storage-root", sr, "--database-url", str(config.database_url),
+                    "--storage-root", sr, "--database-url", _database_url,
                 ]
                 try:
                     with open(log_dir / f"plan_{spec_id[:8]}.log", "a",
@@ -451,7 +458,7 @@ def make_dev_pipeline_tools(
             _g2_approve = bool(_G2_APPROVE_RE.search(text))
             _g2_reject = bool(_G2_REJECT_RE.search(text))
             if _g2_approve and not _g2_reject:
-                log_dir = Path(config.storage_root) / "ui_logs"
+                log_dir = Path(_storage_root) / "ui_logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
                 log_path = log_dir / f"phase_b_resume_{run_id[:8]}.log"
                 pb_argv = [
@@ -465,6 +472,7 @@ def make_dev_pipeline_tools(
                             stdout=logf,
                             stderr=subprocess.STDOUT,
                             cwd=str(_REPO_ROOT),
+                            env=_env_overlay,
                         )
                 except Exception as exc:  # pragma: no cover
                     return {"content": [{"type": "text", "text": f"resume spawn error: {exc}"}]}
@@ -473,7 +481,7 @@ def make_dev_pipeline_tools(
                 return {"content": [{"type": "text", "text": payload}]}
 
             elif _g2_reject and not _g2_approve:
-                log_dir = Path(config.storage_root) / "ui_logs"
+                log_dir = Path(_storage_root) / "ui_logs"
                 log_dir.mkdir(parents=True, exist_ok=True)
                 log_path = log_dir / f"phase_b_resume_{run_id[:8]}.log"
                 pb_argv = [
@@ -487,6 +495,7 @@ def make_dev_pipeline_tools(
                             stdout=logf,
                             stderr=subprocess.STDOUT,
                             cwd=str(_REPO_ROOT),
+                            env=_env_overlay,
                         )
                 except Exception as exc:  # pragma: no cover
                     return {"content": [{"type": "text", "text": f"resume spawn error: {exc}"}]}
@@ -599,14 +608,14 @@ def make_dev_pipeline_tools(
                 ))
 
             # Finalize Gate 1 (sets run status to RUNNING_PHASE_1D, writes artifacts)
-            finalize_gate1(run_id, decisions, config.storage_root, conn)
+            finalize_gate1(run_id, decisions, _storage_root, conn)
             # Clear the gate session state so a finalized gate leaves no stale
             # resolved choices behind (matches webui._do_gate1_approve).
             clear_state(run_id, conn)
             conn.commit()
 
             # Spawn Phase B detached — pauses at Gate 2 for human review
-            log_dir = Path(config.storage_root) / "ui_logs"
+            log_dir = Path(_storage_root) / "ui_logs"
             log_dir.mkdir(parents=True, exist_ok=True)
             log_path = log_dir / f"phase_b_{run_id[:8]}.log"
 
@@ -621,6 +630,7 @@ def make_dev_pipeline_tools(
                         stdout=logf,
                         stderr=subprocess.STDOUT,
                         cwd=str(_REPO_ROOT),
+                        env=_env_overlay,
                     )
             except Exception as exc:  # pragma: no cover
                 return {"content": [{"type": "text", "text": f"finalized but phase-b spawn error: {exc}"}]}
@@ -656,13 +666,13 @@ def make_dev_pipeline_tools(
                 "Đang có task chờ duyệt. Nhắn 'từ chối' để huỷ trước khi tạo task mới."}]}
         task_description: str = args["task_description"]
         spec_id = make_spec_id()
-        log_dir = Path(config.storage_root) / "ui_logs"
+        log_dir = Path(_storage_root) / "ui_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         argv = [
             sys.executable, "-m", "ai_dev_system.task_graph.single_task_worker",
             "--id", spec_id, "--idea", task_description, "--repo", _repo_path,
-            "--storage-root", str(config.storage_root),
-            "--database-url", str(config.database_url),
+            "--storage-root", _storage_root,
+            "--database-url", _database_url,
         ]
         try:
             with open(log_dir / f"task_{spec_id[:8]}.log", "a", encoding="utf-8", errors="replace") as logf:
@@ -693,13 +703,13 @@ def make_dev_pipeline_tools(
                   + "\n".join(questions)
                   + f"\n\nNgười dùng trả lời: {args['answer']}")
         spec_id = pending["spec_id"]
-        log_dir = Path(config.storage_root) / "ui_logs"
+        log_dir = Path(_storage_root) / "ui_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         argv = [
             sys.executable, "-m", "ai_dev_system.task_graph.single_task_worker",
             "--id", spec_id, "--idea", merged, "--repo", pending["repo"],
-            "--storage-root", str(config.storage_root),
-            "--database-url", str(config.database_url),
+            "--storage-root", _storage_root,
+            "--database-url", _database_url,
         ]
         try:
             with open(log_dir / f"task_{spec_id[:8]}.log", "a", encoding="utf-8",
