@@ -22,12 +22,78 @@ DEFAULT_DATABASE_URL = f"sqlite:///{Path.home() / '.ai-dev-system' / 'control.db
 
 
 @dataclass(frozen=True)
+class ProjectPaths:
+    """Per-project data locations under <repo>/.ai-dev/state/."""
+    repo_path: str
+    root: str
+    storage_root: str
+    database_url: str
+
+
+@dataclass(frozen=True)
 class TelegramBotConfig:
     label: str
     token: str
     allowed_chat_ids: tuple[int, ...] = ()
     repo_path: str = ""
     base_branch: str = ""
+
+
+def resolve_project(repo_path: str, *, ensure: bool = True) -> ProjectPaths:
+    """Derive (and optionally initialize) a project's data location.
+
+    Layout: <repo>/.ai-dev/state/{control.db, storage/}. With ensure=True this
+    creates the dirs, adds a `state/` line to <repo>/.ai-dev/.gitignore, and
+    applies the DB schema (idempotent). With ensure=False it is pure — no IO.
+    """
+    if not repo_path or not str(repo_path).strip():
+        raise ValueError("resolve_project requires a non-empty repo_path")
+    repo = os.path.abspath(str(repo_path).strip())
+    root = os.path.join(repo, ".ai-dev", "state")
+    storage_root = os.path.join(root, "storage")
+    db_path = os.path.join(root, "control.db")
+    paths = ProjectPaths(
+        repo_path=repo,
+        root=root,
+        storage_root=storage_root,
+        database_url=f"sqlite:///{db_path}",
+    )
+    if ensure:
+        _ensure_project(paths)
+    return paths
+
+
+def _ensure_project(paths: "ProjectPaths") -> None:
+    """Idempotent init for a project's data dir: mkdir, .gitignore, schema."""
+    from ai_dev_system.db.connection import get_connection
+    from ai_dev_system.db.migrator import apply_schema
+
+    os.makedirs(paths.storage_root, exist_ok=True)  # also creates root/.ai-dev
+
+    # .gitignore: add a `state/` line once, preserving any existing content.
+    gi = Path(paths.repo_path) / ".ai-dev" / ".gitignore"
+    gi.parent.mkdir(parents=True, exist_ok=True)
+    if gi.exists():
+        content = gi.read_text(encoding="utf-8")
+        if "state/" not in [ln.strip() for ln in content.splitlines()]:
+            sep = "" if content == "" or content.endswith("\n") else "\n"
+            gi.write_text(content + sep + "state/\n", encoding="utf-8")
+    else:
+        gi.write_text("state/\n", encoding="utf-8")
+
+    # Apply schema to the project DB (idempotent); fail fast on a real error.
+    conn = get_connection(paths.database_url)
+    try:
+        results = apply_schema(conn)
+        failed = [
+            r for r in results
+            if r.error or (not r.applied and r.skipped_reason == "file not found")
+        ]
+        if failed:
+            details = "; ".join(f"{r.name}: {r.error or r.skipped_reason}" for r in failed)
+            raise RuntimeError(f"project schema apply failed: {details}")
+    finally:
+        conn.close()
 
 
 def _default_retry_policy() -> dict[str, dict[str, Any]]:
