@@ -10,6 +10,7 @@ Run:  py -3.12 -m ai_dev_system.webui   (then open http://localhost:8765)
 """
 from __future__ import annotations
 
+import argparse
 import html
 import json
 import os
@@ -22,7 +23,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from ai_dev_system.config import Config
+from ai_dev_system.config import Config, apply_project_env
 from ai_dev_system.db.connection import get_connection
 from ai_dev_system.task_graph.facets import FACET_KEYS, SPEC_FACET_KEYS, EXEC_FACET_KEYS
 from ai_dev_system.task_graph.single_task_plan import plan_single_task, load_plan, approve_plan
@@ -1810,7 +1811,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(_page("error", f"<div class='card'><pre>{html.escape(repr(exc))}</pre></div>"), 500)
 
 
+def _maybe_apply_project(argv=None) -> None:
+    """If --repo (argv) or AIDEV_REPO (env) is set, overlay that project's
+    STORAGE_ROOT/DATABASE_URL for this process. --repo wins over the env var."""
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--repo", default=None)
+    known, _ = parser.parse_known_args(argv)
+    repo = known.repo or os.environ.get("AIDEV_REPO")
+    if repo:
+        apply_project_env(repo)
+
+
 def main() -> None:
+    _maybe_apply_project()
     server = ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
     print(f"AI Dev System dashboard -> http://localhost:{PORT}  (Ctrl+C to stop)")
     try:
