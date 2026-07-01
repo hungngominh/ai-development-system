@@ -368,6 +368,11 @@ def make_dev_pipeline_tools(
                 )
                 plan = load_plan(sr, spec_id)
                 if plan is not None:
+                    # Idempotency guard: don't spawn a second executor.
+                    exec_path = Path(sr) / "task_specs" / f"{spec_id}-exec.json"
+                    if exec_path.exists():
+                        return {"content": [{"type": "text", "text":
+                            "▶️ Execution đang chạy. Hỏi trạng thái để nhận link PR khi xong."}]}
                     # PLAN gate → approve + execute.
                     approve_plan(sr, spec_id)
                     log_dir = Path(sr) / "ui_logs"; log_dir.mkdir(parents=True, exist_ok=True)
@@ -384,6 +389,10 @@ def make_dev_pipeline_tools(
                         return {"content": [{"type": "text", "text": f"exec spawn error: {exc}"}]}
                     return {"content": [{"type": "text", "text":
                         "▶️ Đang chạy execution. Hỏi trạng thái để nhận link PR khi xong."}]}
+                # Idempotency guard: don't spawn a second plan worker.
+                if pending.get("phase") == "plan_generating":
+                    return {"content": [{"type": "text", "text":
+                        "⏳ Đang tạo plan… Hỏi trạng thái để xem plan."}]}
                 # SPEC gate → require a ready, unblocked spec, then build the plan.
                 from pathlib import Path as _P
                 spec_path = _P(sr) / "task_specs" / f"{spec_id}.json"

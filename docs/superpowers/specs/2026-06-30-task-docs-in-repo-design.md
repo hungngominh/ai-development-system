@@ -68,7 +68,7 @@ PRs merge into the default branch. No generic `spec.md` / `plan.md`.
 **Acceptance criteria:**
 - ...
 
-**Clarify Q&A:** (only if any clarify questions were answered)
+**Clarify Q&A:** (only if any clarify questions were answered; spec is published only after clarify is resolved, not while blocking)
 - Q: ... / A: ...
 
 **Findings:** (only if self-review findings exist)
@@ -114,7 +114,7 @@ already exist.
 ### `single_task_worker` (gains `--mode {spec,plan}`)
 - `--mode spec` (default, = current behavior + publish): generate the spec; if a
   blocking clarify is needed, stop (clarify gate handles it). Otherwise publish
-  `...-spec.md` and record its URL in `{spec_id}.json` under `doc_url`.
+  `...-spec.md` and record its URL in `{spec_id}.json` under `spec_doc_url`.
 - `--mode plan`: load the (approved) spec, run `plan_single_task`, publish
   `...-plan.md`, and record its URL in `{spec_id}-plan.json` under `doc_url`.
 

@@ -246,6 +246,61 @@ def test_status_keeps_pending_when_pr_fails(tmp_path):
     assert store.get_pending("tg", "1") is not None  # NOT cleared
 
 
+def test_approve_plan_twice_does_not_double_spawn(tmp_path):
+    """Approving 'duyệt' a second time after execution has started must NOT spawn a second executor."""
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="s8", repo="/repos/app", base_branch="main")
+    _seed_spec(tmp_path, "s8")
+    # pre-build the plan so the PLAN gate is taken
+    from ai_dev_system.task_graph.single_task_plan import plan_single_task
+    plan_single_task({"task": {"title": "t"}, "facets": {}}, "s8", storage_root=str(tmp_path))
+    spawned = []
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+        spawn_executor=lambda argv, **kw: spawned.append(argv),
+    )
+    gate = _find(tools, "dev_answer_gate")
+    # First approval → executor spawned once
+    out1 = asyncio.run(gate.handler({"run_id": "", "text": "duyệt"}))
+    assert len(spawned) == 1
+    assert "s8" in spawned[0] and "single_task_executor" in " ".join(spawned[0])
+    # Simulate execution started by writing exec.json
+    exec_path = tmp_path / "task_specs" / "s8-exec.json"
+    exec_path.write_text(json.dumps({"status": "running"}), encoding="utf-8")
+    # Second approval → must NOT spawn again
+    out2 = asyncio.run(gate.handler({"run_id": "", "text": "duyệt"}))
+    assert len(spawned) == 1, "Second approve must not spawn a second executor"
+    txt2 = out2["content"][0]["text"].lower()
+    assert "đang chạy" in txt2 or "execution" in txt2
+
+
+def test_approve_spec_twice_does_not_double_spawn_plan_worker(tmp_path):
+    """Approving 'duyệt' a second time while plan_generating must NOT spawn a second plan worker."""
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="s9", repo="/repos/app", base_branch="main")
+    _seed_spec(tmp_path, "s9")  # spec ready, no plan yet
+    spawned = []
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+        spawn_task_worker=lambda argv, **kw: spawned.append(argv),
+    )
+    gate = _find(tools, "dev_answer_gate")
+    # First approval → plan worker spawned once; phase set to plan_generating
+    out1 = asyncio.run(gate.handler({"run_id": "", "text": "duyệt"}))
+    assert len(spawned) == 1
+    assert "--mode" in spawned[0] and "plan" in spawned[0]
+    assert store.get_pending("tg", "1")["phase"] == "plan_generating"
+    # Second approval while phase == plan_generating → must NOT spawn again
+    out2 = asyncio.run(gate.handler({"run_id": "", "text": "duyệt"}))
+    assert len(spawned) == 1, "Second approve must not spawn a second plan worker"
+    txt2 = out2["content"][0]["text"].lower()
+    assert "tạo plan" in txt2 or "đang tạo" in txt2
+
+
 def test_task_start_refuses_when_pending_exists(tmp_path):
     """dev_task_start must refuse if a pending task already exists for this chat."""
     cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
