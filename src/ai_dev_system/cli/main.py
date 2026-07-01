@@ -8,6 +8,7 @@ import typer
 from ai_dev_system.cli.core.context import CLIContext
 from ai_dev_system.cli.core.output import OutputRenderer
 from ai_dev_system.cli.core.registry import get_app
+from ai_dev_system.config import apply_project_env
 from ai_dev_system.feature_flags import (
     FeatureFlagOrderError,
     FeatureFlags,
@@ -43,8 +44,16 @@ def _root_callback(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show planned mutations without applying."
     ),
+    repo: Optional[str] = typer.Option(
+        None,
+        "--repo",
+        envvar="AIDEV_REPO",
+        help="Target repo — use its <repo>/.ai-dev/state for DB + storage (default: global).",
+    ),
 ) -> None:
     """ai-dev — AI Development System CLI."""
+    if repo:
+        apply_project_env(repo)
     # Parse feature overrides
     try:
         overrides = parse_feature_overrides(feature or [])
