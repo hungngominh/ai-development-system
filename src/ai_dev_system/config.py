@@ -71,6 +71,16 @@ def resolve_project(repo_path: str, *, ensure: bool = True) -> ProjectPaths:
     return paths
 
 
+def apply_project_env(repo_path: str) -> "ProjectPaths":
+    """Resolve a project (creating its data dir) and overlay STORAGE_ROOT +
+    DATABASE_URL onto os.environ so every Config.from_env() in this process —
+    and every subprocess that inherits the env — targets that project."""
+    paths = resolve_project(repo_path, ensure=True)
+    os.environ["STORAGE_ROOT"] = paths.storage_root
+    os.environ["DATABASE_URL"] = paths.database_url
+    return paths
+
+
 def _ensure_project(paths: "ProjectPaths") -> None:
     """Idempotent init for a project's data dir: mkdir, .gitignore, schema."""
     from ai_dev_system.db.connection import get_connection
