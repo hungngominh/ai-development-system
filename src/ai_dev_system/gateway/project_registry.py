@@ -13,6 +13,9 @@ import sqlite3
 
 from ai_dev_system.config import ProjectPaths, resolve_project
 from ai_dev_system.db.connection import get_connection
+from ai_dev_system.assistant.run_links import RunLinkStore
+from ai_dev_system.assistant.session import SessionStore
+from ai_dev_system.assistant.budget import BudgetTracker
 
 
 @dataclass(frozen=True)
@@ -20,6 +23,9 @@ class ProjectResources:
     paths: ProjectPaths
     conn: sqlite3.Connection
     conn_factory: Callable[[], sqlite3.Connection]
+    link_store: RunLinkStore
+    session_store: SessionStore
+    budget: BudgetTracker
 
 
 class ProjectRegistry:
@@ -35,7 +41,18 @@ class ProjectRegistry:
             return cached
         paths = resolve_project(key, ensure=True)
         conn = get_connection(paths.database_url)
-        res = ProjectResources(paths=paths, conn=conn, conn_factory=lambda: conn)
+
+        def _cf() -> sqlite3.Connection:
+            return conn
+
+        res = ProjectResources(
+            paths=paths,
+            conn=conn,
+            conn_factory=_cf,
+            link_store=RunLinkStore(_cf),
+            session_store=SessionStore(_cf),
+            budget=BudgetTracker(_cf),
+        )
         self._cache[key] = res
         return res
 
