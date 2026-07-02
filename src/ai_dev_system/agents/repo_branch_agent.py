@@ -306,7 +306,7 @@ def _invoke_claude(
             now = time.monotonic()
             if now >= deadline:
                 timeout_kind = "hard"
-            elif idle_timeout_s and now - last_event[0] >= float(idle_timeout_s):
+            elif idle_timeout_s is not None and idle_timeout_s > 0 and now - last_event[0] >= idle_timeout_s:
                 timeout_kind = "idle"
             else:
                 continue

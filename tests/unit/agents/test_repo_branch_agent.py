@@ -372,9 +372,6 @@ def test_invoke_claude_hard_timeout_kind(monkeypatch):
 
 def test_invoke_claude_custom_flags_replace_exec_flags():
     seen = {}
-    def _capture(cmd, **kw):
-        seen["cmd"] = cmd
-        return _HangingPopen(cmd)  # any Popen; we only need the cmd
     class _DonePopen(_HangingPopen):
         def wait(self, timeout=None):
             self.returncode = 0
