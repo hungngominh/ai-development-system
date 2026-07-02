@@ -10,6 +10,7 @@ Thumbs.db
 *.swp
 *.swo
 .worktrees/
+/data/
 
 # Local SQLite DB artifacts
 ai_dev.db

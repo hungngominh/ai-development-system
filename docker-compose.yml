@@ -7,8 +7,9 @@ services:
       # Claude Max auth — mount read-only từ Windows host.
       # ${CLAUDE_AUTH_DIR} được docker-compose đọc từ ./.env.
       - "${CLAUDE_AUTH_DIR}:/root/.claude:ro"
-      # SQLite DB + storage, persist qua restart/rebuild.
-      - ai-dev-data:/data
+      # Global fallback DB + storage (chỉ cho bot KHÔNG gắn repo / lệnh không --repo).
+      # Per-project data nằm trong repo tại <repo>/.ai-dev/state/. Bind ra host.
+      - ./data:/data
       # Config cho app đọc (Telegram bots, feature flags).
       - ./.env:/app/.env:ro
       # GitHub CLI auth (read-only) so the container can push + open PRs.
@@ -28,5 +29,3 @@ services:
       GIT_COMMITTER_NAME: "${GIT_AUTHOR_NAME}"
       GIT_COMMITTER_EMAIL: "${GIT_AUTHOR_EMAIL}"
 
-volumes:
-  ai-dev-data:
