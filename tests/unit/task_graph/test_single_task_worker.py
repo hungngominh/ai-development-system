@@ -79,3 +79,18 @@ def test_run_worker_db_failure_still_writes_file(tmp_path, monkeypatch):
                         storage_root=str(tmp_path), database_url="not-a-sqlite-url")
     data = json.loads(path.read_text(encoding="utf-8"))
     assert data["status"] == "done"
+
+
+def test_run_worker_passes_live_log_path_and_logs_timeouts(tmp_path, monkeypatch, file_db_url):
+    seen = {}
+    def _fake_spec(idea, llm, *, repo_path=None, log=None, live_log_path=None):
+        seen["live_log_path"] = live_log_path
+        return {"task": {"title": "T"}, "facets": {}}
+    monkeypatch.setattr(w, "spec_single_task", _fake_spec)
+    monkeypatch.setattr(w, "publish_doc", lambda *a, **k: "https://x/blob/b/s.md")
+    w.run_worker("speclog1", "idea", "/some/repo",
+                 storage_root=str(tmp_path), database_url=file_db_url)
+    assert seen["live_log_path"] == tmp_path / "task_specs" / "speclog1.log"
+    log_text = (tmp_path / "task_specs" / "speclog1.log").read_text(encoding="utf-8")
+    assert "300s" not in log_text          # stale fixed-budget message removed
+    assert "idle" in log_text              # announces the idle-based budget

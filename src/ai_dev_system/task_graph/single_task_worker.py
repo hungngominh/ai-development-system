@@ -15,6 +15,7 @@ from pathlib import Path
 
 from ai_dev_system.task_graph.clarify_questions import find_blocking, synthesize_questions
 from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS as _SPEC_KEYS
+from ai_dev_system.task_graph.facets_agentic import _spec_idle_timeout, _spec_hard_timeout
 from ai_dev_system.task_graph.single_task import spec_single_task, _TITLE_MAX
 from ai_dev_system.llm_factory import make_llm_client
 from ai_dev_system.task_graph.repo_docs import (
@@ -96,7 +97,10 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
     try:
         if repo:
             _spec_log(log_path, f"Chế độ: agentic — đọc repo tại {repo}")
-            _spec_log(log_path, f"Đang chạy claude CLI (đọc code + sinh {len(_SPEC_KEYS)} spec facets, tối đa 300s)…")
+            _spec_log(log_path,
+                      f"Đang chạy claude CLI (đọc code + sinh {len(_SPEC_KEYS)} spec facets; "
+                      f"idle timeout {int(_spec_idle_timeout())}s, "
+                      f"trần an toàn {int(_spec_hard_timeout())}s)…")
             llm = None
         else:
             _spec_log(log_path, "Chế độ: text spec via LLM")
@@ -105,7 +109,8 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
             _spec_log(log_path, f"Đang gọi LLM sinh {len(_SPEC_KEYS)} spec facets…")
 
         result = spec_single_task(idea, llm, repo_path=repo,
-                                  log=lambda msg: _spec_log(log_path, msg))
+                                  log=lambda msg: _spec_log(log_path, msg),
+                                  live_log_path=log_path)
         facets = result["facets"]
         spec_facets = {k: v for k, v in facets.items() if k in _SPEC_KEYS}
         filled = sum(1 for f in spec_facets.values() if f.get("status") == "filled")
