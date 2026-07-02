@@ -383,3 +383,30 @@ def test_relative_links_resolve(rel):
     base = (REPO_ROOT / rel).parent
     broken = [h for h in _relative_md_links(text) if not (base / h).exists()]
     assert not broken, f"{rel} has broken relative links: {broken}"
+
+
+# --------------------------------------------------------------------------- #
+# Per-project data model (SP-4): docs must describe <repo>/.ai-dev/state + --repo
+# --------------------------------------------------------------------------- #
+def test_readme_documents_per_project_data():
+    readme = _read("README.md")
+    assert ".ai-dev/state" in readme, "README must document the per-project data path"
+    assert ("--repo" in readme) or ("AIDEV_REPO" in readme), (
+        "README must mention --repo / AIDEV_REPO"
+    )
+
+
+def test_setup_documents_per_project_and_fallback():
+    setup = _read("SETUP.md")
+    assert ".ai-dev/state" in setup, "SETUP must document the per-project data path"
+    assert ("--repo" in setup) or ("AIDEV_REPO" in setup), (
+        "SETUP must mention --repo / AIDEV_REPO"
+    )
+    assert ("fallback" in setup.lower()) or ("global" in setup.lower()), (
+        "SETUP must explain the global fallback"
+    )
+
+
+def test_architecture_documents_per_project_data():
+    arch = _read("docs/architecture.md")
+    assert ".ai-dev/state" in arch, "architecture.md must document the per-project layout"

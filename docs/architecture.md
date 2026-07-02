@@ -61,6 +61,7 @@ Persistent storage duy nhất của hệ thống.
 `migrator.py` — schema migrations.
 `repos/` — repository layer cho từng entity.
 **Không có** LanceDB, Dolt, hay PostgreSQL.
+Dữ liệu tách theo dự án: mỗi repo có DB riêng tại `<repo>/.ai-dev/state/control.db` (storage kèm theo); bot/lệnh không gắn repo dùng DB global fallback.
 
 ### 8. `ai_dev_system.eval` — Eval harness
 

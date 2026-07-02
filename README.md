@@ -83,6 +83,11 @@ src/ai_dev_system/
 - Execution: **single-task** đã hoạt động (TDD-first: test phase → impl phase); ⚠️ **multi-task** graph execution (required_inputs/promoted_outputs) chưa hoàn chỉnh
 - LLM provider: `ClaudeMaxAgent` qua `claude` CLI — không cần API key
 
+## Dữ liệu per-project
+
+- **Per-project (mặc định khi gắn repo):** mỗi repo có DB + storage riêng tại `<repo>/.ai-dev/state/{control.db, storage/}` (tự khởi tạo, gitignore). Áp dụng cho bot Telegram gắn repo, và cho webui/CLI khi truyền `--repo <path>` hoặc đặt `AIDEV_REPO`.
+- **Global (fallback):** bot không gắn repo / chạy không `--repo` dùng `~/.ai-dev-system/` (hoặc `/data` trong Docker).
+
 ---
 
 ## Bắt đầu

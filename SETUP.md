@@ -144,3 +144,11 @@ DATABASE_URL=sqlite:///:memory:        # in-memory (test only)
 ```
 
 PostgreSQL backend đã bị bỏ trong M0.5 để mọi máy đều chạy được không cần Postgres server.
+
+## Dữ liệu per-project
+
+Khi gắn repo, hệ thống lưu DB + storage riêng cho từng dự án tại `<repo>/.ai-dev/state/{control.db, storage/}` — tự khởi tạo và gitignore (qua `<repo>/.ai-dev/.gitignore`).
+
+- **Telegram bot gắn repo:** tự động per-project (không cần cấu hình thêm).
+- **webui / CLI:** chạy per-project bằng `--repo <path>` hoặc biến môi trường `AIDEV_REPO=<path>` (vd `ai-dev --repo /path/to/repo intake ...`, hoặc `AIDEV_REPO=/path/to/repo ai-dev webui`).
+- **Global (fallback):** bot không gắn repo / lệnh không có `--repo` dùng `~/.ai-dev-system/` (hoặc `/data` khi chạy Docker).
