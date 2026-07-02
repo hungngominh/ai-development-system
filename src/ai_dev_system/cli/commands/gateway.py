@@ -17,6 +17,7 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
     from ai_dev_system.gateway.registry import PlatformRegistry
     from ai_dev_system.gateway.daemon import GatewayDaemon
     from ai_dev_system.gateway.clarify_watcher import ClarifyWatcher
+    from ai_dev_system.gateway.spec_status_watcher import SpecStatusWatcher
     from ai_dev_system.gateway.project_registry import ProjectRegistry
     from ai_dev_system.assistant.factory import build_assistant_factory
     from ai_dev_system.assistant.memory import assistant_home
@@ -61,7 +62,7 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
         else:
             has_non_repo = True
 
-    watchers = []            # (RunStatusWatcher, ClarifyWatcher)
+    watchers = []            # (RunStatusWatcher, ClarifyWatcher, SpecStatusWatcher)
     resume_stores = []       # session stores to mark resume-pending on unclean restart
 
     for rp in repos:
@@ -71,7 +72,11 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
             ChatTaskStore(res.paths.storage_root), platforms_by_name,
             res.session_store, res.paths.storage_root,
         )
-        watchers.append((rw, cwt))
+        swt = SpecStatusWatcher(
+            ChatTaskStore(res.paths.storage_root), platforms_by_name,
+            res.session_store, res.paths.storage_root,
+        )
+        watchers.append((rw, cwt, swt))
         resume_stores.append(res.session_store)
 
     if has_non_repo or not repos:
@@ -80,13 +85,18 @@ def build_gateway(cfg, *, transport=None, sender=None, poll_timeout: int = 30):
             ChatTaskStore(cfg.storage_root), platforms_by_name,
             global_session_store, str(cfg.storage_root),
         )
-        watchers.append((rw, cwt))
+        swt = SpecStatusWatcher(
+            ChatTaskStore(cfg.storage_root), platforms_by_name,
+            global_session_store, str(cfg.storage_root),
+        )
+        watchers.append((rw, cwt, swt))
         resume_stores.append(global_session_store)
 
     def _post_poll():
-        for rw, cwt in watchers:
+        for rw, cwt, swt in watchers:
             rw.check_once()
             cwt.check_once()
+            swt.check_once()
 
     class _ResumeFanout:
         """Daemon calls mark_recent_resume_pending() once; fan it out to every store."""
