@@ -50,6 +50,7 @@ from ai_dev_system.cli.start_project import make_project_id, name_to_slug
 from ai_dev_system.gate.gate1_bridge import Decision as GateDecision
 from ai_dev_system.gate.gate1_bridge import finalize_gate1
 from ai_dev_system.task_graph.clarify_questions import format_questions
+from ai_dev_system.task_graph.spec_messages import spec_error_message, spec_gate_message
 from ai_dev_system.gate.gate1_review.loader import load_gate1_context
 from ai_dev_system.gate.gate1_review.parser import parse_user_input
 from ai_dev_system.gate.gate1_review.state import clear_state, load_state, save_state
@@ -253,9 +254,7 @@ def make_dev_pipeline_tools(
                     # Spec generation failed — report it (never "spec ready")
                     # and clear pending so the user can start over.
                     chat_task_store.clear(surface, chat_id)
-                    return {"content": [{"type": "text", "text":
-                        f"❌ Tạo spec thất bại: {str(spec.get('error') or '')[:300]}\n"
-                        "Nhắn lại nội dung task để thử lại."}]}
+                    return {"content": [{"type": "text", "text": spec_error_message(spec)}]}
                 clarify = spec.get("clarify") or {}
                 if clarify.get("needed") and pending.get("round", 0) < 2:
                     chat_task_store.update(surface, chat_id, phase="awaiting_clarify",
@@ -265,14 +264,8 @@ def make_dev_pipeline_tools(
                 plan = load_plan(sr, spec_id)
                 if plan is None:
                     # SPEC gate — plan not generated until the spec is approved.
-                    url = spec.get("spec_doc_url")
-                    link = f"\n📄 Spec: {url}" if url else ""
-                    if spec.get("doc_publish_failed"):
-                        link = ("\n⚠️ Không push được spec doc lên repo (kiểm tra "
-                                "git credentials trong container) — file chỉ có ở bản clone local.")
                     chat_task_store.update(surface, chat_id, phase="awaiting_spec_approval")
-                    return {"content": [{"type": "text", "text":
-                        f"📄 Spec sẵn sàng.{link}\nNhắn 'duyệt' để tạo plan."}]}
+                    return {"content": [{"type": "text", "text": spec_gate_message(spec)}]}
                 # PLAN gate — plan generated + published; awaiting run approval.
                 steps = (plan.get("graph") or {}).get("tasks") or []
                 n = len(steps) if isinstance(steps, list) else 0
@@ -422,9 +415,7 @@ def make_dev_pipeline_tools(
                 spec = json.loads(spec_path.read_text(encoding="utf-8"))
                 if spec.get("status") == "error":
                     chat_task_store.clear(surface, chat_id)
-                    return {"content": [{"type": "text", "text":
-                        f"❌ Spec thất bại, không thể duyệt: {str(spec.get('error') or '')[:300]}\n"
-                        "Nhắn lại nội dung task để thử lại."}]}
+                    return {"content": [{"type": "text", "text": spec_error_message(spec)}]}
                 if (spec.get("clarify") or {}).get("needed"):
                     return {"content": [{"type": "text", "text":
                         "Còn câu hỏi cần trả lời trước khi tạo plan."}]}
