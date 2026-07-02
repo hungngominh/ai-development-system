@@ -15,7 +15,7 @@ from typing import Optional
 
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
 # Reuse the shared claude-CLI plumbing + log helpers from the implementer agent.
-from ai_dev_system.agents.repo_branch_agent import _invoke_claude, _append_log
+from ai_dev_system.agents.repo_branch_agent import _invoke_claude, _append_log, _exec_idle_timeout
 
 _DEFAULT_REVIEW_MAX_TURNS = 40
 
@@ -155,6 +155,7 @@ class ReviewAgent:
         run = _invoke_claude(
             claude, self.repo_path, _build_review_prompt(self.base_branch, objective, test_spec),
             _review_max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
+            idle_timeout_s=_exec_idle_timeout(),
         )
         if run.timed_out or run.returncode != 0:
             return ReviewVerdict(raw=(run.result_event or {}).get("result") or "")

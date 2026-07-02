@@ -325,3 +325,87 @@ def test_review_prompt_weakening_block_present_with_tdd_flag():
     assert "Test integrity" in p
     assert "AC-1: returns 401 on bad creds" in p
     assert "weaken" in p.lower()
+
+
+# ── idle watchdog / _invoke_claude ────────────────────────────────────────────
+import subprocess as _sp
+
+from ai_dev_system.agents.repo_branch_agent import (
+    _invoke_claude, _parse_ndjson_event, _exec_idle_timeout, _EXEC_FLAGS,
+)
+import ai_dev_system.agents.repo_branch_agent as rba
+
+
+class _HangingPopen:
+    """Never exits on its own; emits no events. wait() raises TimeoutExpired
+    until kill() is called (mirrors a stalled real CLI)."""
+    def __init__(self, cmd, **kw):
+        self.cmd = cmd
+        self.returncode = None
+        self.stdout = iter([])
+        self.stderr = iter([])
+        self._killed = False
+    def wait(self, timeout=None):
+        if self._killed:
+            self.returncode = -9
+            return
+        raise _sp.TimeoutExpired(cmd="claude", timeout=timeout)
+    def kill(self):
+        self._killed = True
+
+
+def test_invoke_claude_idle_timeout_kills_stalled_cli(monkeypatch):
+    monkeypatch.setattr(rba, "_POLL_INTERVAL_S", 0.01)
+    with patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", _HangingPopen):
+        run = _invoke_claude("claude", ".", "p", 10, timeout_s=9999,
+                             idle_timeout_s=0.05)
+    assert run.timed_out and run.timeout_kind == "idle"
+
+
+def test_invoke_claude_hard_timeout_kind(monkeypatch):
+    monkeypatch.setattr(rba, "_POLL_INTERVAL_S", 0.01)
+    with patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", _HangingPopen):
+        run = _invoke_claude("claude", ".", "p", 10, timeout_s=0.05,
+                             idle_timeout_s=None)
+    assert run.timed_out and run.timeout_kind == "hard"
+
+
+def test_invoke_claude_custom_flags_replace_exec_flags():
+    seen = {}
+    def _capture(cmd, **kw):
+        seen["cmd"] = cmd
+        return _HangingPopen(cmd)  # any Popen; we only need the cmd
+    class _DonePopen(_HangingPopen):
+        def wait(self, timeout=None):
+            self.returncode = 0
+    def _done(cmd, **kw):
+        seen["cmd"] = cmd
+        return _DonePopen(cmd)
+    with patch("ai_dev_system.agents.repo_branch_agent.subprocess.Popen", side_effect=_done):
+        _invoke_claude("claude", ".", "p", 7, timeout_s=5,
+                       flags=["--output-format", "stream-json", "--verbose", "--x"])
+    cmd = seen["cmd"]
+    assert "--x" in cmd
+    assert "--permission-mode" not in cmd          # _EXEC_FLAGS NOT used
+    assert cmd[cmd.index("--max-turns") + 1] == "7"
+
+
+def test_exec_flags_use_stream_json():
+    assert "stream-json" in _EXEC_FLAGS and "--verbose" in _EXEC_FLAGS
+
+
+def test_exec_idle_timeout_env(monkeypatch):
+    monkeypatch.delenv("EXEC_IDLE_TIMEOUT", raising=False)
+    assert _exec_idle_timeout() == 180.0
+    monkeypatch.setenv("EXEC_IDLE_TIMEOUT", "60")
+    assert _exec_idle_timeout() == 60.0
+    monkeypatch.setenv("EXEC_IDLE_TIMEOUT", "junk")
+    assert _exec_idle_timeout() == 180.0
+
+
+def test_parse_ndjson_assistant_tool_use_unwrapped():
+    line = json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {"file_path": "a.py"}},
+        {"type": "text", "text": "reading"},
+    ]}})
+    assert _parse_ndjson_event(line) == "[tool] Read: a.py"

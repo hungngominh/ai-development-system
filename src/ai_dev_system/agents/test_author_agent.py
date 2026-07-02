@@ -17,7 +17,7 @@ from ai_dev_system.agents.base import AgentResult
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
 from ai_dev_system.agents.repo_branch_agent import (
     _invoke_claude, _append_log, _max_turns, _git, _extract_summary,
-    _format_lessons, _merge_rules,
+    _format_lessons, _merge_rules, _exec_idle_timeout,
 )
 from ai_dev_system.rules.project_rules import load_project_file_rules
 
@@ -147,6 +147,7 @@ class TestAuthorAgent:
         run1 = _invoke_claude(
             claude, self.repo_path, _build_test_prompt(context, effective_rules),
             _max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
+            idle_timeout_s=_exec_idle_timeout(),
         )
         if run1.timed_out:
             self._write_outputs(output_path, run1, review=None)
@@ -200,6 +201,7 @@ class TestAuthorAgent:
                 claude, self.repo_path,
                 _build_test_fix_prompt(objective, verdict.findings, verdict.tests_red),
                 _max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
+                idle_timeout_s=_exec_idle_timeout(),
             )
             rounds_fixed += 1
             if fix_run.timed_out or fix_run.returncode != 0:

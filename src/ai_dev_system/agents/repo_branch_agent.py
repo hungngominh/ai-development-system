@@ -20,9 +20,11 @@ from ai_dev_system.rules.project_rules import load_project_file_rules
 from ai_dev_system.task_graph.facets import SPEC_FACET_KEYS
 
 # Static claude CLI flags. --max-turns is appended at run() time so it can be
-# tuned per-environment (see _max_turns).
+# tuned per-environment (see _max_turns). stream-json (NDJSON, one event per
+# line) feeds both the live log and the idle watchdog in _invoke_claude;
+# --verbose is required by the CLI for stream-json in -p mode.
 _EXEC_FLAGS = [
-    "--output-format", "json",
+    "--output-format", "stream-json", "--verbose",
     "--permission-mode", "bypassPermissions",
 ]
 
@@ -44,6 +46,26 @@ def _max_turns() -> int:
     return val if val > 0 else _DEFAULT_MAX_TURNS
 
 
+# Seconds between liveness checks while waiting on the CLI. Module-level so
+# tests can shrink it.
+_POLL_INTERVAL_S = 1.0
+
+
+def _exec_idle_timeout() -> float:
+    """Idle watchdog budget: kill claude only when NO NDJSON event has arrived
+    for this many seconds (EXEC_IDLE_TIMEOUT, default 180). A healthy run is
+    bounded by liveness, not total wall-clock — timeout_s stays as a very high
+    safety ceiling against infinite loops."""
+    raw = os.environ.get("EXEC_IDLE_TIMEOUT")
+    if not raw:
+        return 180.0
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return 180.0
+    return v if v > 0 else 180.0
+
+
 def _parse_ndjson_event(line: str) -> Optional[str]:
     """Return a human-readable log message for a NDJSON event, or None to skip."""
     try:
@@ -58,6 +80,15 @@ def _parse_ndjson_event(line: str) -> Optional[str]:
         inp = obj.get("input") or {}
         detail = _summarize_tool_input(name, inp)
         return f"[tool] {name}{detail}"
+
+    if event_type == "assistant":
+        blocks = ((obj.get("message") or {}).get("content")) or []
+        parts = []
+        for b in blocks:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                name = b.get("name", "?")
+                parts.append(f"[tool] {name}{_summarize_tool_input(name, b.get('input') or {})}")
+        return "\n".join(parts) if parts else None
 
     if event_type == "result":
         subtype = obj.get("subtype", "")
@@ -197,6 +228,7 @@ class _ClaudeRun:
     result_event: Optional[dict]
     subtype: str
     timed_out: bool = False
+    timeout_kind: str = ""   # "" | "idle" | "hard"
 
 
 def _step_model_effort(step: str) -> tuple[Optional[str], Optional[str]]:
@@ -219,13 +251,18 @@ def _invoke_claude(
     live_log_path: Optional[Path] = None,
     model: Optional[str] = None,
     effort: Optional[str] = None,
+    flags: Optional[list] = None,
+    idle_timeout_s: Optional[float] = None,
 ) -> _ClaudeRun:
     """Run `claude -p` once, streaming NDJSON events to the live log. Shared by
-    RepoBranchAgent (implement/fix) and ReviewAgent (review).
+    RepoBranchAgent (implement/fix), ReviewAgent (review) and the spec agentic
+    path (facets_agentic, via flags=_READONLY_FLAGS).
 
-    `model`/`effort` (when set) pin the tier per step via `--model`/`--effort`;
-    left unset, the call inherits the CLI session default (legacy behaviour)."""
-    cmd = [claude, "-p", prompt, *_EXEC_FLAGS, "--max-turns", str(max_turns)]
+    Liveness beats wall-clock: when idle_timeout_s is set, the process is
+    killed only if no stdout line has arrived for that long; timeout_s is a
+    high safety ceiling against infinite loops, not a work budget."""
+    cmd = [claude, "-p", prompt, *(_EXEC_FLAGS if flags is None else flags),
+           "--max-turns", str(max_turns)]
     if model:
         cmd += ["--model", model]
     if effort:
@@ -238,9 +275,11 @@ def _invoke_claude(
 
     all_stdout: list[str] = []
     stderr_lines: list[str] = []
+    last_event = [time.monotonic()]   # mutable holder shared with drain thread
 
     def _drain_stdout():
         for line in proc.stdout:
+            last_event[0] = time.monotonic()
             all_stdout.append(line)
             if live_log_path:
                 msg = _parse_ndjson_event(line.strip())
@@ -257,18 +296,29 @@ def _invoke_claude(
     stderr_thread.start()
 
     timed_out = False
-    try:
-        proc.wait(timeout=int(timeout_s))
-    except subprocess.TimeoutExpired:
-        timed_out = True
-        proc.kill()
+    timeout_kind = ""
+    deadline = time.monotonic() + float(timeout_s)
+    while True:
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=_POLL_INTERVAL_S)
+            break                                   # process exited
         except subprocess.TimeoutExpired:
-            pass
-    finally:
-        stdout_thread.join(timeout=5)
-        stderr_thread.join(timeout=5)
+            now = time.monotonic()
+            if now >= deadline:
+                timeout_kind = "hard"
+            elif idle_timeout_s and now - last_event[0] >= float(idle_timeout_s):
+                timeout_kind = "idle"
+            else:
+                continue
+            timed_out = True
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            break
+    stdout_thread.join(timeout=5)
+    stderr_thread.join(timeout=5)
 
     stdout = "".join(all_stdout)
     stderr = "".join(stderr_lines)
@@ -276,7 +326,8 @@ def _invoke_claude(
     rc = proc.returncode if proc.returncode is not None else -1
     return _ClaudeRun(
         returncode=rc, stdout=stdout, stderr=stderr,
-        result_event=ev, subtype=(ev or {}).get("subtype") or "", timed_out=timed_out,
+        result_event=ev, subtype=(ev or {}).get("subtype") or "",
+        timed_out=timed_out, timeout_kind=timeout_kind,
     )
 
 
@@ -370,6 +421,7 @@ class RepoBranchAgent:
         run1 = _invoke_claude(
             claude, self.repo_path, _build_execution_prompt(context, effective_rules),
             max_turns, timeout_s, self.live_log_path, model=model, effort=effort,
+            idle_timeout_s=_exec_idle_timeout(),
         )
 
         if run1.timed_out:
@@ -435,6 +487,7 @@ class RepoBranchAgent:
                 claude, self.repo_path,
                 _build_fix_prompt(objective, verdict.findings, verdict.tests_passed),
                 _max_turns(), timeout_s, self.live_log_path, model=model, effort=effort,
+                idle_timeout_s=_exec_idle_timeout(),
             )
             rounds_fixed += 1
             if fix_run.timed_out or fix_run.returncode != 0:
