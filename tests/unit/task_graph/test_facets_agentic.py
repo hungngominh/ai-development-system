@@ -102,6 +102,27 @@ def test_build_command_includes_model_when_given(tmp_path):
     assert cmd[0] == "claude" and "-p" in cmd
 
 
+def _max_turns_of(cmd):
+    return cmd[cmd.index("--max-turns") + 1]
+
+
+def test_build_command_default_max_turns(monkeypatch):
+    monkeypatch.delenv("SPEC_MAX_TURNS", raising=False)
+    assert _max_turns_of(_build_command("claude", "P")) == "40"
+
+
+def test_build_command_max_turns_env_override(monkeypatch):
+    monkeypatch.setenv("SPEC_MAX_TURNS", "25")
+    assert _max_turns_of(_build_command("claude", "P")) == "25"
+
+
+def test_build_command_max_turns_invalid_env_falls_back(monkeypatch):
+    monkeypatch.setenv("SPEC_MAX_TURNS", "zero")
+    assert _max_turns_of(_build_command("claude", "P")) == "40"
+    monkeypatch.setenv("SPEC_MAX_TURNS", "-3")
+    assert _max_turns_of(_build_command("claude", "P")) == "40"
+
+
 def test_extract_text_messages_fallback(tmp_path):
     inner = _ok_inner()
     wrapper = json.dumps({"messages": [{"role": "assistant", "content": inner}]})

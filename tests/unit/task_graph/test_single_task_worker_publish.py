@@ -28,12 +28,41 @@ def test_run_plan_worker_builds_plan_and_records_doc_url(tmp_path):
     assert saved["doc_url"] == "https://github.com/o/r/blob/b/plan.md"
 
 
-def test_run_plan_worker_no_url_leaves_plan_clean(tmp_path):
+def test_run_plan_worker_no_url_marks_publish_failure(tmp_path):
     root = tmp_path / "storage"
     _seed_spec(root, "spec1234ab", "/repos/app")
     with patch("ai_dev_system.task_graph.single_task_worker.publish_doc", return_value=None):
         plan = w.run_plan_worker("spec1234ab", storage_root=str(root))
     assert "doc_url" not in plan
+    assert plan["doc_publish_failed"] is True
+    # persisted so the gateway progress tool can warn the user
+    saved = json.loads(plan_path(str(root), "spec1234ab").read_text(encoding="utf-8"))
+    assert saved["doc_publish_failed"] is True
+
+
+def test_run_worker_marks_spec_doc_publish_failure(tmp_path, monkeypatch, file_db_url):
+    """Spec done + repo bound but publish fails → payload carries the failure flag."""
+    monkeypatch.setattr(w, "spec_single_task",
+                        lambda *a, **k: {"task": {"title": "T"}, "facets": {}})
+    monkeypatch.setattr(w, "publish_doc", lambda *a, **k: None)
+    path = w.run_worker("specpub1", "idea", "/repos/app",
+                        storage_root=str(tmp_path), database_url=file_db_url)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["status"] == "done"
+    assert "spec_doc_url" not in data
+    assert data["doc_publish_failed"] is True
+
+
+def test_run_worker_publish_success_sets_no_failure_flag(tmp_path, monkeypatch, file_db_url):
+    monkeypatch.setattr(w, "spec_single_task",
+                        lambda *a, **k: {"task": {"title": "T"}, "facets": {}})
+    monkeypatch.setattr(w, "publish_doc",
+                        lambda *a, **k: "https://github.com/o/r/blob/b/spec.md")
+    path = w.run_worker("specpub2", "idea", "/repos/app",
+                        storage_root=str(tmp_path), database_url=file_db_url)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["spec_doc_url"] == "https://github.com/o/r/blob/b/spec.md"
+    assert "doc_publish_failed" not in data
 
 
 def test_main_mode_plan_dispatches(tmp_path):

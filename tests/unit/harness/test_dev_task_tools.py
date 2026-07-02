@@ -301,6 +301,102 @@ def test_approve_spec_twice_does_not_double_spawn_plan_worker(tmp_path):
     assert "tạo plan" in txt2 or "đang tạo" in txt2
 
 
+# ---------------------------------------------------------------------------
+# Errored spec must be reported as failure, not "spec ready"
+# ---------------------------------------------------------------------------
+
+def _seed_error_spec(tmp_path, spec_id, error="claude CLI trả về code 1: error_max_turns"):
+    d = tmp_path / "task_specs"; d.mkdir(parents=True, exist_ok=True)
+    (d / f"{spec_id}.json").write_text(json.dumps({
+        "status": "error", "idea": "investigate 500", "repo": "/repos/app",
+        "error": error,
+    }), encoding="utf-8")
+
+
+def test_status_reports_spec_error_and_clears_pending(tmp_path):
+    """A spec JSON with status=error must be reported as a failure (not 'spec
+    ready') and the pending record cleared so the user can retry."""
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="serr1", repo="/repos/app", base_branch="main")
+    _seed_error_spec(tmp_path, "serr1")
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+    )
+    status = _find(tools, "dev_run_status")
+    out = asyncio.run(status.handler({"run_id": ""}))
+    txt = out["content"][0]["text"]
+    assert "❌" in txt and "error_max_turns" in txt
+    assert "duyệt" not in txt.lower()  # must not offer the approval gate
+    assert store.get_pending("tg", "1") is None  # cleared → user can retry
+
+
+def test_approve_refuses_errored_spec(tmp_path):
+    """'duyệt' on an errored spec must not spawn a plan worker."""
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="serr2", repo="/repos/app", base_branch="main")
+    _seed_error_spec(tmp_path, "serr2")
+    spawned = []
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+        spawn_task_worker=lambda argv, **kw: spawned.append(argv),
+    )
+    gate = _find(tools, "dev_answer_gate")
+    out = asyncio.run(gate.handler({"run_id": "", "text": "duyệt"}))
+    txt = out["content"][0]["text"]
+    assert "❌" in txt or "thất bại" in txt
+    assert spawned == []  # plan worker NOT spawned
+    assert store.get_pending("tg", "1") is None  # cleared → user can retry
+
+
+# ---------------------------------------------------------------------------
+# Doc publish failure must be surfaced in the gate messages
+# ---------------------------------------------------------------------------
+
+def test_status_spec_gate_warns_when_doc_publish_failed(tmp_path):
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="spub1", repo="/repos/app", base_branch="main")
+    d = tmp_path / "task_specs"; d.mkdir(parents=True, exist_ok=True)
+    (d / "spub1.json").write_text(json.dumps({
+        "status": "done", "idea": "add logout", "repo": "/repos/app",
+        "task": {"title": "Add logout"}, "facets": {},
+        "doc_publish_failed": True,
+    }), encoding="utf-8")
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+    )
+    status = _find(tools, "dev_run_status")
+    out = asyncio.run(status.handler({"run_id": ""}))
+    txt = out["content"][0]["text"]
+    assert "⚠️" in txt  # publish-failure warning shown
+    assert "duyệt" in txt.lower()  # gate still usable
+
+
+def test_status_plan_gate_warns_when_doc_publish_failed(tmp_path):
+    cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])
+    store = ChatTaskStore(str(tmp_path))
+    store.set_pending("tg", "1", spec_id="spub2", repo="/repos/app", base_branch="main")
+    _seed_spec(tmp_path, "spub2")
+    from ai_dev_system.task_graph.single_task_plan import plan_single_task, plan_path
+    plan_single_task({"task": {"title": "t"}, "facets": {}}, "spub2", storage_root=str(tmp_path))
+    pp = plan_path(str(tmp_path), "spub2")
+    pl = json.loads(pp.read_text(encoding="utf-8")); pl["doc_publish_failed"] = True
+    pp.write_text(json.dumps(pl), encoding="utf-8")
+    tools = make_dev_pipeline_tools(
+        surface="tg", chat_id="1", conn_factory=lambda: None, config=cfg,
+        link_store=None, chat_task_store=store,
+    )
+    status = _find(tools, "dev_run_status")
+    out = asyncio.run(status.handler({"run_id": ""}))
+    txt = out["content"][0]["text"]
+    assert "⚠️" in txt and "plan" in txt.lower()
+
+
 def test_task_start_refuses_when_pending_exists(tmp_path):
     """dev_task_start must refuse if a pending task already exists for this chat."""
     cfg = _Cfg(tmp_path, [_Bot("tg", repo_path="/repos/app", base_branch="main")])

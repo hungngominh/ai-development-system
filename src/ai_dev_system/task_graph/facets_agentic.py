@@ -23,12 +23,27 @@ from ai_dev_system.task_graph.facets import (
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
 
 # Read-only, non-interactive flags (verified against Claude Code CLI).
+# --max-turns is appended at _build_command() time so it can be tuned
+# per-environment via SPEC_MAX_TURNS (large repos need more read turns).
 _READONLY_FLAGS = [
     "--output-format", "json",
     "--permission-mode", "bypassPermissions",
     "--disallowedTools", "Edit", "Write", "Bash", "PowerShell", "WebFetch", "WebSearch",
-    "--max-turns", "15",
 ]
+
+_DEFAULT_SPEC_MAX_TURNS = 40
+
+
+def _spec_max_turns() -> int:
+    """Resolve the claude --max-turns budget from SPEC_MAX_TURNS (fallback 40)."""
+    raw = os.environ.get("SPEC_MAX_TURNS")
+    if raw is None:
+        return _DEFAULT_SPEC_MAX_TURNS
+    try:
+        n = int(raw)
+    except ValueError:
+        return _DEFAULT_SPEC_MAX_TURNS
+    return n if n > 0 else _DEFAULT_SPEC_MAX_TURNS
 
 
 def _build_prompt(task: dict) -> str:
@@ -50,7 +65,7 @@ def _build_prompt(task: dict) -> str:
 
 
 def _build_command(claude: str, prompt: str, *, model: str | None = None) -> list[str]:
-    cmd = [claude, "-p", prompt, *_READONLY_FLAGS]
+    cmd = [claude, "-p", prompt, *_READONLY_FLAGS, "--max-turns", str(_spec_max_turns())]
     if model:
         cmd += ["--model", model]
     return cmd

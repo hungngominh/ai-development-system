@@ -246,9 +246,16 @@ def make_dev_pipeline_tools(
                         f"❌ Execution {ex.get('exec_status')}: {ex.get('error','')[:300]}"}]}
                 return {"content": [{"type": "text", "text": "⏳ Đang chạy execution..."}]}
 
-            # 2. Spec ready? Clarify gate → spec gate → plan gate.
+            # 2. Spec ready? Error gate → clarify gate → spec gate → plan gate.
             if spec_path.exists():
                 spec = json.loads(spec_path.read_text(encoding="utf-8"))
+                if spec.get("status") == "error":
+                    # Spec generation failed — report it (never "spec ready")
+                    # and clear pending so the user can start over.
+                    chat_task_store.clear(surface, chat_id)
+                    return {"content": [{"type": "text", "text":
+                        f"❌ Tạo spec thất bại: {str(spec.get('error') or '')[:300]}\n"
+                        "Nhắn lại nội dung task để thử lại."}]}
                 clarify = spec.get("clarify") or {}
                 if clarify.get("needed") and pending.get("round", 0) < 2:
                     chat_task_store.update(surface, chat_id, phase="awaiting_clarify",
@@ -260,6 +267,9 @@ def make_dev_pipeline_tools(
                     # SPEC gate — plan not generated until the spec is approved.
                     url = spec.get("spec_doc_url")
                     link = f"\n📄 Spec: {url}" if url else ""
+                    if spec.get("doc_publish_failed"):
+                        link = ("\n⚠️ Không push được spec doc lên repo (kiểm tra "
+                                "git credentials trong container) — file chỉ có ở bản clone local.")
                     chat_task_store.update(surface, chat_id, phase="awaiting_spec_approval")
                     return {"content": [{"type": "text", "text":
                         f"📄 Spec sẵn sàng.{link}\nNhắn 'duyệt' để tạo plan."}]}
@@ -268,6 +278,9 @@ def make_dev_pipeline_tools(
                 n = len(steps) if isinstance(steps, list) else 0
                 url = plan.get("doc_url")
                 link = f"\n📋 Plan: {url}" if url else ""
+                if plan.get("doc_publish_failed"):
+                    link = ("\n⚠️ Không push được plan doc lên repo (kiểm tra "
+                            "git credentials trong container) — file chỉ có ở bản clone local.")
                 chat_task_store.update(surface, chat_id, phase="awaiting_plan_approval")
                 return {"content": [{"type": "text", "text":
                     f"📋 Plan sẵn sàng ({n} bước).{link}\nNhắn 'duyệt' để chạy và tạo PR."}]}
@@ -407,6 +420,11 @@ def make_dev_pipeline_tools(
                     return {"content": [{"type": "text", "text":
                         "Spec chưa sẵn sàng — hỏi trạng thái trước."}]}
                 spec = json.loads(spec_path.read_text(encoding="utf-8"))
+                if spec.get("status") == "error":
+                    chat_task_store.clear(surface, chat_id)
+                    return {"content": [{"type": "text", "text":
+                        f"❌ Spec thất bại, không thể duyệt: {str(spec.get('error') or '')[:300]}\n"
+                        "Nhắn lại nội dung task để thử lại."}]}
                 if (spec.get("clarify") or {}).get("needed"):
                     return {"content": [{"type": "text", "text":
                         "Còn câu hỏi cần trả lời trước khi tạo plan."}]}

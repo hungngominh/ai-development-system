@@ -153,6 +153,10 @@ def run_worker(spec_id: str, idea: str, repo: str | None, *, storage_root: str,
         )
         if url:
             payload["spec_doc_url"] = url
+        else:
+            # Surfaced by the gateway as a ⚠️ warning: the doc exists only in
+            # the container's clone (push/auth failed), not on GitHub.
+            payload["doc_publish_failed"] = True
         _spec_log(log_path, f"Spec doc: {url or '(local only / no push)'}")
 
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -182,8 +186,10 @@ def run_plan_worker(spec_id: str, *, storage_root: str,
         )
         if url:
             plan["doc_url"] = url
-            plan_path(storage_root, spec_id).write_text(
-                json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
+        else:
+            plan["doc_publish_failed"] = True
+        plan_path(storage_root, spec_id).write_text(
+            json.dumps(plan, indent=2, ensure_ascii=False), encoding="utf-8")
         _spec_log(log_path, f"Plan doc: {url or '(local only / no push)'}")
     return plan
 
