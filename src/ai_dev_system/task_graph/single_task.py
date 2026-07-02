@@ -31,12 +31,14 @@ def build_single_task(idea: str, *, title: str | None = None) -> dict:
 
 
 def spec_single_task(idea: str, llm, *, title: str | None = None,
-                     repo_path: str | None = None, log=None) -> dict:
+                     repo_path: str | None = None, log=None,
+                     live_log_path=None) -> dict:
     """-> {"task": <task with .facets>, "facets": <8-facet dict>, "findings": [...]}.
 
     repo_path set → agentic, repo-grounded facets (llm unused for facets).
     else → text/spec facets via `llm` (slice-2 path).
     log: optional callable(str) forwarded to generate_task_facets_agentic.
+    live_log_path: NDJSON tool events are appended here (the spec .log file).
 
     llm=None (agentic path): if self_review_enabled(), a critic client is built
     lazily via make_llm_client("critic"). Any exception during critic-client build
@@ -44,7 +46,7 @@ def spec_single_task(idea: str, llm, *, title: str | None = None,
     """
     task = build_single_task(idea, title=title)
     if repo_path:
-        facets = generate_task_facets_agentic(task, repo_path, log=log)
+        facets = generate_task_facets_agentic(task, repo_path, log=log, live_log_path=live_log_path)
     else:
         facets = generate_task_facets(task, {}, None, llm)
     task["facets"] = facets

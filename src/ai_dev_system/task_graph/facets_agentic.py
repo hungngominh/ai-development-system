@@ -3,14 +3,13 @@
 Runs the `claude` CLI in read-only, non-interactive mode with the target repo as
 cwd, letting it Read/Grep/Glob the actual code to ground each facet.
 Raises on failure so callers can surface the error. Use `_all_needs_human()` at
-the call site when a silent fallback is wanted. Tests inject `run` (a
-subprocess.run-like callable); the real `claude` CLI is never invoked under test.
+the call site when a silent fallback is wanted. Tests inject `invoke` (an
+_invoke_claude-shaped callable); the real `claude` CLI is never invoked under test.
 """
 from __future__ import annotations
 
 import json
 import os
-import subprocess
 
 from ai_dev_system.task_graph.facets import (
     SPEC_FACET_KEYS,
@@ -22,16 +21,20 @@ from ai_dev_system.task_graph.facets import (
 )
 from ai_dev_system.llm_factory import ClaudeCodeLLMClient
 
-# Read-only, non-interactive flags (verified against Claude Code CLI).
-# --max-turns is appended at _build_command() time so it can be tuned
-# per-environment via SPEC_MAX_TURNS (large repos need more read turns).
+# Read-only, non-interactive flags. stream-json (one NDJSON event per line)
+# feeds the idle watchdog in _invoke_claude — a stalled CLI dies after
+# SPEC_IDLE_TIMEOUT of silence instead of a fixed total budget; --verbose is
+# required by the CLI for stream-json in -p mode. --max-turns is appended by
+# _invoke_claude (see SPEC_MAX_TURNS).
 _READONLY_FLAGS = [
-    "--output-format", "json",
+    "--output-format", "stream-json", "--verbose",
     "--permission-mode", "bypassPermissions",
     "--disallowedTools", "Edit", "Write", "Bash", "PowerShell", "WebFetch", "WebSearch",
 ]
 
 _DEFAULT_SPEC_MAX_TURNS = 40
+_DEFAULT_SPEC_IDLE_TIMEOUT = 180.0
+_DEFAULT_SPEC_HARD_TIMEOUT = 3600.0
 
 
 def _spec_max_turns() -> int:
@@ -44,6 +47,29 @@ def _spec_max_turns() -> int:
     except ValueError:
         return _DEFAULT_SPEC_MAX_TURNS
     return n if n > 0 else _DEFAULT_SPEC_MAX_TURNS
+
+
+def _float_env(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return v if v > 0 else default
+
+
+def _spec_idle_timeout() -> float:
+    """Kill claude only after this many seconds WITHOUT a new NDJSON event
+    (SPEC_IDLE_TIMEOUT, default 180). Liveness, not total work, is the bound —
+    a large repo may legitimately take 15+ minutes of active reading."""
+    return _float_env("SPEC_IDLE_TIMEOUT", _DEFAULT_SPEC_IDLE_TIMEOUT)
+
+
+def _spec_hard_timeout() -> float:
+    """Safety ceiling against infinite loops (SPEC_HARD_TIMEOUT, default 3600)."""
+    return _float_env("SPEC_HARD_TIMEOUT", _DEFAULT_SPEC_HARD_TIMEOUT)
 
 
 def _build_prompt(task: dict) -> str:
@@ -62,13 +88,6 @@ def _build_prompt(task: dict) -> str:
         '{"status": "filled"|"na"|"needs_human", "content": "...", "reason": "..."}.\n'
         "Facets:\n" + facet_lines
     )
-
-
-def _build_command(claude: str, prompt: str, *, model: str | None = None) -> list[str]:
-    cmd = [claude, "-p", prompt, *_READONLY_FLAGS, "--max-turns", str(_spec_max_turns())]
-    if model:
-        cmd += ["--model", model]
-    return cmd
 
 
 def _find_json_block(text: str) -> str:
@@ -133,14 +152,17 @@ def generate_task_facets_agentic(
     repo_path: str,
     *,
     model: str | None = None,
-    timeout: int = 300,
-    run=subprocess.run,
+    live_log_path=None,
+    invoke=None,
     log=None,
 ) -> dict[str, dict]:
-    """20 facets grounded in the repo at `repo_path`, via read-only `claude -p`.
+    """20 facets grounded in the repo at `repo_path`, via read-only `claude -p`
+    (streamed through the shared _invoke_claude with an idle watchdog).
 
     Raises on failure so callers can surface the error. Use _all_needs_human()
     at the call site when a silent fallback is wanted.
+    live_log_path: NDJSON tool events are appended here (the spec .log file).
+    invoke: test seam — an _invoke_claude-shaped callable.
     log: optional callable(str) for progress/diagnostic lines.
     """
     def _log(msg):
@@ -150,43 +172,48 @@ def generate_task_facets_agentic(
     if not repo_path or not os.path.isdir(repo_path):
         raise ValueError(f"repo_path không hợp lệ hoặc không tồn tại: {repo_path!r}")
     claude = ClaudeCodeLLMClient._resolve_claude_cmd()
-    cmd = _build_command(claude, _build_prompt(task), model=model)
-    proc = run(
-        cmd, cwd=repo_path, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=timeout,
+    if invoke is None:
+        from ai_dev_system.agents.repo_branch_agent import _invoke_claude as invoke
+    idle_s, hard_s = _spec_idle_timeout(), _spec_hard_timeout()
+    run = invoke(
+        claude, repo_path, _build_prompt(task), _spec_max_turns(), hard_s,
+        live_log_path=live_log_path, model=model,
+        flags=_READONLY_FLAGS, idle_timeout_s=idle_s,
     )
-    stdout = proc.stdout or ""
-    stderr = proc.stderr or ""
-    _log(f"claude CLI xong: rc={proc.returncode} stdout={len(stdout)}B stderr={len(stderr)}B")
-    if proc.returncode != 0:
+    if run.timed_out:
+        if run.timeout_kind == "idle":
+            raise RuntimeError(
+                f"claude CLI treo: không có event mới trong {int(idle_s)}s "
+                f"(SPEC_IDLE_TIMEOUT)")
         raise RuntimeError(
-            f"claude CLI trả về code {proc.returncode}. "
-            f"stderr: {stderr[:400]!r}. stdout: {stdout[:200]!r}"
+            f"claude CLI vượt trần an toàn {int(hard_s)}s (SPEC_HARD_TIMEOUT)")
+    _log(f"claude CLI xong: rc={run.returncode} "
+         f"stdout={len(run.stdout)}B stderr={len(run.stderr)}B")
+    if run.returncode != 0:
+        kind = f" ({run.subtype})" if run.subtype else ""
+        raise RuntimeError(
+            f"claude CLI trả về code {run.returncode}{kind}. "
+            f"stderr: {run.stderr[:400]!r}. stdout: {run.stdout[:200]!r}"
         )
-    if not stdout.strip() and stderr.strip():
-        # Node.js on Windows (DETACHED_PROCESS) sometimes writes to stderr instead of stdout.
-        _log("stdout trống, thử dùng stderr thay thế")
-        stdout = stderr
+    raw = (run.result_event or {}).get("result") or ""
+    if not raw:
+        stdout = run.stdout or run.stderr
+        try:
+            raw = _extract_text(stdout)
+        except (json.JSONDecodeError, ValueError):
+            raw = stdout
+    text = ClaudeCodeLLMClient._strip_outer_code_fence(raw)
     try:
-        raw = _extract_text(stdout)
-        text = ClaudeCodeLLMClient._strip_outer_code_fence(raw)
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        # claude prepended prose before the JSON fence — extract block directly.
+        text = _find_json_block(raw)
         try:
             data = json.loads(text)
-        except json.JSONDecodeError:
-            # claude prepended prose before the JSON fence — extract block directly.
-            text = _find_json_block(raw)
-            try:
-                data = json.loads(text)
-            except json.JSONDecodeError as e:
-                raise RuntimeError(
-                    f"claude CLI trả về JSON không hợp lệ: {text[:200]!r}"
-                ) from e
-    except json.JSONDecodeError as e:
-        raise RuntimeError(
-            f"claude CLI trả về JSON không hợp lệ: {text[:200]!r}"
-        ) from e
-    except Exception:
-        raise
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"claude CLI trả về JSON không hợp lệ: {text[:200]!r}"
+            ) from e
     if not isinstance(data, dict):
         raise RuntimeError(f"claude CLI trả về dữ liệu không phải dict: {text[:200]!r}")
     result = {k: _coerce_facet(data.get(k)) for k in SPEC_FACET_KEYS}
